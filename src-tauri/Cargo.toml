@@ -32,3 +32,4 @@ mongodb = { version = "2.8.0", default-features = false, features = ["tokio-runt
 futures-util = "0.3.28"
 bson = "2.8.0"
 uuid = { version = "1.4", features = ["v4"] }
+chrono = "0.4"
