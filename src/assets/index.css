@@ -96,3 +96,32 @@
     @apply bg-background text-foreground;
   }
 }
+
+
+.excel-headers {
+  display: flex;
+  flex-wrap: nowrap;
+}
+
+.excel-header-cell {
+  padding: 6px 10px;
+  background-color: #e2efda; /* Excel green color */
+  border: 1px solid #c5e0b4; /* Excel green border */
+  min-width: 120px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.excel-header-cell:hover {
+  background-color: #d8e9cc; /* Slightly darker on hover */
+}
+
+.excel-header-required {
+  background-color: #c6e0b4; /* Darker green for required fields */
+}
+
+/* Remove gaps between cells */
+.excel-headers > div {
+  margin-right: -1px; /* Remove gaps between cells */
+}
