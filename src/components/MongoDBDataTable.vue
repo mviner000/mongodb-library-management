@@ -38,10 +38,19 @@ import {
   TooltipTrigger
 } from '@/components/ui/tooltip';
 
-import { PlusCircledIcon } from '@radix-icons/vue';
+import { PlusCircledIcon, ArrowLeftIcon } from '@radix-icons/vue';
 import { useClipboard } from '@vueuse/core';
 
-const collectionName = ref('users');
+const emit = defineEmits(['back']);
+
+const props = defineProps({
+  selectedCollection: {
+    type: String,
+    default: ''
+  }
+});
+
+const collectionName = ref(props.selectedCollection || 'users');
 const documents = ref<any[]>([]);
 const isLoading = ref(false);
 const errorMessage = ref('');
@@ -58,6 +67,11 @@ const showSchemaAsRow = ref(true);
 const editingCell = ref<{rowIndex: number; header: string} | null>(null);
 const editValue = ref('');
 const isSaving = ref(false);
+
+// Go back to template gallery
+const goBack = () => {
+  emit('back');
+};
 
 // For pagination
 const totalPages = computed(() => Math.ceil(documents.value.length / pageSize.value));
@@ -134,6 +148,12 @@ const getFieldTypeName = (field: string) => {
   }
 };
 
+watch(() => props.selectedCollection, (newVal) => {
+  if (newVal) {
+    collectionName.value = newVal;
+  }
+});
+
 watch(collectionName, async (newVal) => {
   try {
     console.log(`Fetching schema for collection: ${newVal}`);
@@ -208,7 +228,6 @@ const saveNewDocument = async () => {
     errorMessage.value = `Create failed: ${error}`;
   }
 };
-
 
 const fetchDocuments = async () => {
   isLoading.value = true;
@@ -314,9 +333,11 @@ const fetchCollections = async () => {
 
 onMounted(() => {
   fetchCollections();
+  // If we have a selectedCollection prop, use it
+  if (props.selectedCollection) {
+    collectionName.value = props.selectedCollection;
+  }
 });
-
-defineExpose({ fetchDocuments, fetchCollections });
 
 const onPageChange = (page: number) => {
   currentPage.value = page;
@@ -327,36 +348,29 @@ const toggleSchemaDisplay = () => {
 };
 
 watch(collectionName, fetchDocuments);
+
+defineExpose({ fetchDocuments, fetchCollections });
 </script>
 
 <template>
   <div class="border rounded-md p-4 w-full">
-    <h2 class="text-xl font-bold mb-4">MongoDB Data Table</h2>
-    
-    <div class="flex flex-col md:flex-row gap-4 mb-4">
-      <div class="w-full md:w-1/4">
-        <Label for="collection-select">Collection</Label>
-        <Select v-model="collectionName">
-          <SelectTrigger class="mt-1">
-            <SelectValue placeholder="Select a collection" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem v-for="collection in collectionsList" :key="collection" :value="collection">
-              {{ collection }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
+    <div class="flex justify-between items-center mb-4">
+      <!-- Back button to return to gallery -->
+      <div class="flex items-center">
+        <Button variant="ghost" size="sm" @click="goBack" class="mr-2">
+          <ArrowLeftIcon class="h-4 w-4 mr-1" />
+          Back to Collections
+        </Button>
+        <h2 class="text-xl font-bold">{{ collectionName }}</h2>
       </div>
       
-      <div class="w-full md:w-3/4">
-        <Label for="filter-input">Filter Query (JSON)</Label>
-        <div class="flex gap-2 mt-1">
-          <Input id="filter-input" v-model="filterQuery" placeholder="{}" />
-          <Button @click="fetchDocuments" :disabled="isLoading">
-            <ReloadIcon v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
-            <span v-else>Filter</span>
-          </Button>
-        </div>
+      <!-- Filter section -->
+      <div class="flex gap-2">
+        <Input v-model="filterQuery" placeholder="{}" class="w-48" />
+        <Button @click="fetchDocuments" :disabled="isLoading" size="sm">
+          <ReloadIcon v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
+          <span v-else>Filter</span>
+        </Button>
       </div>
     </div>
     
@@ -385,83 +399,83 @@ watch(collectionName, fetchDocuments);
     <!-- Schema info table when no documents found -->
     <div v-else-if="documents.length === 0 && hasSchema" class="w-full">
       <div class="mb-4">
-    <h3 class="text-lg font-semibold mb-2">Collection Schema: {{ collectionName }}</h3>
-    <p class="text-gray-600 mb-4">
-      No documents found in this collection. Below is the schema definition.
-    </p>
-    
-    <!-- Excel-style schema fields with tooltips -->
-    <div class="overflow-x-auto pb-2 mb-4">
-      <div class="flex excel-headers">
-        <div v-for="field in tableHeaders" :key="field" class="relative">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div class="excel-header-cell" :class="isFieldRequired(field) ? 'excel-header-required' : ''">
-                  {{ field }}
-                  <span v-if="isFieldRequired(field)" class="text-red-500 ml-1">*</span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent class="w-64 p-0">
-                <div class="text-gray-600 bg-white rounded shadow border border-gray-200 p-3">
-                  <div class="font-semibold border-b pb-1 mb-2 text-slate-600">{{ field }}</div>
-                  <div class="grid grid-cols-2 gap-1 text-sm">
-                    <div>Type:</div>
-                    <div class="font-medium">{{ getFieldTypeName(field) }}</div>
-                    
-                    <div>Required:</div>
-                    <div>
-                      <span v-if="isFieldRequired(field)" class="text-green-600 font-medium">Yes</span>
-                      <span v-else class="text-gray-500">No</span>
+        <h3 class="text-lg font-semibold mb-2">Collection Schema: {{ collectionName }}</h3>
+        <p class="text-gray-600 mb-4">
+          No documents found in this collection. Below is the schema definition.
+        </p>
+        
+        <!-- Excel-style schema fields with tooltips -->
+        <div class="overflow-x-auto pb-2 mb-4">
+          <div class="flex excel-headers">
+            <div v-for="field in tableHeaders" :key="field" class="relative">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div class="excel-header-cell" :class="isFieldRequired(field) ? 'excel-header-required' : ''">
+                      {{ field }}
+                      <span v-if="isFieldRequired(field)" class="text-red-500 ml-1">*</span>
                     </div>
-                    
-                    <div>Description:</div>
-                    <div>{{ getSchemaInfo(field).description || 'No description' }}</div>
-                  </div>
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+                  </TooltipTrigger>
+                  <TooltipContent class="w-64 p-0">
+                    <div class="text-gray-600 bg-white rounded shadow border border-gray-200 p-3">
+                      <div class="font-semibold border-b pb-1 mb-2 text-slate-600">{{ field }}</div>
+                      <div class="grid grid-cols-2 gap-1 text-sm">
+                        <div>Type:</div>
+                        <div class="font-medium">{{ getFieldTypeName(field) }}</div>
+                        
+                        <div>Required:</div>
+                        <div>
+                          <span v-if="isFieldRequired(field)" class="text-green-600 font-medium">Yes</span>
+                          <span v-else class="text-gray-500">No</span>
+                        </div>
+                        
+                        <div>Description:</div>
+                        <div>{{ getSchemaInfo(field).description || 'No description' }}</div>
+                      </div>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          </div>
+        </div>
+        
+        <div class="mt-6">
+          <Button @click="startAdding" class="gap-2">
+            <PlusCircledIcon class="h-4 w-4" />
+            <span>Add First Document</span>
+          </Button>
+        </div>
+      </div>
+      
+      <!-- Add document form (unchanged) -->
+      <div v-if="isAdding" class="mt-6 border rounded-md p-4 bg-gray-50">
+        <h3 class="text-lg font-semibold mb-4">Add New Document</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div v-for="field in tableHeaders" :key="`new-${field}`" class="mb-4">
+            <Label :for="`field-${field}`" class="block mb-1">
+              {{ field }}
+              <span v-if="isFieldRequired(field)" class="text-red-500">*</span>
+            </Label>
+            <Input 
+              v-if="field !== '_id'"
+              :id="`field-${field}`"
+              v-model="newDocument[field]"
+              :type="collectionSchema.properties[field]?.bsonType === 'date' ? 'datetime-local' : 'text'"
+              :class="{ 'border-red-300': isFieldRequired(field) && !newDocument[field] }"
+            />
+            <span v-else class="text-gray-400">(auto-generated)</span>
+            <p class="text-xs text-gray-500 mt-1">
+              {{ getSchemaInfo(field).description || '' }}
+            </p>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 mt-4">
+          <Button @click="cancelAdding" variant="outline">Cancel</Button>
+          <Button @click="saveNewDocument">Save Document</Button>
         </div>
       </div>
     </div>
-        
-    <div class="mt-6">
-      <Button @click="startAdding" class="gap-2">
-        <PlusCircledIcon class="h-4 w-4" />
-        <span>Add First Document</span>
-      </Button>
-    </div>
-      </div>
-  
-  <!-- Add document form (unchanged) -->
-  <div v-if="isAdding" class="mt-6 border rounded-md p-4 bg-gray-50">
-    <h3 class="text-lg font-semibold mb-4">Add New Document</h3>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div v-for="field in tableHeaders" :key="`new-${field}`" class="mb-4">
-        <Label :for="`field-${field}`" class="block mb-1">
-          {{ field }}
-          <span v-if="isFieldRequired(field)" class="text-red-500">*</span>
-        </Label>
-        <Input 
-          v-if="field !== '_id'"
-          :id="`field-${field}`"
-          v-model="newDocument[field]"
-          :type="collectionSchema.properties[field]?.bsonType === 'date' ? 'datetime-local' : 'text'"
-          :class="{ 'border-red-300': isFieldRequired(field) && !newDocument[field] }"
-        />
-        <span v-else class="text-gray-400">(auto-generated)</span>
-        <p class="text-xs text-gray-500 mt-1">
-          {{ getSchemaInfo(field).description || '' }}
-        </p>
-      </div>
-    </div>
-    <div class="flex justify-end gap-2 mt-4">
-      <Button @click="cancelAdding" variant="outline">Cancel</Button>
-      <Button @click="saveNewDocument">Save Document</Button>
-    </div>
-  </div>
-</div>
     
     <!-- No documents and no schema -->
     <div v-else-if="documents.length === 0 && !hasSchema" class="text-center my-8 text-gray-500">
