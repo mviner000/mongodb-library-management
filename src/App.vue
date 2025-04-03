@@ -1,7 +1,9 @@
 <!-- src/App.vue -->
 <script setup lang="ts">
-import { ref, onMounted, provide, computed, onUnmounted } from 'vue'
+import { ref, onMounted, provide, computed, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+
+import Toaster from '@/components/ui/toast/Toaster.vue'
 import SheetsNavbar from '@/components/SheetsNavbar.vue'
 import Sidebar from '@/components/Sidebar.vue'
 import TabBar from '@/components/TabBar.vue'
@@ -11,6 +13,7 @@ import MongoDBStatus from '@/components/MongoDBStatus.vue'
 import MongoDBOperations from '@/components/MongoDBOperations.vue'
 import MongoDBDataTable from '@/components/MongoDBDataTable.vue'
 import HelloWorldTab from '@/components/HelloWorldTab.vue'
+import { useToast } from './components/ui/toast'
 
 interface Tab {
   id: string
@@ -25,20 +28,49 @@ const tabs = ref<Tab[]>([
 ])
 const activeTabId = ref<string>('default')
 const activeTab = ref<'home' | 'settings'>('home')
-const dataTableRef = ref<InstanceType<typeof MongoDBDataTable> | null>(null)
+const dataTableRef = ref<InstanceType<typeof MongoDBDataTable>[]>([]);
 const isConnecting = ref(false)
 const connectionError = ref('')
 const isSidebarOpen = ref(false)
+const isSplit = ref(false)
+const { toast } = useToast()
 
-// Computed properties
+// Split pane resizing
+const leftWidth = ref(50)
+const isDragging = ref(false)
+const containerRef = ref<HTMLElement | null>(null)
+
+function startResize(e: MouseEvent) {
+  isDragging.value = true
+  document.addEventListener('mousemove', handleMouseMove)
+  document.addEventListener('mouseup', stopResize)
+}
+
+function handleMouseMove(e: MouseEvent) {
+  if (!isDragging.value || !containerRef.value) return
+  
+  const containerRect = containerRef.value.getBoundingClientRect()
+  const newWidth = ((e.clientX - containerRect.left) / containerRect.width) * 100
+  leftWidth.value = Math.max(20, Math.min(80, newWidth))
+}
+
+function stopResize() {
+  isDragging.value = false
+  document.removeEventListener('mousemove', handleMouseMove)
+  document.removeEventListener('mouseup', stopResize)
+}
+
+watch(isSplit, (newVal) => {
+  if (newVal) leftWidth.value = 50
+})
+
+// Existing computed properties
 const navbarTitle = computed(() => {
-  const activeTab = tabs.value.find(t => t.id === activeTabId.value)
-  return activeTab?.title || 'Library Manager'
+  return tabs.value.find(t => t.id === activeTabId.value)?.title || 'Library Manager'
 })
 
 const showSearch = computed(() => {
-  const activeTab = tabs.value.find(t => t.id === activeTabId.value)
-  return activeTab?.type === 'default'
+  return tabs.value.find(t => t.id === activeTabId.value)?.type === 'default'
 })
 
 // Keyboard shortcut handler
@@ -54,14 +86,54 @@ function handleKeyPress(e: KeyboardEvent) {
     })
     activeTabId.value = newTabId
   }
+  
+  if (e.ctrlKey && e.key === '\\') {
+    e.preventDefault()
+    if (tabs.value.length === 2) {
+      isSplit.value = !isSplit.value
+    } else if (tabs.value.length > 2) {
+      toast({
+        title: 'Split Tab Error',
+        description: 'Split Tab only works for 2 tabs opened',
+      })
+    } else {
+      toast({
+        title: 'Split Tab Error',
+        description: 'Not enough tabs to split',
+      })
+    }
+  }
 }
 
 // Template selection handler
 function handleTemplateSelected(templateId: string) {
-  createCollectionTab(templateId);
+  // Open in the current tab if it's the default tab
+  const currentTab = tabs.value.find(t => t.id === activeTabId.value);
+  
+  if (currentTab?.type === 'default') {
+    // Update the current tab instead of creating a new one
+    const updatedTabs = tabs.value.map(tab => {
+      if (tab.id === activeTabId.value) {
+        return {
+          ...tab,
+          title: templateId,
+          type: 'collection' as const, // Use 'as const' to enforce literal type
+          collectionName: templateId
+        };
+      }
+      return tab;
+    });
+    
+    // Explicitly type the assignment to satisfy TypeScript
+    tabs.value = updatedTabs as Tab[];
+  } else {
+    // Create a new tab if we're not on the default tab
+    createCollectionTab(templateId);
+  }
 }
 
 function handleOpenInNewTab(templateId: string) {
+  // Always create a new tab for context menu "open in new tab"
   createCollectionTab(templateId);
 }
 
@@ -98,12 +170,7 @@ async function autoConnectMongoDB() {
       await invoke('connect_mongodb', {
         connectionString: 'mongodb://localhost:27017'
       });
-      
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      if (dataTableRef.value) {
-        dataTableRef.value.fetchDocuments();
-      }
+      // No need to manually call fetchDocuments here
     }
   } catch (error) {
     connectionError.value = `Failed to connect to MongoDB: ${error}`;
@@ -114,10 +181,10 @@ async function autoConnectMongoDB() {
 
 // Document action handler
 function handleDocumentAction(event: { type: string, collectionName: string }) {
-  if (dataTableRef.value) {
-    dataTableRef.value.fetchDocuments();
-    dataTableRef.value.fetchCollections();
-  }
+  dataTableRef.value.forEach(comp => {
+    comp.fetchDocuments();
+    comp.fetchCollections();
+  });
 }
 
 // Sidebar state
@@ -139,6 +206,7 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <Toaster />
   <div class="flex flex-col min-h-screen">
     <TabBar 
       :tabs="tabs"
@@ -163,35 +231,120 @@ onUnmounted(() => {
         </div>
 
         <template v-if="activeTab === 'home'">
-          <div v-for="tab in tabs" :key="tab.id">
-            <div v-if="tab.id === activeTabId" class="h-full">
-              <HelloWorldTab 
-                v-if="tab.type === 'hello'" 
-                :content="tab.content" 
-              />
-              
-              <template v-else-if="tab.type === 'collection'">
-                <div class="p-2">
-                  <Button variant="ghost" size="sm" class="mb-2" @click="handleCloseTab(tab.id)">
-                    <span class="flex items-center">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-                        <path d="M19 12H5M12 19l-7-7 7-7"></path>
-                      </svg>
-                      Back to Collections
-                    </span>
-                  </Button>
-                </div>
-                <MongoDBDataTable 
-                  ref="dataTableRef" 
-                  :selected-collection="tab.collectionName"
-                />
-              </template>
+          <div v-if="isSplit && tabs.length === 2" 
+               ref="containerRef"
+               class="flex h-full relative"
+               :class="{ 'select-none': isDragging }">
+            <div 
+              class="h-full overflow-auto"
+              :style="{ width: `${leftWidth}%` }">
+              <div class="h-full">
+                <template v-for="(tab, index) in tabs" :key="tab.id">
+                  <div v-if="index === 0" class="h-full">
+                    <HelloWorldTab 
+                      v-if="tab.type === 'hello'" 
+                      :content="tab.content" 
+                    />
+                    <template v-else-if="tab.type === 'collection'">
+                      <div class="p-2">
+                        <Button variant="ghost" size="sm" class="mb-2" @click="handleCloseTab(tab.id)">
+                          <span class="flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+                              <path d="M19 12H5M12 19l-7-7 7-7"></path>
+                            </svg>
+                            Back to Collections
+                          </span>
+                        </Button>
+                      </div>
+                      <MongoDBDataTable 
+                        ref="dataTableRef" 
+                        :selected-collection="tab.collectionName"
+                      />
+                    </template>
+                    <TemplateGallery 
+                      v-else-if="tab.type === 'default'" 
+                      @templateSelected="handleTemplateSelected"
+                      @openInNewTab="handleOpenInNewTab"
+                    />
+                  </div>
+                </template>
+              </div>
+            </div>
 
-              <TemplateGallery 
-                v-else-if="tab.type === 'default'" 
-                @templateSelected="handleTemplateSelected"
-                @openInNewTab="handleOpenInNewTab"
-              />
+            <div
+              class="w-1 bg-gray-200 hover:bg-blue-400 cursor-col-resize relative"
+              @mousedown="startResize"
+              :class="{ 'bg-blue-400': isDragging }"
+            ></div>
+
+            <div 
+              class="h-full overflow-auto"
+              :style="{ width: `${100 - leftWidth}%` }">
+              <div class="h-full">
+                <template v-for="(tab, index) in tabs" :key="tab.id">
+                  <div v-if="index === 1" class="h-full">
+                    <HelloWorldTab 
+                      v-if="tab.type === 'hello'" 
+                      :content="tab.content" 
+                    />
+                    <template v-else-if="tab.type === 'collection'">
+                      <div class="p-2">
+                        <Button variant="ghost" size="sm" class="mb-2" @click="handleCloseTab(tab.id)">
+                          <span class="flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+                              <path d="M19 12H5M12 19l-7-7 7-7"></path>
+                            </svg>
+                            Back to Collections
+                          </span>
+                        </Button>
+                      </div>
+                      <MongoDBDataTable 
+                        ref="dataTableRef" 
+                        :selected-collection="tab.collectionName"
+                      />
+                    </template>
+                    <TemplateGallery 
+                      v-else-if="tab.type === 'default'" 
+                      @templateSelected="handleTemplateSelected"
+                      @openInNewTab="handleOpenInNewTab"
+                    />
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <div v-else>
+            <div v-for="tab in tabs" :key="tab.id">
+              <div v-if="tab.id === activeTabId" class="h-full">
+                <HelloWorldTab 
+                  v-if="tab.type === 'hello'" 
+                  :content="tab.content" 
+                />
+                
+                <template v-else-if="tab.type === 'collection'">
+                  <div class="p-2">
+                    <Button variant="ghost" size="sm" class="mb-2" @click="handleCloseTab(tab.id)">
+                      <span class="flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+                          <path d="M19 12H5M12 19l-7-7 7-7"></path>
+                        </svg>
+                        Back to Collections
+                      </span>
+                    </Button>
+                  </div>
+                  <MongoDBDataTable 
+                    ref="dataTableRef" 
+                    :selected-collection="tab.collectionName"
+                  />
+                </template>
+
+                <TemplateGallery 
+                  v-else-if="tab.type === 'default'" 
+                  @templateSelected="handleTemplateSelected"
+                  @openInNewTab="handleOpenInNewTab"
+                />
+              </div>
             </div>
           </div>
         </template>
