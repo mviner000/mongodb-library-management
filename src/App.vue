@@ -1,6 +1,6 @@
 <!-- src/App.vue -->
 <script setup lang="ts">
-import { ref, onMounted, provide } from 'vue'
+import { ref, onMounted, provide, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import SheetsNavbar from '@/components/SheetsNavbar.vue'
 import Sidebar from '@/components/Sidebar.vue'
@@ -16,7 +16,17 @@ const isConnecting = ref(false)
 const connectionError = ref('')
 const isSidebarOpen = ref(false)
 const showTemplateGallery = ref(true)
-const selectedTemplate = ref<string | null>(null)
+const selectedCollection = ref<string | undefined>(undefined);
+
+// Computed properties for SheetsNavbar
+const navbarTitle = computed(() => {
+  return selectedCollection.value || 'Library Manager';
+});
+
+const showSearch = computed(() => {
+  // Only show search when in template gallery
+  return showTemplateGallery.value;
+});
 
 // Provide sidebar state to components
 provide('sidebarState', {
@@ -64,10 +74,16 @@ function handleDocumentAction(event: { type: string, collectionName: string }) {
 
 // Handle template selection
 function handleTemplateSelected(templateId: string) {
-  selectedTemplate.value = templateId;
+  selectedCollection.value = templateId;
   showTemplateGallery.value = false;
-  console.log(`Selected template: ${templateId}`);
+  console.log(`Selected collection: ${templateId}`);
   // Here you would normally load the template data or create a new spreadsheet
+}
+
+// Function to go back to template gallery
+function backToGallery() {
+  selectedCollection.value = undefined;
+  showTemplateGallery.value = true;
 }
 
 // Try to connect on component mount
@@ -78,7 +94,10 @@ onMounted(() => {
 
 <template>
   <div class="flex flex-col min-h-screen">
-    <SheetsNavbar />
+    <SheetsNavbar 
+      :title="navbarTitle" 
+      :showSearch="showSearch"
+    />
     <div class="flex flex-1">
       <Sidebar :activeTab="activeTab" @selectTab="activeTab = $event" />
       
@@ -90,11 +109,27 @@ onMounted(() => {
         </div>
 
         <template v-if="activeTab === 'home'">
-          <!-- Show template gallery when no template is selected -->
-          <TemplateGallery v-if="showTemplateGallery" @templateSelected="handleTemplateSelected" />
+          <div v-if="!showTemplateGallery" class="p-2">
+            <Button variant="ghost" size="sm" class="mb-2" @click="backToGallery">
+              <span class="flex items-center">
+                <!-- Back Icon -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+                  <path d="M19 12H5M12 19l-7-7 7-7"></path>
+                </svg>
+                Back to Collections
+              </span>
+            </Button>
+          </div>
           
-          <!-- Show data table when a template is selected -->
-          <MongoDBDataTable v-else ref="dataTableRef" />
+          <TemplateGallery 
+            v-if="showTemplateGallery" 
+            @templateSelected="handleTemplateSelected" 
+          />
+          <MongoDBDataTable 
+            v-else 
+            ref="dataTableRef" 
+            :selected-collection="selectedCollection"
+          />
         </template>
 
         <template v-else>

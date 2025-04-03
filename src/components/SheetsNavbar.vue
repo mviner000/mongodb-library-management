@@ -1,11 +1,20 @@
 <!-- src/components/SheetsNavbar.vue -->
 <script setup lang="ts">
-import { ref, inject } from 'vue';
+import { ref, inject, watch } from 'vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 
-const title = ref('Library Manager');
+const props = defineProps<{
+  showSearch?: boolean;
+  title?: string;
+}>();
+
+// Default title with reactive binding to props
+const title = ref(props.title || 'Library Manager');
+
+// Track search visibility
+const showSearch = ref(props.showSearch !== false);
 
 // Get sidebar state from parent
 const sidebarState = inject('sidebarState') as {
@@ -13,6 +22,20 @@ const sidebarState = inject('sidebarState') as {
   toggle: () => void,
   close: () => void
 }
+
+// Watch for title prop changes
+watch(() => props.title, (newTitle) => {
+  if (newTitle) {
+    title.value = newTitle;
+  }
+});
+
+// Watch for search visibility prop changes
+watch(() => props.showSearch, (newValue) => {
+  if (newValue !== undefined) {
+    showSearch.value = newValue;
+  }
+});
 </script>
 
 <template>
@@ -42,8 +65,8 @@ const sidebarState = inject('sidebarState') as {
       </div>
     </div>
 
-    <!-- Middle section: Search -->
-    <div class="flex-1 mx-4">
+    <!-- Middle section: Search (conditionally rendered) -->
+    <div v-if="showSearch" class="flex-1 mx-4">
       <div class="relative max-w-2xl mx-auto">
         <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
           <!-- Search Icon -->
@@ -58,6 +81,8 @@ const sidebarState = inject('sidebarState') as {
         />
       </div>
     </div>
+    <!-- Empty div for spacing when search is hidden -->
+    <div v-else class="flex-1"></div>
 
     <!-- Right section: User profile and actions -->
     <div class="flex items-center gap-2">

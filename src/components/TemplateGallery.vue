@@ -3,6 +3,12 @@
 import { ref, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 
 interface Template {
   id: string;
@@ -19,6 +25,12 @@ const emit = defineEmits(['templateSelected']);
 
 const handleTemplateSelect = (templateId: string) => {
   emit('templateSelected', templateId);
+};
+
+const handleOpenInNewTab = (templateId: string) => {
+  // Placeholder for opening in new tab functionality
+  console.log(`Opening template ${templateId} in new tab`);
+  // Implementation will be added later
 };
 
 // Fetch collections from MongoDB
@@ -104,37 +116,44 @@ onMounted(() => {
       
       <!-- Template grid -->
       <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-        <div 
-          v-for="template in templates" 
-          :key="template.id"
-          class="flex flex-col items-center cursor-pointer" 
-          @click="handleTemplateSelect(template.id)"
-        >
-          <div class="border border-gray-200 rounded-md overflow-hidden hover:border-blue-500 transition-colors w-full">
-            <!-- Using placeholder images until you have actual template thumbnails -->
-            <div class="w-full h-32 bg-white flex items-center justify-center">
-              <!-- For blank template, show plus icon -->
-              <div v-if="template.id === 'blank'" class="flex flex-col items-center justify-center">
-                <svg viewBox="0 0 48 48" width="48" height="48">
-                  <path fill="#F44336" d="M23,11h2v26h-2z"/>
-                  <path fill="#4CAF50" d="M35,23v2H13v-2z"/>
-                  <path fill="#2196F3" d="M11,23v2H7.9A1.9,1.9,0,0,1,6,23.1V23z"/>
-                  <path fill="#FFC107" d="M37,23v2h3.1A1.9,1.9,0,0,0,42,23.9V23z"/>
-                </svg>
+        <ContextMenu v-for="template in templates" :key="template.id">
+          <ContextMenuTrigger>
+            <div 
+              class="flex flex-col items-center cursor-pointer" 
+              @click="handleTemplateSelect(template.id)"
+            >
+              <div class="border border-gray-200 rounded-md overflow-hidden hover:border-blue-500 transition-colors w-full">
+                <!-- Using placeholder images until you have actual template thumbnails -->
+                <div class="w-full h-32 bg-white flex items-center justify-center">
+                  <!-- For blank template, show plus icon -->
+                  <div v-if="template.id === 'blank'" class="flex flex-col items-center justify-center">
+                    <svg viewBox="0 0 48 48" width="48" height="48">
+                      <path fill="#F44336" d="M23,11h2v26h-2z"/>
+                      <path fill="#4CAF50" d="M35,23v2H13v-2z"/>
+                      <path fill="#2196F3" d="M11,23v2H7.9A1.9,1.9,0,0,1,6,23.1V23z"/>
+                      <path fill="#FFC107" d="M37,23v2h3.1A1.9,1.9,0,0,0,42,23.9V23z"/>
+                    </svg>
+                  </div>
+                  <!-- For MongoDB collections show a placeholder -->
+                  <div v-else class="w-full h-full flex items-center justify-center bg-gray-50">
+                    <svg viewBox="0 0 48 48" width="48" height="48">
+                      <!-- MongoDB leaf logo -->
+                      <path fill="#69B240" d="M24,4c-4.42,0-8,3.58-8,8c0,4.92,3.3,11.08,7.33,17.15C23.99,30.83,24,35,24,35v9h0.02
+                        c0,0,9.83-4.33,9.98-13.42c0-0.25,0-0.51-0.02-0.78L34,30c0,0,3.58-2.17,3.58-8.17c0-2-0.67-3.67-1.67-4.92
+                        c0-2.5-3.5-7.5-3.5-7.5S34,5,34,3c-1.5,0-2.5,0.75-2.5,0.75S28.5,4,24,4z"/>
+                    </svg>
+                  </div>
+                </div>
               </div>
-              <!-- For MongoDB collections show a placeholder -->
-              <div v-else class="w-full h-full flex items-center justify-center bg-gray-50">
-                <svg viewBox="0 0 48 48" width="48" height="48">
-                  <!-- MongoDB leaf logo -->
-                  <path fill="#69B240" d="M24,4c-4.42,0-8,3.58-8,8c0,4.92,3.3,11.08,7.33,17.15C23.99,30.83,24,35,24,35v9h0.02
-                    c0,0,9.83-4.33,9.98-13.42c0-0.25,0-0.51-0.02-0.78L34,30c0,0,3.58-2.17,3.58-8.17c0-2-0.67-3.67-1.67-4.92
-                    c0-2.5-3.5-7.5-3.5-7.5S34,5,34,3c-1.5,0-2.5,0.75-2.5,0.75S28.5,4,24,4z"/>
-                </svg>
-              </div>
+              <span class="text-xs text-gray-700 mt-1 text-center">{{ template.title }}</span>
             </div>
-          </div>
-          <span class="text-xs text-gray-700 mt-1 text-center">{{ template.title }}</span>
-        </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem @click="handleOpenInNewTab(template.id)">
+              Open in new tab
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
       </div>
     </div>
   </div>
