@@ -21,16 +21,14 @@ const templates = ref<Template[]>([]);
 const isLoading = ref(true);
 const error = ref('');
 
-const emit = defineEmits(['templateSelected']);
+const emit = defineEmits(['templateSelected', 'openInNewTab']);
 
 const handleTemplateSelect = (templateId: string) => {
   emit('templateSelected', templateId);
 };
 
 const handleOpenInNewTab = (templateId: string) => {
-  // Placeholder for opening in new tab functionality
-  console.log(`Opening template ${templateId} in new tab`);
-  // Implementation will be added later
+  emit('openInNewTab', templateId);
 };
 
 // Fetch collections from MongoDB
@@ -149,7 +147,7 @@ onMounted(() => {
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
-            <ContextMenuItem @click="handleOpenInNewTab(template.id)">
+            <ContextMenuItem @click.stop="handleOpenInNewTab(template.id)">
               Open in new tab
             </ContextMenuItem>
           </ContextMenuContent>
