@@ -5,7 +5,7 @@
   "identifier": "com.vue-tauri.app",
   "build": {
     "beforeDevCommand": "bun run dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://192.168.42.183:1420",
     "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist"
   },

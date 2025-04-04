@@ -26,55 +26,76 @@ pub struct DownloadProgress {
 }
 
 pub async fn install_mongodb(app: &AppHandle) -> Result<(), String> {
-    // Define the MongoDB Windows download and installation parameters
-    let mongodb_version = "8.0.6";
-    let download_url = format!("https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-{}-signed.msi", mongodb_version);
-    let installer_filename = format!("mongodb-installer-{}.msi", Uuid::new_v4());
-    let installer_path = std::env::temp_dir().join(installer_filename);
-    let data_dir = r"C:\data\db";
-    let mongo_bin_path = format!(r"C:\Program Files\MongoDB\Server\{}\bin", mongodb_version);
+    // Create custom temporary directory for MongoDB installer files
+    let custom_temp_dir = std::env::temp_dir().join("mongodb-installer-temp");
+    fs::create_dir_all(&custom_temp_dir)
+        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
 
-    // Define the steps for MongoDB installation
+    // Define MongoDB installation parameters
+    let mongodb_version = "8.0.6";
+    let download_url = format!(
+        "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-{}-signed.msi",
+        mongodb_version
+    );
+    let installer_filename = format!("mongodb-installer-{}.msi", Uuid::new_v4());
+    let installer_path = custom_temp_dir.join(installer_filename);
+    let data_dir = r"C:\data\db";
+    let mongo_bin_path = format!(
+        r"C:\Program Files\MongoDB\Server\{}\bin",
+        mongodb_version
+    );
+
+    // Total steps for progress tracking
     let total_steps = 5;
-    
-    // Emit the installer path to the frontend
+
+    // Notify frontend about the installer path
     if let Some(path_str) = installer_path.to_str() {
-        app.emit("mongodb-installer-path", path_str.to_string()).unwrap_or_default();
+        app.emit("mongodb-installer-path", path_str.to_string())
+            .unwrap_or_default();
     }
-    
+
     // Step 1: Create data directory
     emit_progress(app, 1, total_steps, "Creating MongoDB data directory", false);
     create_directory(&data_dir)
         .map_err(|e| format!("Failed to create data directory: {}", e))?;
-    
+
     // Step 2: Download MongoDB MSI installer
     emit_progress(app, 2, total_steps, "Downloading MongoDB installer", false);
-    
     let installer_str = installer_path.to_str().unwrap();
-    download_file_with_progress(app, &download_url, installer_str)
+    download_file_with_progress(app, &download_url, installer_str, &custom_temp_dir)
         .await
         .map_err(|e| format!("Failed to download MongoDB installer: {}", e))?;
-    
-    // Rest of the function remains unchanged...
+
     // Step 3: Install MongoDB silently
     emit_progress(app, 3, total_steps, "Installing MongoDB", false);
     install_mongodb_msi(app, installer_str)
         .await
         .map_err(|e| format!("Failed to install MongoDB: {}", e))?;
-    
+
     // Step 4: Add MongoDB to PATH
     emit_progress(app, 4, total_steps, "Adding MongoDB to system PATH", false);
     add_to_path(app, &mongo_bin_path)
         .await
         .map_err(|e| format!("Failed to add MongoDB to PATH: {}", e))?;
-    
+
     // Step 5: Start MongoDB service
     emit_progress(app, 5, total_steps, "Starting MongoDB service", false);
     start_mongodb_service(app, &mongo_bin_path, &data_dir)
         .await
         .map_err(|e| format!("Failed to start MongoDB service: {}", e))?;
 
-    emit_progress(app, total_steps, total_steps, "MongoDB installation completed successfully", false);
+    emit_progress(
+        app,
+        total_steps,
+        total_steps,
+        "MongoDB installation completed successfully",
+        false,
+    );
+
+    // After all installation steps complete
+    // fs::remove_dir_all(&custom_temp_dir)
+    //     .map_err(|e| format!("Failed to clean up temp directory: {}", e))?;
+
     Ok(())
 }
 
@@ -99,7 +120,12 @@ fn create_directory(dir: &str) -> Result<(), std::io::Error> {
     fs::create_dir_all(dir)
 }
 
-async fn download_file_with_progress(app: &AppHandle, url: &str, out_path: &str) -> Result<(), String> {
+async fn download_file_with_progress(
+    app: &AppHandle,
+    url: &str,
+    out_path: &str,
+    _temp_dir: &std::path::Path,  // New parameter
+) -> Result<(), String> {
     let (mut rx_head, _child_head) = app.shell()
         .command("powershell")
         .args(["-Command", &format!(
@@ -299,8 +325,6 @@ async fn download_file_with_progress(app: &AppHandle, url: &str, out_path: &str)
         .args(["-ExecutionPolicy", "Bypass", "-File", ps_script_path.to_str().unwrap()])
         .spawn()
         .map_err(|e| format!("Failed to spawn download script: {}", e))?;
-
-    let mut last_progress_percentage = 0.0;
     
     while let Some(event) = rx.recv().await {
         match event {

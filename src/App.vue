@@ -4,7 +4,7 @@ import { ref, onMounted, provide, computed, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
 import Toaster from '@/components/ui/toast/Toaster.vue'
-import SheetsNavbar from '@/components/SheetsNavbar.vue'
+import TemplateGalleryNavbar from '@/components/TemplateGalleryNavbar.vue'
 import Sidebar from '@/components/Sidebar.vue'
 import TabBar from '@/components/TabBar.vue'
 import TemplateGallery from '@/components/TemplateGallery.vue'
@@ -12,6 +12,8 @@ import SudoPasswordModal from '@/components/SudoPasswordModal.vue'
 import MongoDBStatus from '@/components/MongoDBStatus.vue'
 import MongoDBOperations from '@/components/MongoDBOperations.vue'
 import MongoDBDataTable from '@/components/MongoDBDataTable.vue'
+import BrowserNavbar from '@/components/BrowserNavbar.vue'
+import MongoDBTableNavbar from '@/components/MongoDBTableNavbar.vue'
 import HelloWorldTab from '@/components/HelloWorldTab.vue'
 import { useToast } from './components/ui/toast'
 
@@ -26,6 +28,12 @@ interface Tab {
 const tabs = ref<Tab[]>([
   { id: 'default', title: 'untitled', type: 'default' }
 ])
+
+const activeTabType = computed(() => {
+  const activeTab = tabs.value.find(t => t.id === activeTabId.value)
+  return activeTab?.type || 'default'
+})
+
 const activeTabId = ref<string>('default')
 const activeTab = ref<'home' | 'settings'>('home')
 const dataTableRef = ref<InstanceType<typeof MongoDBDataTable>[]>([]);
@@ -40,7 +48,7 @@ const leftWidth = ref(50)
 const isDragging = ref(false)
 const containerRef = ref<HTMLElement | null>(null)
 
-function startResize(e: MouseEvent) {
+function startResize(_e: MouseEvent) {
   isDragging.value = true
   document.addEventListener('mousemove', handleMouseMove)
   document.addEventListener('mouseup', stopResize)
@@ -159,6 +167,27 @@ function handleCloseTab(tabId: string) {
   }
 }
 
+// browser nav functions
+const currentUrl = ref('')
+
+// Add these empty function stubs that your colleague can implement later
+function handleNavigation(_url: string) {
+  // Your colleague will implement this
+}
+
+function handleReload() {
+  // Your colleague will implement this
+}
+
+function handleBack() {
+  // Your colleague will implement this
+}
+
+function handleForward() {
+  // Your colleague will implement this
+}
+
+
 // MongoDB connection logic
 async function autoConnectMongoDB() {
   isConnecting.value = true;
@@ -180,7 +209,7 @@ async function autoConnectMongoDB() {
 }
 
 // Document action handler
-function handleDocumentAction(event: { type: string, collectionName: string }) {
+function handleDocumentAction(_event: { type: string, collectionName: string }) {
   dataTableRef.value.forEach(comp => {
     comp.fetchDocuments();
     comp.fetchCollections();
@@ -215,9 +244,12 @@ onUnmounted(() => {
       @tab-click="activeTabId = $event"
     />
 
-    <SheetsNavbar 
-      :title="navbarTitle" 
-      :showSearch="showSearch"
+    <BrowserNavbar 
+      :current-url="currentUrl" 
+      @navigate="handleNavigation"
+      @reload="handleReload"
+      @back="handleBack"
+      @forward="handleForward"
     />
     
     <div class="flex flex-1">
@@ -230,16 +262,38 @@ onUnmounted(() => {
           {{ connectionError }}
         </div>
 
-        <template v-if="activeTab === 'home'">
+        <!-- Show settings when activeTab is 'settings' -->
+        <div v-if="activeTab === 'settings'">
+          <div class="p-4">
+            <h1 class="text-2xl font-bold mb-6 text-center">MongoDB Database Manager</h1>
+            <div class="flex flex-col items-center w-full gap-6">
+              <MongoDBStatus class="w-full max-w-3xl" @connection-status-changed="autoConnectMongoDB" />
+              <MongoDBOperations class="w-full max-w-3xl" @document-action="handleDocumentAction" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Only show tab content when not in settings -->
+        <div v-else>
           <div v-if="isSplit && tabs.length === 2" 
                ref="containerRef"
                class="flex h-full relative"
                :class="{ 'select-none': isDragging }">
-            <div 
-              class="h-full overflow-auto"
-              :style="{ width: `${leftWidth}%` }">
+            <!-- Left Pane -->
+            <div class="h-full overflow-auto" :style="{ width: `${leftWidth}%` }">
               <div class="h-full">
-                <template v-for="(tab, index) in tabs" :key="tab.id">
+                <MongoDBTableNavbar 
+                  v-if="tabs[0].type === 'collection'"
+                  :title="tabs[0].title"
+                  class="sticky top-0 z-50"
+                />
+                <TemplateGalleryNavbar
+                  v-else
+                  :title="tabs[0].title"
+                  :showSearch="tabs[0].type === 'default'"
+                  class="sticky top-0 z-50"
+                />
+                <div v-for="(tab, index) in tabs" :key="tab.id">
                   <div v-if="index === 0" class="h-full">
                     <HelloWorldTab 
                       v-if="tab.type === 'hello'" 
@@ -267,21 +321,30 @@ onUnmounted(() => {
                       @openInNewTab="handleOpenInNewTab"
                     />
                   </div>
-                </template>
+                </div>
               </div>
             </div>
 
-            <div
-              class="w-1 bg-gray-200 hover:bg-blue-400 cursor-col-resize relative"
+            <div class="w-1 bg-gray-200 hover:bg-blue-400 cursor-col-resize relative"
               @mousedown="startResize"
               :class="{ 'bg-blue-400': isDragging }"
             ></div>
 
-            <div 
-              class="h-full overflow-auto"
-              :style="{ width: `${100 - leftWidth}%` }">
+            <!-- Right Pane -->
+            <div class="h-full overflow-auto" :style="{ width: `${100 - leftWidth}%` }">
               <div class="h-full">
-                <template v-for="(tab, index) in tabs" :key="tab.id">
+                <MongoDBTableNavbar 
+                  v-if="tabs[1].type === 'collection'"
+                  :title="tabs[1].title"
+                  class="sticky top-0 z-50"
+                />
+                <TemplateGalleryNavbar
+                  v-else
+                  :title="tabs[1].title"
+                  :showSearch="tabs[1].type === 'default'"
+                  class="sticky top-0 z-50"
+                />
+                <div v-for="(tab, index) in tabs" :key="tab.id">
                   <div v-if="index === 1" class="h-full">
                     <HelloWorldTab 
                       v-if="tab.type === 'hello'" 
@@ -309,19 +372,30 @@ onUnmounted(() => {
                       @openInNewTab="handleOpenInNewTab"
                     />
                   </div>
-                </template>
+                </div>
               </div>
             </div>
           </div>
 
           <div v-else>
+            <MongoDBTableNavbar 
+              v-if="activeTabType === 'collection'"
+              :title="navbarTitle" 
+              class="sticky top-0 z-50"
+            />
+            <TemplateGalleryNavbar
+              v-else
+              :title="navbarTitle" 
+              :showSearch="showSearch"
+              class="sticky top-0 z-50"
+            />
+            
             <div v-for="tab in tabs" :key="tab.id">
               <div v-if="tab.id === activeTabId" class="h-full">
                 <HelloWorldTab 
                   v-if="tab.type === 'hello'" 
                   :content="tab.content" 
                 />
-                
                 <template v-else-if="tab.type === 'collection'">
                   <div class="p-2">
                     <Button variant="ghost" size="sm" class="mb-2" @click="handleCloseTab(tab.id)">
@@ -338,7 +412,6 @@ onUnmounted(() => {
                     :selected-collection="tab.collectionName"
                   />
                 </template>
-
                 <TemplateGallery 
                   v-else-if="tab.type === 'default'" 
                   @templateSelected="handleTemplateSelected"
@@ -347,17 +420,17 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
-        </template>
 
-        <template v-else>
-          <div class="p-4">
-            <h1 class="text-2xl font-bold mb-6 text-center">MongoDB Database Manager</h1>
-            <div class="flex flex-col items-center w-full gap-6">
-              <MongoDBStatus class="w-full max-w-3xl" @connection-status-changed="autoConnectMongoDB" />
-              <MongoDBOperations class="w-full max-w-3xl" @document-action="handleDocumentAction" />
+          <div v-if="!activeTabId">
+            <div class="p-4">
+              <h1 class="text-2xl font-bold mb-6 text-center">MongoDB Database Manager</h1>
+              <div class="flex flex-col items-center w-full gap-6">
+                <MongoDBStatus class="w-full max-w-3xl" @connection-status-changed="autoConnectMongoDB" />
+                <MongoDBOperations class="w-full max-w-3xl" @document-action="handleDocumentAction" />
+              </div>
             </div>
           </div>
-        </template>
+        </div>
       </main>
     </div>
   </div>

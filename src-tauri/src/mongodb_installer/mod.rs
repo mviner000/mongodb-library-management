@@ -8,7 +8,7 @@ mod ubuntu;
 mod windows;
 
 // Re-export shared types
-pub use ubuntu::SudoPasswordRequest;
+// pub use ubuntu::SudoPasswordRequest;
 
 #[tauri::command]
 pub async fn install_mongodb(app: AppHandle) -> Result<(), String> {

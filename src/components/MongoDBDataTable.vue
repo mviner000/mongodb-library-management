@@ -39,7 +39,6 @@ import {
 } from '@/components/ui/tooltip';
 
 import { PlusCircledIcon } from '@radix-icons/vue';
-import { useClipboard } from '@vueuse/core';
 
 
 const props = defineProps<{
@@ -56,7 +55,6 @@ const filterQuery = ref('{}');
 const collectionSchema = ref<any>({});
 const newDocument = ref<Record<string, any>>({});
 const isAdding = ref(false);
-const { copy } = useClipboard();
 const showSchemaAsRow = ref(true);
 
 // Add immediate: true to collectionName watcher
@@ -123,11 +121,6 @@ const getSchemaInfo = (field: string) => {
 const isFieldRequired = (field: string) => {
   return collectionSchema.value.required?.includes(field) || false;
 };
-
-function formatValue(value: any): string {
-  if (value === undefined || value === null) return '';
-  return typeof value === 'object' ? JSON.stringify(value) : String(value);
-}
 
 // Move formatSchemaValue into the setup scope
 const formatSchemaValue = (value: any, bsonType: string | string[]) => {
@@ -348,10 +341,6 @@ defineExpose({ fetchDocuments, fetchCollections });
 
 const onPageChange = (page: number) => {
   currentPage.value = page;
-};
-
-const toggleSchemaDisplay = () => {
-  showSchemaAsRow.value = !showSchemaAsRow.value;
 };
 
 watch(collectionName, fetchDocuments);

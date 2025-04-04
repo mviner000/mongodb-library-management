@@ -40,7 +40,7 @@ const sidebarClass = computed(() => {
     class="fixed z-40 h-[calc(100vh-3.5rem)] top-14 bg-white border-r w-64 transition-all duration-150 ease-in-out"
     :class="sidebarClass"
   >
-    <div class="flex flex-col gap-1 p-2">
+    <div class="flex flex-col gap-1 p-2 mt-20">
       <Button
         variant="ghost"
         :class="activeTab === 'home' ? 'bg-muted' : 'hover:bg-muted'"
