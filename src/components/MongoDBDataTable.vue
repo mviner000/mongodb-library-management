@@ -1,4 +1,4 @@
-<!-- update this old src/components/MongoDBDataTable.vue -->
+<!-- src/components/MongoDBDataTable.vue -->
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
@@ -273,6 +273,7 @@ const initializeNewDocument = () => {
   const properties = collectionSchema.value.properties || {};
   
   required.forEach((field: string) => {
+    if (['created_at', 'updated_at'].includes(field)) return;
     const prop = properties[field];
     // Handle boolean initialization
     if (prop.bsonType === 'bool') {
@@ -363,7 +364,7 @@ const fetchDocuments = async () => {
     if (success) {
       documents.value = data;
       currentPage.value = 1;
-      console.log("Fetched documents:", data);  // Log fetched data
+      console.log("Fetched documents:", data);
     } else {
       errorMessage.value = error || 'Failed to fetch documents';
       documents.value = [];
@@ -379,7 +380,7 @@ const fetchDocuments = async () => {
 };
 
 const handleCellClick = (rowIndex: number, header: string, value: any) => {
-  if (header === '_id') return;
+  if (['_id', 'created_at', 'updated_at'].includes(header)) return;
   editingCell.value = { rowIndex, header };
   editValue.value = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
 };
@@ -423,10 +424,19 @@ const saveEdit = async () => {
     const { success, data, error } = await response.json();
     
     if (success && data.modified_count > 0) {
-      const originalDoc = documents.value.find(d => d._id.$oid === doc._id.$oid);
-      if (originalDoc) {
-        originalDoc[editingCell.value.header] = update[editingCell.value.header];
-        documents.value = [...documents.value];
+      // Refresh the updated document
+      const filter = JSON.stringify({ _id: { $oid: doc._id.$oid } });
+      const response = await fetch(
+        `${API_BASE}/collections/${collectionName.value}/documents?filter=${encodeURIComponent(filter)}`
+      );
+      const { success: fetchSuccess, data: fetchData } = await response.json();
+
+      if (fetchSuccess && fetchData.length > 0) {
+        const index = documents.value.findIndex(d => d._id.$oid === doc._id.$oid);
+        if (index !== -1) {
+          documents.value.splice(index, 1, fetchData[0]);
+          documents.value = [...documents.value];
+        }
       }
       editingCell.value = null;
     } else {
@@ -687,7 +697,7 @@ watch(collectionName, fetchDocuments);
         </TableHeader>
         <TableBody>
           <!-- Schema Info Row -->
-          <TableRow v-if="showSchemaAsRow" class="bg-blue-50 text-xs">
+          <TableRow v-if="showSchemaAsRow" class="bg-blue-50 text-xs hidden">
             <TableCell v-for="header in tableHeaders" :key="`schema-${header}`" 
               class="border-r border-b border-gray-200 p-2">
               <div class="flex flex-col">
@@ -705,98 +715,109 @@ watch(collectionName, fetchDocuments);
           </TableRow>
           
           <!-- Regular Data Rows -->
-          <TableRow v-for="(doc, rowIndex) in paginatedDocuments" :key="rowIndex">
-            <TableCell v-for="header in tableHeaders" :key="`${rowIndex}-${header}`" 
-            class="border-r border-b border-gray-200 p-0">
-              <div class="h-full">
-                <div v-if="editingCell?.rowIndex === rowIndex && editingCell?.header === header" 
-                  class="h-full">
-                  <!-- Boolean field editing -->
-                  <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" 
-                    class="flex items-center justify-center h-full p-2">
-                    <input 
-                      type="checkbox" 
-                      v-model="editValue" 
-                      @change="saveEdit"
-                      class="h-4 w-4"
-                    />
-                  </div>
-                  <!-- Reference field editing -->
-                  <div v-else-if="isReferenceField(header)" class="p-1">
-                    <Select v-model="editValue" @update:modelValue="saveEdit">
-                      <SelectTrigger>
-                        <SelectValue :placeholder="`Select ${getReferencedCollection(header)}`" :model-value="editValue" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <ScrollArea class="h-48">
-                          <div class="p-1">
-                            <Input 
-                              v-model="searchQuery[header]"
-                              placeholder="Search..."
-                              class="mb-2"
-                            />
-                            <div v-if="filteredOptions(header).length">
-                              <SelectItem 
-                                v-for="option in filteredOptions(header)"
-                                :key="option.id"
-                                :value="option.id"
-                              >
-                                {{ option.label }}
-                              </SelectItem>
-                            </div>
-                            <div v-else class="text-sm text-gray-500 px-2 py-1">
-                              No options found
-                            </div>
-                          </div>
-                        </ScrollArea>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <!-- Date input for date fields -->
-                  <Input v-else-if="collectionSchema.properties[header]?.bsonType === 'date'"
-                    type="datetime-local"
-                    v-model="editValue"
-                    @blur="saveEdit"
-                    class="h-full rounded-none border-none focus-visible:ring-2"
+          <!-- In the template section -->
+<TableRow v-for="(doc, rowIndex) in paginatedDocuments" :key="rowIndex">
+  <TableCell v-for="header in tableHeaders" :key="`${rowIndex}-${header}`" 
+    class="border-r border-b border-gray-200 p-0">
+    <div class="h-full">
+      <div v-if="editingCell?.rowIndex === rowIndex && editingCell?.header === header" 
+          class="h-full">
+        <!-- Boolean field editing -->
+        <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" 
+          class="flex items-center justify-center h-full p-2">
+          <input 
+            type="checkbox" 
+            v-model="editValue" 
+            @change="saveEdit"
+            class="h-4 w-4"
+          />
+        </div>
+        <!-- Reference field editing -->
+        <div v-else-if="isReferenceField(header)" class="p-1">
+          <Select v-model="editValue" @update:modelValue="saveEdit">
+            <SelectTrigger>
+              <SelectValue :placeholder="`Select ${getReferencedCollection(header)}`" :model-value="editValue" />
+            </SelectTrigger>
+            <SelectContent>
+              <ScrollArea class="h-48">
+                <div class="p-1">
+                  <Input 
+                    v-model="searchQuery[header]"
+                    placeholder="Search..."
+                    class="mb-2"
                   />
-                  <!-- Default textarea for other fields -->
-                  <textarea v-else
-                    v-model="editValue"
-                    @blur="saveEdit"
-                    @keyup.ctrl.enter="saveEdit"
-                    class="w-full h-full p-2 font-mono text-sm border-none focus:ring-2 focus:ring-blue-500"
-                    rows="3"
-                  />
-                </div>
-                <div v-else
-                  class="p-2 cursor-pointer hover:bg-blue-50 min-h-[40px]"
-                  @click="handleCellClick(rowIndex, header, doc[header])"
-                >
-                  <!-- Show boolean values with checkboxes in read-only mode -->
-                  <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" class="flex justify-center">
-                    <input type="checkbox" :checked="doc[header]" disabled class="h-4 w-4" />
+                  <div v-if="filteredOptions(header).length">
+                    <SelectItem 
+                      v-for="option in filteredOptions(header)"
+                      :key="option.id"
+                      :value="option.id"
+                    >
+                      {{ option.label }}
+                    </SelectItem>
                   </div>
-                  <!-- Show reference field labels in read-only mode -->
-                  <div v-else-if="isReferenceField(header)" class="text-blue-600">
-                    {{ getReferenceLabel(header, doc[header]) || doc[header] }}
+                  <div v-else class="text-sm text-gray-500 px-2 py-1">
+                    No options found
                   </div>
-                  <template v-else>
-                    {{ formatSchemaValue(doc[header], collectionSchema.properties[header]?.bsonType) }}
-                  </template>
                 </div>
-              </div>
-            </TableCell>
-            <TableCell class="border-b border-gray-200 text-right p-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                class="text-red-600 hover:text-red-800"
-                @click="deleteDocument(doc._id.$oid)"
-              >
-                <TrashIcon class="h-4 w-4" />
-              </Button>
-            </TableCell>
-          </TableRow>
+              </ScrollArea>
+            </SelectContent>
+          </Select>
+        </div>
+        <!-- Date input for date fields -->
+        <Input v-else-if="collectionSchema.properties[header]?.bsonType === 'date'"
+          type="datetime-local"
+          v-model="editValue"
+          @blur="saveEdit"
+          class="h-full rounded-none border-none focus-visible:ring-2"
+        />
+        <!-- Default textarea for other fields -->
+        <textarea v-else
+          v-model="editValue"
+          @blur="saveEdit"
+          @keyup.ctrl.enter="saveEdit"
+          class="w-full h-full p-2 font-mono text-sm border-none focus:ring-2 focus:ring-blue-500"
+          rows="3"
+        />
+      </div>
+      <div v-else
+        class="p-2 min-h-[40px]"
+        :class="{
+          'cursor-pointer hover:bg-blue-50': !['created_at', 'updated_at'].includes(header),
+          'cursor-not-allowed': ['created_at', 'updated_at'].includes(header)
+        }"
+        @click="!['created_at', 'updated_at', '_id'].includes(header) && handleCellClick(rowIndex, header, doc[header])"
+      >
+        <!-- Show boolean values with checkboxes in read-only mode -->
+        <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" class="flex justify-center">
+          <input type="checkbox" :checked="doc[header]" disabled class="h-4 w-4" />
+        </div>
+        <!-- Show reference field labels in read-only mode -->
+        <div v-else-if="isReferenceField(header)" class="text-blue-600">
+          {{ getReferenceLabel(header, doc[header]) || doc[header] }}
+        </div>
+        <!-- Add disabled display for timestamp fields -->
+        <template v-else-if="['created_at', 'updated_at'].includes(header)">
+          <span class="text-gray-500">
+            {{ formatSchemaValue(doc[header], collectionSchema.properties[header]?.bsonType) }}
+          </span>
+        </template>
+        <template v-else>
+          {{ formatSchemaValue(doc[header], collectionSchema.properties[header]?.bsonType) }}
+        </template>
+      </div>
+    </div>
+  </TableCell>
+  <TableCell class="border-b border-gray-200 text-right p-1">
+    <Button
+      variant="ghost"
+      size="sm"
+      class="text-red-600 hover:text-red-800"
+      @click="deleteDocument(doc._id.$oid)"
+    >
+      <TrashIcon class="h-4 w-4" />
+    </Button>
+  </TableCell>
+</TableRow>
 
           <TableRow v-if="isAdding" class="bg-blue-50">
             <TableCell v-for="header in tableHeaders" :key="header" class="p-1">
@@ -962,5 +983,10 @@ watch(collectionName, fetchDocuments);
 
 .schema-table tr:hover td {
   @apply bg-gray-50;
+}
+
+.cursor-not-allowed {
+  cursor: not-allowed;
+  opacity: 0.8;
 }
 </style>

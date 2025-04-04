@@ -249,6 +249,15 @@ async fn insert_document_handler(
             let doc_result = mongodb::bson::to_document(&document);
             match doc_result {
                 Ok(mut doc) => {
+                    // Remove any client-provided timestamp fields
+                    doc.remove("created_at");
+                    doc.remove("updated_at");
+                    
+                    // Add server-managed timestamp fields
+                    let current_time = mongodb::bson::DateTime::now();
+                    doc.insert("created_at", current_time.clone());
+                    doc.insert("updated_at", current_time);
+                    
                     // Process fields according to schema types (dates, integers, etc.)
                     if let Err(e) = process_document_fields(&db, &collection_name, &mut doc).await {
                         return error_response::<InsertResponse>(StatusCode::BAD_REQUEST, e);
@@ -458,6 +467,14 @@ async fn update_document_handler(
                     
                     // Process fields in the update document according to the schema
                     let mut update_doc = update.clone();
+                    
+                    // Remove any attempts to modify timestamp fields
+                    update_doc.remove("created_at");
+                    
+                    // Always update the updated_at field with current timestamp
+                    let current_time = mongodb::bson::DateTime::now();
+                    update_doc.insert("updated_at", current_time);
+                    
                     if let Err(e) = process_document_fields(&db, &collection_name, &mut update_doc).await {
                         return error_response::<UpdateResponse>(StatusCode::BAD_REQUEST, e);
                     }
