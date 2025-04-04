@@ -16,6 +16,7 @@ import BrowserNavbar from '@/components/BrowserNavbar.vue'
 import MongoDBTableNavbar from '@/components/MongoDBTableNavbar.vue'
 import HelloWorldTab from '@/components/HelloWorldTab.vue'
 import { useToast } from './components/ui/toast'
+import ApiServerStatus from './components/ApiServerStatus.vue'
 
 interface Tab {
   id: string
@@ -261,6 +262,8 @@ onUnmounted(() => {
         <div v-if="connectionError" class="mb-4 p-3 bg-red-100 text-red-700 rounded-md">
           {{ connectionError }}
         </div>
+
+        <ApiServerStatus />
 
         <!-- Show settings when activeTab is 'settings' -->
         <div v-if="activeTab === 'settings'">

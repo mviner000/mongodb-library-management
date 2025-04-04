@@ -36,6 +36,16 @@ impl MongoDbState {
     }
 }
 
+// Make MongoDbState cloneable
+impl Clone for MongoDbState {
+    fn clone(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+            database_name: self.database_name.clone(),
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn connect_mongodb(
     mongodb_state: State<'_, MongoDbState>,
