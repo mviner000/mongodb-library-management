@@ -1,4 +1,4 @@
-<!-- src/components/MongoDBDataTable.vue -->
+<!-- update this old src/components/MongoDBDataTable.vue -->
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
@@ -30,16 +30,17 @@ import {
   PaginationNext,
   PaginationPrev,
 } from '@/components/ui/pagination';
-
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger
 } from '@/components/ui/tooltip';
-
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { useToast } from '@/components/ui/toast/use-toast';
 import { PlusCircledIcon } from '@radix-icons/vue';
 
+const { toast } = useToast();
 
 const props = defineProps<{
   selectedCollection?: string;
@@ -57,26 +58,114 @@ const newDocument = ref<Record<string, any>>({});
 const isAdding = ref(false);
 const showSchemaAsRow = ref(true);
 
+const API_BASE = 'http://localhost:3000';
+
+// Reference handling
+const referenceOptions = ref<Record<string, Array<{ id: string; label: string }>>>({});
+const searchQuery = ref<Record<string, string>>({});
+const loadingReferences = ref<Record<string, boolean>>({});
+
+const isReferenceField = (field: string) => {
+  return field.endsWith('_semester_id') || field.endsWith('_account_id');
+};
+
+const getReferencedCollection = (field: string) => {
+  if (field.endsWith('_semester_id')) return 'semesters';
+  if (field.endsWith('_account_id')) return 'school_accounts';
+  return null;
+};
+
+async function fetchReferenceOptions(collectionName: string) {
+  loadingReferences.value[collectionName] = true;
+  try {
+    const response = await fetch(`${API_BASE}/collections/${collectionName}/documents`);
+    const { success, data, error } = await response.json();
+    
+    if (success) {
+      const options = data.map((doc: any) => ({
+        id: doc._id.$oid,
+        label: doc.label || doc.name || doc._id.$oid,
+      }));
+      referenceOptions.value[collectionName] = options;
+      
+      if (options.length === 0) {
+        toast({
+          title: 'No options found',
+          description: `No documents found in ${collectionName}. Please add some first.`,
+          variant: 'destructive',
+        });
+      }
+    } else {
+      toast({
+        title: 'Error fetching options',
+        description: error || 'Failed to fetch reference data',
+        variant: 'destructive',
+      });
+    }
+  } catch (error) {
+    toast({
+      title: 'Error',
+      description: `Failed to fetch ${collectionName}: ${error}`,
+      variant: 'destructive',
+    });
+  } finally {
+    loadingReferences.value[collectionName] = false;
+  }
+}
+
+const filteredOptions = (field: string) => {
+  const refCollection = getReferencedCollection(field);
+  if (!refCollection) return [];
+  const options = referenceOptions.value[refCollection] || [];
+  const query = (searchQuery.value[field] || '').toLowerCase();
+  return options.filter(opt => opt.label.toLowerCase().includes(query));
+};
+
 // Add immediate: true to collectionName watcher
 watch(collectionName, async (newVal) => {
   try {
-    console.log(`Fetching schema for collection: ${newVal}`);
-    collectionSchema.value = await invoke('get_collection_schema', { 
-      collectionName: newVal 
-    });
-    console.log('Schema fetch successful:', collectionSchema.value);
-    newDocument.value = initializeNewDocument();
-    await fetchDocuments(); // Also trigger document fetch
+    const response = await fetch(`${API_BASE}/collections/${newVal}/schema`);
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    const { success, data, error } = await response.json();
+    
+    if (success) {
+      collectionSchema.value = data;
+      newDocument.value = initializeNewDocument();
+      await fetchDocuments();
+      
+      // Fetch reference data for this collection's schema
+      if (data.properties) {
+        Object.keys(data.properties).forEach((field) => {
+          const refCollection = getReferencedCollection(field);
+          if (refCollection && !referenceOptions.value[refCollection]) {
+            fetchReferenceOptions(refCollection);
+          }
+        });
+      }
+    } else {
+      errorMessage.value = error || 'Schema fetch failed';
+    }
   } catch (error) {
-    console.error('Schema fetch error:', error);
     errorMessage.value = `Schema error: ${error}`;
   }
-}, { immediate: true }); // Add immediate option here
+}, { immediate: true });
 
 // Watch for prop changes
 watch(() => props.selectedCollection, (newVal) => {
   if (newVal && newVal !== collectionName.value) {
     collectionName.value = newVal;
+  }
+});
+
+// Watch for adding state
+watch(isAdding, async (newVal) => {
+  if (newVal) {
+    tableHeaders.value.forEach((field) => {
+      const refCollection = getReferencedCollection(field);
+      if (refCollection && !referenceOptions.value[refCollection]) {
+        fetchReferenceOptions(refCollection);
+      }
+    });
   }
 });
 
@@ -115,6 +204,15 @@ const hasSchema = computed(() => {
 const getSchemaInfo = (field: string) => {
   if (!collectionSchema.value.properties || !collectionSchema.value.properties[field]) return {};
   return collectionSchema.value.properties[field];
+};
+
+// function to resolve reference labels
+const getReferenceLabel = (field: string, id: string) => {
+  const refCollection = getReferencedCollection(field);
+  if (!refCollection) return id;
+  const options = referenceOptions.value[refCollection] || [];
+  const option = options.find(opt => opt.id === id);
+  return option ? option.label : id;
 };
 
 // Check if a field is required
@@ -176,7 +274,12 @@ const initializeNewDocument = () => {
   
   required.forEach((field: string) => {
     const prop = properties[field];
-    doc[field] = getDefaultValue(prop.bsonType);
+    // Handle boolean initialization
+    if (prop.bsonType === 'bool') {
+      doc[field] = false;
+    } else {
+      doc[field] = getDefaultValue(prop.bsonType);
+    }
   });
   
   // Add required timestamps
@@ -211,25 +314,24 @@ const cancelAdding = () => {
 
 const saveNewDocument = async () => {
   try {
-    // Convert dates to timestamps
-    Object.entries(collectionSchema.value.properties || {}).forEach(([key, prop]: [string, any]) => {
-      if (prop.bsonType === 'date' && newDocument.value[key] instanceof Date) {
-        newDocument.value[key] = newDocument.value[key].getTime();
-      }
+    const response = await fetch(`${API_BASE}/collections/${collectionName.value}/documents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newDocument.value)
     });
 
-    await invoke('insert_document', {
-      collectionName: collectionName.value,
-      document: newDocument.value
-    });
+    const { success, error } = await response.json();
     
-    isAdding.value = false;
-    await fetchDocuments();
+    if (success) {
+      isAdding.value = false;
+      await fetchDocuments();
+    } else {
+      errorMessage.value = error || 'Create failed';
+    }
   } catch (error) {
     errorMessage.value = `Create failed: ${error}`;
   }
 };
-
 
 const fetchDocuments = async () => {
   isLoading.value = true;
@@ -242,19 +344,35 @@ const fetchDocuments = async () => {
       errorMessage.value = `Invalid filter JSON: ${error}`;
       return;
     }
-    documents.value = await invoke<any[]>('find_documents', {
-      collectionName: collectionName.value,
-      filter: filter
+
+    // Build URL with URLSearchParams for the filter
+    let url = `${API_BASE}/collections/${collectionName.value}/documents`;
+    
+    const params = new URLSearchParams();
+    params.append('filter', JSON.stringify(filter));
+    url += `?${params.toString()}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
     });
-    currentPage.value = 1;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes('Database connection not initialized')) {
-      setTimeout(fetchDocuments, 1000);
+
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    const { success, data, error } = await response.json();
+
+    if (success) {
+      documents.value = data;
+      currentPage.value = 1;
+      console.log("Fetched documents:", data);  // Log fetched data
     } else {
-      errorMessage.value = `Error fetching documents: ${message}`;
+      errorMessage.value = error || 'Failed to fetch documents';
       documents.value = [];
+      console.log("Error from API:", error);
     }
+  } catch (error) {
+    errorMessage.value = `Error fetching documents: ${error}`;
+    documents.value = [];
+    console.error("Exception:", error);
   } finally {
     isLoading.value = false;
   }
@@ -269,33 +387,32 @@ const handleCellClick = (rowIndex: number, header: string, value: any) => {
 const saveEdit = async () => {
   if (!editingCell.value || isSaving.value) return;
   isSaving.value = true;
-  
-  const { rowIndex, header } = editingCell.value;
-  const doc = paginatedDocuments.value[rowIndex];
-  const originalDoc = documents.value.find(d => d._id.$oid === doc._id.$oid);
-  if (!originalDoc) return;
 
   try {
-    // Parse value based on original type
-    let newValue: any = editValue.value;
-    if (typeof originalDoc[header] === 'number') {
-      newValue = parseFloat(editValue.value);
-    } else if (typeof originalDoc[header] === 'object') {
-      newValue = JSON.parse(editValue.value);
-    }
+    const doc = paginatedDocuments.value[editingCell.value.rowIndex];
+    const update = { [editingCell.value.header]: JSON.parse(editValue.value) };
 
-    const update = { [header]: newValue };
-    const success = await invoke<boolean>('update_document', {
-      collectionName: collectionName.value,
-      id: doc._id.$oid,
-      update: update
-    });
+    const response = await fetch(
+      `${API_BASE}/collections/${collectionName.value}/documents/${doc._id.$oid}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(update)
+      }
+    );
 
-    if (success) {
-      originalDoc[header] = newValue;
-      documents.value = [...documents.value];
+    const { success, data, error } = await response.json();
+    
+    if (success && data.modified_count > 0) {
+      const originalDoc = documents.value.find(d => d._id.$oid === doc._id.$oid);
+      if (originalDoc) {
+        originalDoc[editingCell.value.header] = update[editingCell.value.header];
+        documents.value = [...documents.value];
+      }
+      editingCell.value = null;
+    } else {
+      errorMessage.value = error || 'Update failed';
     }
-    editingCell.value = null;
   } catch (error) {
     errorMessage.value = `Error updating field: ${error}`;
   } finally {
@@ -306,11 +423,18 @@ const saveEdit = async () => {
 const deleteDocument = async (id: string) => {
   if (!confirm('Are you sure you want to delete this document?')) return;
   try {
-    const success = await invoke<boolean>('delete_document', {
-      collectionName: collectionName.value,
-      id: id
-    });
-    if (success) fetchDocuments();
+    const response = await fetch(
+      `${API_BASE}/collections/${collectionName.value}/documents/${id}`,
+      { method: 'DELETE' }
+    );
+
+    const { success, data, error } = await response.json();
+    
+    if (success && data.deleted_count > 0) {
+      await fetchDocuments();
+    } else {
+      errorMessage.value = error || 'Delete failed';
+    }
   } catch (error) {
     errorMessage.value = `Error deleting document: ${error}`;
   }
@@ -319,17 +443,20 @@ const deleteDocument = async (id: string) => {
 const collectionsList = ref<string[]>([]);
 const fetchCollections = async () => {
   try {
-    collectionsList.value = await invoke<string[]>('list_collections');
-    if (collectionsList.value.length > 0 && !collectionsList.value.includes(collectionName.value)) {
-      collectionName.value = collectionsList.value[0];
+    const response = await fetch(`${API_BASE}/collections`);
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    const { success, data, error } = await response.json();
+    
+    if (success) {
+      collectionsList.value = data;
+      if (data.length > 0 && !data.includes(collectionName.value)) {
+        collectionName.value = data[0];
+      }
+    } else {
+      errorMessage.value = error || 'Failed to fetch collections';
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes('Database connection not initialized')) {
-      setTimeout(fetchCollections, 1000);
-    } else {
-      errorMessage.value = `Error fetching collections: ${message}`;
-    }
+    errorMessage.value = `Error fetching collections: ${error}`;
   }
 };
 
@@ -345,7 +472,6 @@ const onPageChange = (page: number) => {
 
 watch(collectionName, fetchDocuments);
 </script>
-
 <template>
   <div class="border rounded-md p-4 w-full">
     
@@ -377,83 +503,139 @@ watch(collectionName, fetchDocuments);
     <!-- Schema info table when no documents found -->
     <div v-else-if="documents.length === 0 && hasSchema" class="w-full">
       <div class="mb-4">
-    <h3 class="text-lg font-semibold mb-2">Collection Schema: {{ collectionName }}</h3>
-    <p class="text-gray-600 mb-4">
-      No documents found in this collection. Below is the schema definition.
-    </p>
-    
-    <!-- Excel-style schema fields with tooltips -->
-    <div class="overflow-x-auto pb-2 mb-4">
-      <div class="flex excel-headers">
-        <div v-for="field in tableHeaders" :key="field" class="relative">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div class="excel-header-cell" :class="isFieldRequired(field) ? 'excel-header-required' : ''">
-                  {{ field }}
-                  <span v-if="isFieldRequired(field)" class="text-red-500 ml-1">*</span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent class="w-64 p-0">
-                <div class="text-gray-600 bg-white rounded shadow border border-gray-200 p-3">
-                  <div class="font-semibold border-b pb-1 mb-2 text-slate-600">{{ field }}</div>
-                  <div class="grid grid-cols-2 gap-1 text-sm">
-                    <div>Type:</div>
-                    <div class="font-medium">{{ getFieldTypeName(field) }}</div>
-                    
-                    <div>Required:</div>
-                    <div>
-                      <span v-if="isFieldRequired(field)" class="text-green-600 font-medium">Yes</span>
-                      <span v-else class="text-gray-500">No</span>
+        <h3 class="text-lg font-semibold mb-2">Collection Schema: {{ collectionName }}</h3>
+        <p class="text-gray-600 mb-4">
+          No documents found in this collection. Below is the schema definition.
+        </p>
+        
+        <!-- Excel-style schema fields with tooltips -->
+        <div class="overflow-x-auto pb-2 mb-4">
+          <div class="flex excel-headers">
+            <div v-for="field in tableHeaders" :key="field" class="relative">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div class="excel-header-cell" :class="isFieldRequired(field) ? 'excel-header-required' : ''">
+                      {{ field }}
+                      <span v-if="isFieldRequired(field)" class="text-red-500 ml-1">*</span>
                     </div>
-                    
-                    <div>Description:</div>
-                    <div>{{ getSchemaInfo(field).description || 'No description' }}</div>
-                  </div>
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+                  </TooltipTrigger>
+                  <TooltipContent class="w-64 p-0">
+                    <div class="text-gray-600 bg-white rounded shadow border border-gray-200 p-3">
+                      <div class="font-semibold border-b pb-1 mb-2 text-slate-600">{{ field }}</div>
+                      <div class="grid grid-cols-2 gap-1 text-sm">
+                        <div>Type:</div>
+                        <div class="font-medium">{{ getFieldTypeName(field) }}</div>
+                        
+                        <div>Required:</div>
+                        <div>
+                          <span v-if="isFieldRequired(field)" class="text-green-600 font-medium">Yes</span>
+                          <span v-else class="text-gray-500">No</span>
+                        </div>
+                        
+                        <div>Description:</div>
+                        <div>{{ getSchemaInfo(field).description || 'No description' }}</div>
+                      </div>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          </div>
+        </div>
+            
+        <div class="mt-6">
+          <Button @click="startAdding" class="gap-2">
+            <PlusCircledIcon class="h-4 w-4" />
+            <span>Add First Document</span>
+          </Button>
+        </div>
+      </div>
+  
+      <!-- Add document form (updated) -->
+      <div v-if="isAdding" class="mt-6 border rounded-md p-4 bg-gray-50">
+        <h3 class="text-lg font-semibold mb-4">Add New Document</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div v-for="field in tableHeaders" :key="`new-${field}`" class="mb-4">
+            <Label :for="`field-${field}`" class="block mb-1">
+              {{ field }}
+              <span v-if="isFieldRequired(field)" class="text-red-500">*</span>
+            </Label>
+            
+            <!-- Boolean field handling -->
+            <template v-if="getSchemaInfo(field).bsonType === 'bool'">
+              <div class="flex items-center gap-2">
+                <input 
+                  type="checkbox" 
+                  :id="`field-${field}`"
+                  v-model="newDocument[field]"
+                  class="h-4 w-4"
+                />
+                <label :for="`field-${field}`" class="text-sm">
+                  {{ newDocument[field] ? 'True' : 'False' }}
+                </label>
+              </div>
+            </template>
+            
+            <!-- Reference field with dropdown -->
+            <template v-else-if="isReferenceField(field)">
+              <div v-if="loadingReferences[getReferencedCollection(field)]" class="flex items-center gap-2">
+                <ReloadIcon class="h-4 w-4 animate-spin" />
+                <span>Loading options...</span>
+              </div>
+              <Select v-else v-model="newDocument[field]">
+                <SelectTrigger>
+                  <SelectValue :placeholder="`Select ${getReferencedCollection(field)}`" />
+                </SelectTrigger>
+                <SelectContent>
+                  <ScrollArea class="h-48">
+                    <div class="p-1">
+                      <Input 
+                        v-model="searchQuery[field]"
+                        placeholder="Search..."
+                        class="mb-2"
+                      />
+                      <div v-if="filteredOptions(field).length">
+                        <SelectItem 
+                          v-for="option in filteredOptions(field)"
+                          :key="option.id"
+                          :value="option.id"
+                        >
+                          {{ option.label }}
+                        </SelectItem>
+                      </div>
+                      <div v-else class="text-sm text-gray-500 px-2 py-1">
+                        No options found
+                      </div>
+                    </div>
+                  </ScrollArea>
+                </SelectContent>
+              </Select>
+            </template>
+
+            <!-- Regular field -->
+            <template v-else>
+              <Input 
+                v-if="field !== '_id'"
+                :id="`field-${field}`"
+                v-model="newDocument[field]"
+                :type="collectionSchema.properties[field]?.bsonType === 'date' ? 'datetime-local' : 'text'"
+                :class="{ 'border-red-300': isFieldRequired(field) && !newDocument[field] }"
+              />
+              <span v-else class="text-gray-400">(auto-generated)</span>
+            </template>
+            
+            <p class="text-xs text-gray-500 mt-1">
+              {{ getSchemaInfo(field).description || '' }}
+            </p>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 mt-4">
+          <Button @click="cancelAdding" variant="outline">Cancel</Button>
+          <Button @click="saveNewDocument">Save Document</Button>
         </div>
       </div>
     </div>
-        
-    <div class="mt-6">
-      <Button @click="startAdding" class="gap-2">
-        <PlusCircledIcon class="h-4 w-4" />
-        <span>Add First Document</span>
-      </Button>
-    </div>
-      </div>
-  
-  <!-- Add document form (unchanged) -->
-  <div v-if="isAdding" class="mt-6 border rounded-md p-4 bg-gray-50">
-    <h3 class="text-lg font-semibold mb-4">Add New Document</h3>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div v-for="field in tableHeaders" :key="`new-${field}`" class="mb-4">
-        <Label :for="`field-${field}`" class="block mb-1">
-          {{ field }}
-          <span v-if="isFieldRequired(field)" class="text-red-500">*</span>
-        </Label>
-        <Input 
-          v-if="field !== '_id'"
-          :id="`field-${field}`"
-          v-model="newDocument[field]"
-          :type="collectionSchema.properties[field]?.bsonType === 'date' ? 'datetime-local' : 'text'"
-          :class="{ 'border-red-300': isFieldRequired(field) && !newDocument[field] }"
-        />
-        <span v-else class="text-gray-400">(auto-generated)</span>
-        <p class="text-xs text-gray-500 mt-1">
-          {{ getSchemaInfo(field).description || '' }}
-        </p>
-      </div>
-    </div>
-    <div class="flex justify-end gap-2 mt-4">
-      <Button @click="cancelAdding" variant="outline">Cancel</Button>
-      <Button @click="saveNewDocument">Save Document</Button>
-    </div>
-  </div>
-</div>
     
     <!-- No documents and no schema -->
     <div v-else-if="documents.length === 0 && !hasSchema" class="text-center my-8 text-gray-500">
@@ -501,16 +683,58 @@ watch(collectionName, fetchDocuments);
           <TableRow v-for="(doc, rowIndex) in paginatedDocuments" :key="rowIndex">
             <TableCell v-for="header in tableHeaders" :key="`${rowIndex}-${header}`" 
             class="border-r border-b border-gray-200 p-0">
-            <div class="h-full">
-              <div v-if="editingCell?.rowIndex === rowIndex && editingCell?.header === header" 
-                class="h-full">
-                <!-- Add date input for date fields -->
-                <Input v-if="collectionSchema.properties[header]?.bsonType === 'date'"
-                  type="datetime-local"
-                  v-model="editValue"
-                  @blur="saveEdit"
-                  class="h-full rounded-none border-none focus-visible:ring-2"
-                />
+              <div class="h-full">
+                <div v-if="editingCell?.rowIndex === rowIndex && editingCell?.header === header" 
+                  class="h-full">
+                  <!-- Boolean field editing -->
+                  <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" 
+                    class="flex items-center justify-center h-full p-2">
+                    <input 
+                      type="checkbox" 
+                      v-model="editValue" 
+                      @change="saveEdit"
+                      class="h-4 w-4"
+                    />
+                  </div>
+                  <!-- Reference field editing -->
+                  <div v-else-if="isReferenceField(header)" class="p-1">
+                    <Select v-model="editValue" @update:modelValue="saveEdit">
+                      <SelectTrigger>
+                        <SelectValue :placeholder="`Select ${getReferencedCollection(header)}`" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <ScrollArea class="h-48">
+                          <div class="p-1">
+                            <Input 
+                              v-model="searchQuery[header]"
+                              placeholder="Search..."
+                              class="mb-2"
+                            />
+                            <div v-if="filteredOptions(header).length">
+                              <SelectItem 
+                                v-for="option in filteredOptions(header)"
+                                :key="option.id"
+                                :value="option.id"
+                              >
+                                {{ option.label }}
+                              </SelectItem>
+                            </div>
+                            <div v-else class="text-sm text-gray-500 px-2 py-1">
+                              No options found
+                            </div>
+                          </div>
+                        </ScrollArea>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <!-- Date input for date fields -->
+                  <Input v-else-if="collectionSchema.properties[header]?.bsonType === 'date'"
+                    type="datetime-local"
+                    v-model="editValue"
+                    @blur="saveEdit"
+                    class="h-full rounded-none border-none focus-visible:ring-2"
+                  />
+                  <!-- Default textarea for other fields -->
                   <textarea v-else
                     v-model="editValue"
                     @blur="saveEdit"
@@ -520,10 +744,20 @@ watch(collectionName, fetchDocuments);
                   />
                 </div>
                 <div v-else
-                    class="p-2 cursor-pointer hover:bg-blue-50 min-h-[40px]"
-                    @click="handleCellClick(rowIndex, header, doc[header])"
-                  >
-                  {{ formatSchemaValue(doc[header], collectionSchema.properties[header]?.bsonType) }}
+                  class="p-2 cursor-pointer hover:bg-blue-50 min-h-[40px]"
+                  @click="handleCellClick(rowIndex, header, doc[header])"
+                >
+                  <!-- Show boolean values with checkboxes in read-only mode -->
+                  <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" class="flex justify-center">
+                    <input type="checkbox" :checked="doc[header]" disabled class="h-4 w-4" />
+                  </div>
+                  <!-- Show reference field labels in read-only mode -->
+                  <div v-else-if="isReferenceField(header)" class="text-blue-600">
+                    {{ getReferenceLabel(header, doc[header]) || doc[header] }}
+                  </div>
+                  <template v-else>
+                    {{ formatSchemaValue(doc[header], collectionSchema.properties[header]?.bsonType) }}
+                  </template>
                 </div>
               </div>
             </TableCell>
@@ -541,7 +775,44 @@ watch(collectionName, fetchDocuments);
 
           <TableRow v-if="isAdding" class="bg-blue-50">
             <TableCell v-for="header in tableHeaders" :key="header" class="p-1">
-              <Input v-if="header !== '_id'"
+              <!-- Boolean field in inline add mode -->
+              <div v-if="header !== '_id' && collectionSchema.properties[header]?.bsonType === 'bool'" 
+                class="flex items-center justify-center">
+                <input 
+                  type="checkbox" 
+                  v-model="newDocument[header]"
+                  class="h-4 w-4"
+                />
+              </div>
+              <!-- Reference field in inline add mode -->
+              <div v-else-if="header !== '_id' && isReferenceField(header)" class="h-8">
+                <Select v-model="newDocument[header]" class="h-8">
+                  <SelectTrigger class="h-8">
+                    <SelectValue :placeholder="`Select`" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <div v-if="loadingReferences[getReferencedCollection(header)]" class="p-2">
+                      <ReloadIcon class="h-4 w-4 animate-spin mx-auto" />
+                    </div>
+                    <ScrollArea v-else class="h-48">
+                      <Input 
+                        v-model="searchQuery[header]"
+                        placeholder="Search..."
+                        class="mb-1 mx-1"
+                      />
+                      <SelectItem 
+                        v-for="option in filteredOptions(header)"
+                        :key="option.id"
+                        :value="option.id"
+                      >
+                        {{ option.label }}
+                      </SelectItem>
+                    </ScrollArea>
+                  </SelectContent>
+                </Select>
+              </div>
+              <!-- Regular field in inline add mode -->
+              <Input v-else-if="header !== '_id'"
                 v-model="newDocument[header]"
                 :type="collectionSchema.properties[header]?.bsonType === 'date' ? 'datetime-local' : 'text'"
                 class="h-8"
@@ -615,6 +886,11 @@ watch(collectionName, fetchDocuments);
 </template>
 
 <style>
+.checkbox-cell {
+  vertical-align: middle;
+  text-align: center;
+}
+
 .excel-style-table {
   border-collapse: collapse;
   border-spacing: 0;

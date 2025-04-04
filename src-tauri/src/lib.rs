@@ -76,6 +76,8 @@ pub fn run() {
             // API server commands
             api_server::is_api_server_running,
             api_server::start_api_server,
+            api_server::stop_api_server,
+            api_server::list_api_routes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

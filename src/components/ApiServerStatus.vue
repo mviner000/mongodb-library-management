@@ -1,7 +1,8 @@
 <!-- src/components/ApiServerStatus.vue -->
 <template>
-    <div class="p-4">
-      <div class="flex gap-4 items-center">
+  <div class="p-4">
+    <div class="flex gap-4 items-center flex-wrap">
+      <div class="flex gap-2 items-center">
         <button 
           @click="startApiServer" 
           class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-blue-300"
@@ -9,27 +10,79 @@
         >
           {{ buttonText }}
         </button>
-        <div v-if="isRunning" class="flex items-center gap-2">
-          <div class="w-3 h-3 bg-green-500 rounded-full"></div>
-          <span>Server running on port {{ serverPort }}</span>
-        </div>
-        <div v-else class="flex items-center gap-2">
-          <div class="w-3 h-3 bg-red-500 rounded-full"></div>
-          <span>Server not running</span>
-        </div>
+        <button 
+          @click="stopApiServer" 
+          class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 disabled:bg-red-300"
+          :disabled="!isRunning"
+        >
+          Stop Server
+        </button>
       </div>
-      <div v-if="error" class="mt-2 text-red-500">{{ error }}</div>
+      
+      <button 
+        @click="showRoutesModal = true"
+        class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+        :disabled="!isRunning"
+      >
+        List API Routes
+      </button>
+
+      <div v-if="isRunning" class="flex items-center gap-2">
+        <div class="w-3 h-3 bg-green-500 rounded-full"></div>
+        <span>Server running on port {{ serverPort }}</span>
+      </div>
+      <div v-else class="flex items-center gap-2">
+        <div class="w-3 h-3 bg-red-500 rounded-full"></div>
+        <span>Server not running</span>
+      </div>
     </div>
-  </template>
+
+    <Dialog v-model:open="showRoutesModal">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>API Routes</DialogTitle>
+          <DialogDescription>
+            Available endpoints on http://localhost:{{ serverPort }}
+          </DialogDescription>
+        </DialogHeader>
+        <div class="max-h-[60vh] overflow-y-auto">
+          <div v-for="(route, index) in apiRoutes" :key="index" class="p-2 bg-gray-100 rounded mb-2 font-mono">
+            {{ route }}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="showRoutesModal = false">Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <div v-if="error" class="mt-2 text-red-500">{{ error }}</div>
+  </div>
+</template>
   
-  <script setup lang="ts">
-  import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
+<script setup lang="ts">
+  import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue';
   import { invoke } from '@tauri-apps/api/core';
-  
+
+  import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+
+
+import { Button } from '@/components/ui/button';
+
+
   const serverPort = ref(3000);
   const isStarting = ref(false);
   const isRunning = ref(false);
   const error = ref('');
+  const showRoutesModal = ref(false);
+  const apiRoutes = ref<string[]>([]);
   let checkInterval: number;
   
   const buttonText = computed(() => {
@@ -45,6 +98,28 @@
       isRunning.value = false;
     }
   }
+
+  async function stopApiServer() {
+  if (!isRunning.value) return;
+  
+  try {
+    await invoke('stop_api_server');
+    isRunning.value = false;
+    error.value = '';
+  } catch (err) {
+    error.value = `Error stopping server: ${err}`;
+    console.error(err);
+  }
+}
+
+async function loadApiRoutes() {
+  try {
+    apiRoutes.value = await invoke<string[]>('list_api_routes');
+  } catch (err) {
+    console.error('Failed to load API routes:', err);
+    apiRoutes.value = [];
+  }
+}
   
   onMounted(async () => {
     await checkServerStatus();
@@ -72,4 +147,10 @@
       isStarting.value = false;
     }
   }
+
+  watch(showRoutesModal, async (newVal) => {
+  if (newVal) {
+    await loadApiRoutes();
+  }
+});
   </script>

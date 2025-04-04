@@ -5,8 +5,12 @@ use axum::{
     http::{StatusCode, Method},
     Json, Router, extract::Path, extract::State, response::IntoResponse,
 };
-use mongodb::{bson::{doc, Document, oid::ObjectId}, Database};
+
+use axum::extract::Query;
+
+use mongodb::{bson::{doc, Document, oid::ObjectId, Bson}, Database};
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
@@ -158,9 +162,21 @@ fn extract_schema_from_response(response: Document) -> Result<serde_json::Value,
 async fn find_documents_handler(
     State(state): State<Arc<Mutex<ApiServerState>>>,
     Path(collection_name): Path<String>,
-    Json(filter): Json<Document>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let mongodb_state = &state.lock().await.mongodb_state;
+    
+    // Extract filter from query parameters - fixed temporary value issue
+    let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
+    
+    // Parse the JSON string into a Document
+    let filter: Document = match serde_json::from_str(&filter_str) {
+        Ok(f) => f,
+        Err(e) => return error_response::<Vec<Document>>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid filter JSON: {}", e)
+        ),
+    };
     
     match get_database(mongodb_state).await {
         Ok(db) => {
@@ -233,8 +249,8 @@ async fn insert_document_handler(
             let doc_result = mongodb::bson::to_document(&document);
             match doc_result {
                 Ok(mut doc) => {
-                    // Process date fields using the schema (similar to your implementation)
-                    if let Err(e) = process_date_fields(&db, &collection_name, &mut doc).await {
+                    // Process fields according to schema types (dates, integers, etc.)
+                    if let Err(e) = process_document_fields(&db, &collection_name, &mut doc).await {
                         return error_response::<InsertResponse>(StatusCode::BAD_REQUEST, e);
                     }
                     
@@ -269,12 +285,8 @@ async fn insert_document_handler(
     }
 }
 
-async fn process_date_fields(
-    db: &Database, 
-    collection_name: &str, 
-    doc: &mut Document
-) -> Result<(), String> {
-    // Get collection schema
+// Get collection schema - extract common functionality for reuse
+async fn get_collection_schema_internal(db: &Database, collection_name: &str) -> Result<Document, String> {
     let command = doc! {
         "listCollections": 1,
         "filter": { "name": collection_name }
@@ -284,36 +296,66 @@ async fn process_date_fields(
         .await
         .map_err(|e| format!("Failed to get collection info: {}", e))?;
     
-    let schema = extract_schema_from_response(response)?;
+    let cursor = response.get_document("cursor")
+        .map_err(|e| format!("Invalid response format: {}", e))?;
     
-    // Process date fields using the schema
-    if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
-        for (field, spec) in properties {
-            // Check if the field is a date type in the schema
-            if let Some(spec_obj) = spec.as_object() {
-                if let Some(bson_type) = spec_obj.get("bsonType").and_then(|b| b.as_str()) {
-                    if bson_type == "date" {
-                        // Check if the field exists in the document as a string
-                        if let Some(mongodb::bson::Bson::String(date_str)) = doc.get(field) {
-                            // Try to parse the date
-                            if let Ok(datetime) = chrono::DateTime::parse_from_rfc3339(date_str) {
-                                // Convert to SystemTime then to bson::DateTime
-                                let system_time: SystemTime = datetime.into();
-                                let mongo_date = mongodb::bson::DateTime::from_system_time(system_time);
-                                doc.insert(field, mongo_date);
-                            } else {
-                                // Try with extended format
-                                let extended_date_str = format!("{}:00Z", date_str);
-                                if let Ok(datetime) = chrono::DateTime::parse_from_rfc3339(&extended_date_str) {
-                                    // Convert to SystemTime then to bson::DateTime
-                                    let system_time: SystemTime = datetime.into();
-                                    let mongo_date = mongodb::bson::DateTime::from_system_time(system_time);
-                                    doc.insert(field, mongo_date);
-                                } else {
-                                    return Err(format!("Failed to parse date field '{}': {}", field, date_str));
-                                }
-                            }
-                        }
+    let batches = cursor.get_array("firstBatch")
+        .map_err(|_| "No collections found".to_string())?;
+    
+    if batches.is_empty() {
+        return Err("Collection not found".into());
+    }
+    
+    let coll_info = batches[0].as_document()
+        .ok_or_else(|| "Invalid collection info".to_string())?;
+    
+    let options = coll_info.get_document("options")
+        .map_err(|_| "No options found".to_string())?;
+    
+    let validator = options.get_document("validator")
+        .map_err(|_| "No validator found".to_string())?;
+    
+    let json_schema = validator.get_document("$jsonSchema")
+        .map_err(|_| "No JSON schema found".to_string())?;
+    
+    Ok(json_schema.clone())
+}
+
+// Process all types of fields according to schema
+async fn process_document_fields(
+    db: &Database, 
+    collection_name: &str, 
+    doc: &mut Document
+) -> Result<(), String> {
+    // Get collection schema
+    let schema = get_collection_schema_internal(db, collection_name).await?;
+    
+    if let Some(properties) = schema.get("properties").and_then(|p| p.as_document()) {
+        for (field, spec) in properties.iter() {
+            // Skip if field doesn't exist in document
+            if !doc.contains_key(field) {
+                continue;
+            }
+            
+            if let Some(spec_doc) = spec.as_document() {
+                if let Some(bson_type) = spec_doc.get("bsonType") {
+                    let bson_type_str = bson_type.as_str().unwrap_or("");
+                    
+                    match bson_type_str {
+                        // Handle date fields
+                        "date" => {
+                            process_date_field(doc, field)?;
+                        },
+                        // Handle integer fields
+                        "int" => {
+                            process_int_field(doc, field)?;
+                        },
+                        // Handle double/decimal fields
+                        "double" => {
+                            process_double_field(doc, field)?;
+                        },
+                        // Add other types as needed
+                        _ => {}
                     }
                 }
             }
@@ -321,6 +363,82 @@ async fn process_date_fields(
     }
     
     Ok(())
+}
+
+// Process date fields
+fn process_date_field(doc: &mut Document, field: &str) -> Result<(), String> {
+    if let Some(Bson::String(date_str)) = doc.get(field) {
+        // Try to parse the date using different formats
+        let datetime = if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(date_str) {
+            dt
+        } else {
+            // Try with extended format
+            let extended_date_str = format!("{}:00Z", date_str);
+            chrono::DateTime::parse_from_rfc3339(&extended_date_str)
+                .map_err(|e| format!("Failed to parse date field '{}': {} - Error: {}", field, date_str, e))?
+        };
+        
+        // Convert to SystemTime then to bson::DateTime
+        let system_time: SystemTime = datetime.into();
+        let mongo_date = mongodb::bson::DateTime::from_system_time(system_time);
+        doc.insert(field, mongo_date);
+    }
+    
+    Ok(())
+}
+
+// Process integer fields
+fn process_int_field(doc: &mut Document, field: &str) -> Result<(), String> {
+    match doc.get(field) {
+        Some(Bson::String(int_str)) => {
+            // Convert string to integer
+            let int_value = int_str.parse::<i32>()
+                .map_err(|e| format!("Failed to parse integer field '{}': {} - Error: {}", field, int_str, e))?;
+            doc.insert(field, Bson::Int32(int_value));
+        },
+        Some(Bson::Double(double_val)) => {
+            // Convert double to integer
+            let int_value = *double_val as i32;
+            doc.insert(field, Bson::Int32(int_value));
+        },
+        _ => {}
+    }
+    
+    Ok(())
+}
+
+// Process double/decimal fields
+fn process_double_field(doc: &mut Document, field: &str) -> Result<(), String> {
+    match doc.get(field) {
+        Some(Bson::String(double_str)) => {
+            // Convert string to double
+            let double_value = double_str.parse::<f64>()
+                .map_err(|e| format!("Failed to parse double field '{}': {} - Error: {}", field, double_str, e))?;
+            doc.insert(field, Bson::Double(double_value));
+        },
+        Some(Bson::Int32(int_val)) => {
+            // Convert integer to double
+            let double_value = *int_val as f64;
+            doc.insert(field, Bson::Double(double_value));
+        },
+        Some(Bson::Int64(int_val)) => {
+            // Convert integer to double
+            let double_value = *int_val as f64;
+            doc.insert(field, Bson::Double(double_value));
+        },
+        _ => {}
+    }
+    
+    Ok(())
+}
+
+// Legacy function for backward compatibility (now calls the more comprehensive process_document_fields)
+async fn process_date_fields(
+    db: &Database, 
+    collection_name: &str, 
+    doc: &mut Document
+) -> Result<(), String> {
+    process_document_fields(db, collection_name, doc).await
 }
 
 async fn update_document_handler(
@@ -337,9 +455,16 @@ async fn update_document_handler(
                 Ok(object_id) => {
                     let collection = db.collection::<Document>(&collection_name);
                     let filter = doc! { "_id": object_id };
-                    let update_doc = doc! { "$set": update };
                     
-                    match collection.update_one(filter, update_doc, None).await {
+                    // Process fields in the update document according to the schema
+                    let mut update_doc = update.clone();
+                    if let Err(e) = process_document_fields(&db, &collection_name, &mut update_doc).await {
+                        return error_response::<UpdateResponse>(StatusCode::BAD_REQUEST, e);
+                    }
+                    
+                    let update_bson = doc! { "$set": update_doc };
+                    
+                    match collection.update_one(filter, update_bson, None).await {
                         Ok(result) => {
                             (StatusCode::OK, Json(ApiResponse {
                                 success: true,
@@ -467,4 +592,32 @@ pub async fn start_api_server(
 
     start_server(api_state.inner().clone(), port).await?;
     Ok(format!("API server started on port {}", port))
+}
+
+#[tauri::command]
+pub async fn stop_api_server(
+    api_state: tauri::State<'_, Arc<Mutex<ApiServerState>>>,
+) -> Result<(), String> {
+    let mut state = api_state.lock().await;
+    if let Some(handle) = state.server_handle.take() {
+        handle.abort();
+        Ok(())
+    } else {
+        Err("API server is not running".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn list_api_routes(
+    api_state: tauri::State<'_, Arc<Mutex<ApiServerState>>>,
+) -> Result<Vec<String>, String> {
+    let _state = api_state.lock().await;
+    Ok(vec![
+        "GET /collections".to_string(),
+        "GET /collections/:collection_name/schema".to_string(),
+        "GET /collections/:collection_name/documents".to_string(),
+        "POST /collections/:collection_name/documents".to_string(),
+        "PUT /collections/:collection_name/documents/:id".to_string(),
+        "DELETE /collections/:collection_name/documents/:id".to_string(),
+    ])
 }
