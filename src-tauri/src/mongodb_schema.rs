@@ -28,8 +28,12 @@ async fn create_school_accounts_collection(db: &Database) -> Result<()> {
                 .unique(true)
                 .build()))
             .build(),
+
         IndexModel::builder()
             .keys(doc! { "last_updated_semester_id": 1 })
+            .options(Some(IndexOptions::builder()
+                .name("semester_ref_idx".to_string())
+                .build()))
             .build(),
     ];
 
@@ -55,7 +59,7 @@ async fn create_school_accounts_collection(db: &Database) -> Result<()> {
                         "major": { "bsonType": "string", "description": "Major" },
                         "year_level": { "bsonType": "string", "description": "Year level" },
                         "is_active": { "bsonType": "bool", "description": "Active status flag (required)" },
-                        "last_updated_semester_id": { "bsonType": "string", "description": "Reference to last updated semester" },
+                        "last_updated_semester_id": { "bsonType": "string", "description": "REF:semesters | Reference to last updated semester" },
                         "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
                         "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
                     }

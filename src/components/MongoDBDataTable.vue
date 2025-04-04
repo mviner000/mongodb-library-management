@@ -66,13 +66,13 @@ const searchQuery = ref<Record<string, string>>({});
 const loadingReferences = ref<Record<string, boolean>>({});
 
 const isReferenceField = (field: string) => {
-  return field.endsWith('_semester_id') || field.endsWith('_account_id');
+  return getSchemaInfo(field).description?.includes('REF:');
 };
 
 const getReferencedCollection = (field: string) => {
-  if (field.endsWith('_semester_id')) return 'semesters';
-  if (field.endsWith('_account_id')) return 'school_accounts';
-  return null;
+  const desc = getSchemaInfo(field).description || '';
+  const match = desc.match(/REF:(\w+)/);
+  return match ? match[1] : null;
 };
 
 async function fetchReferenceOptions(collectionName: string) {
@@ -390,7 +390,26 @@ const saveEdit = async () => {
 
   try {
     const doc = paginatedDocuments.value[editingCell.value.rowIndex];
-    const update = { [editingCell.value.header]: JSON.parse(editValue.value) };
+    
+    // Handle reference fields differently
+    let parsedValue: any;
+    if (isReferenceField(editingCell.value.header)) {
+      parsedValue = editValue.value;
+    } else {
+      const fieldInfo = getSchemaInfo(editingCell.value.header);
+      const bsonType = Array.isArray(fieldInfo.bsonType) 
+        ? fieldInfo.bsonType[0] 
+        : fieldInfo.bsonType;
+      
+      // Handle string fields without JSON parsing
+      if (bsonType === 'string') {
+        parsedValue = editValue.value;
+      } else {
+        parsedValue = JSON.parse(editValue.value);
+      }
+    }
+
+    const update = { [editingCell.value.header]: parsedValue };
 
     const response = await fetch(
       `${API_BASE}/collections/${collectionName.value}/documents/${doc._id.$oid}`,
@@ -535,6 +554,9 @@ watch(collectionName, fetchDocuments);
                         
                         <div>Description:</div>
                         <div>{{ getSchemaInfo(field).description || 'No description' }}</div>
+                        
+                        <div v-if="isReferenceField(field)">References:</div>
+                        <div v-if="isReferenceField(field)" class="font-medium">{{ getReferencedCollection(field) }}</div>
                       </div>
                     </div>
                   </TooltipContent>
@@ -672,6 +694,9 @@ watch(collectionName, fetchDocuments);
                 <span class="font-semibold">{{ header }}</span>
                 <span class="text-gray-600">{{ getFieldTypeName(header) }}</span>
                 <span class="text-gray-600">{{ getSchemaInfo(header).description }}</span>
+                <span v-if="isReferenceField(header)" class="text-blue-600">
+                  References: {{ getReferencedCollection(header) }}
+                </span>
               </div>
             </TableCell>
             <TableCell class="border-b border-gray-200 p-2 text-right">
@@ -700,7 +725,7 @@ watch(collectionName, fetchDocuments);
                   <div v-else-if="isReferenceField(header)" class="p-1">
                     <Select v-model="editValue" @update:modelValue="saveEdit">
                       <SelectTrigger>
-                        <SelectValue :placeholder="`Select ${getReferencedCollection(header)}`" />
+                        <SelectValue :placeholder="`Select ${getReferencedCollection(header)}`" :model-value="editValue" />
                       </SelectTrigger>
                       <SelectContent>
                         <ScrollArea class="h-48">
