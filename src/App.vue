@@ -1,20 +1,17 @@
 <!-- src/App.vue -->
 <script setup lang="ts">
-import { ref, onMounted, provide, computed, onUnmounted, watch, markRaw } from 'vue'
+import { ref, onMounted, provide, onUnmounted, watch, markRaw } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useZoom } from '@/composables/useZoom'
 import { useRoute, useRouter } from 'vue-router'
 
 import Toaster from '@/components/ui/toast/Toaster.vue'
-import TemplateGalleryNavbar from '@/components/TemplateGalleryNavbar.vue'
-import Sidebar from '@/components/Sidebar.vue'
 import TabBar from '@/components/TabBar.vue'
 import SudoPasswordModal from '@/components/SudoPasswordModal.vue'
 import MongoDBStatus from '@/components/MongoDBStatus.vue'
 import MongoDBOperations from '@/components/MongoDBOperations.vue'
 import MongoDBDataTable from '@/components/MongoDBDataTable.vue'
 import BrowserNavbar from '@/components/BrowserNavbar.vue'
-import MongoDBTableNavbar from '@/components/MongoDBTableNavbar.vue'
 import { useToast } from './components/ui/toast'
 import ApiServerStatus from './components/ApiServerStatus.vue'
 import TemplateGallery from './components/TemplateGallery.vue'
@@ -22,7 +19,6 @@ import HelloWorldTab from './components/HelloWorldTab.vue'
 
 const route = useRoute()
 const router = useRouter()
-const routes = router.getRoutes()
 
 const componentCache = ref(new Map())
 
@@ -65,23 +61,19 @@ interface Tab {
   content?: string
   collectionName?: string
   path: string
+  reloadCount: number // Added reload counter
 }
 
 const tabs = ref<Tab[]>([
-  { id: 'home', title: 'Home', type: 'home', path: '/home' }
+  { id: 'home', title: 'Home', type: 'home', path: '/home', reloadCount: 0 }
 ])
 
-const activeTabType = computed(() => {
-  const activeTab = tabs.value.find(t => t.id === activeTabId.value)
-  return activeTab?.type || 'home'
-})
 
 const activeTabId = ref<string>('home')
 const activeTab = ref<'home' | 'settings'>('home')
 const dataTableRef = ref<InstanceType<typeof MongoDBDataTable>[]>([]);
 const isConnecting = ref(false)
 const connectionError = ref('')
-const isSidebarOpen = ref(false)
 const isSplit = ref(false)
 const { toast } = useToast()
 
@@ -123,74 +115,35 @@ watch(isSplit, (newVal) => {
 // Router integration
 function syncTabsWithRoute() {
   const currentPath = route.path;
-  
+
+  // Check if any tab has the current path
   const existingTab = tabs.value.find(tab => tab.path === currentPath);
   
   if (existingTab) {
-    // Update existing tab's title if collection name changed
-    if (currentPath.startsWith('/collection/') && existingTab.type === 'collection') {
-      const newCollectionName = currentPath.split('/')[2];
-      existingTab.title = newCollectionName;
-      existingTab.collectionName = newCollectionName;
-    }
-    
-    // Activate existing tab
+    // Activate the existing tab
     activeTabId.value = existingTab.id;
   } else {
-    const activeTabIndex = tabs.value.findIndex(t => t.id === activeTabId.value);
-    const activeTab = tabs.value[activeTabIndex];
-
-    // Replace home tab when navigating to collection
-    if (activeTab?.type === 'home' && currentPath.startsWith('/collection/')) {
-      const collectionName = currentPath.split('/')[2];
-      const newTab: Tab = {
-        id: `col-${Date.now()}`,
-        title: collectionName,
-        type: 'collection', // This is now properly typed as 'collection'
-        collectionName,
-        path: currentPath
-      };
-      tabs.value.splice(activeTabIndex, 1, newTab);
-      activeTabId.value = newTab.id;
-    } else {
-      // Create new tab for other cases
-      const newTab = createNewTabBasedOnRoute(currentPath);
-      tabs.value.push(newTab);
-      activeTabId.value = newTab.id;
+    // Update the current active tab's path
+    const activeTab = tabs.value.find(t => t.id === activeTabId.value);
+    if (activeTab) {
+      activeTab.path = currentPath;
+      // Update title and type based on path
+      if (currentPath.startsWith('/collection/')) {
+        const collectionName = currentPath.split('/')[2];
+        activeTab.title = collectionName;
+        activeTab.type = 'collection';
+        activeTab.collectionName = collectionName;
+      } else if (currentPath === '/home') {
+        activeTab.title = 'Home';
+        activeTab.type = 'home';
+      } else {
+        activeTab.title = currentPath;
+      }
     }
   }
 }
 
-// Helper function to create tabs
-function createNewTabBasedOnRoute(path: string): Tab {
-  if (path === '/home') {
-    return { id: 'home', title: 'Home', type: 'home', path: '/home' };
-  }
-  
-  if (path.startsWith('/collection/')) {
-    const collectionName = path.split('/')[2];
-    return {
-      id: `col-${Date.now()}`,
-      title: collectionName,
-      type: 'collection',
-      collectionName,
-      path: path
-    };
-  }
-  
-  if (path === '/hello') {
-    return {
-      id: `hello-${Date.now()}`,
-      title: 'Hello World',
-      type: 'hello',
-      content: 'Hello World',
-      path: '/hello'
-    };
-  }
-  
-  // Default fallback
-  return { id: 'home', title: 'Home', type: 'home', path: '/home' };
-}
+
 
 
 // Watch for route changes
@@ -202,10 +155,6 @@ watch(() => route.path, () => {
   }
 }, { immediate: false }) // Change immediate to false
 
-// Existing computed properties
-const navbarTitle = computed(() => {
-  return tabs.value.find(t => t.id === activeTabId.value)?.title || 'Library Manager'
-})
 
 // Watch route changes to update URL
 watch(() => route.path, (newPath) => {
@@ -217,9 +166,6 @@ watch(() => route.path, (newPath) => {
   }
 })
 
-const showSearch = computed(() => {
-  return tabs.value.find(t => t.id === activeTabId.value)?.type === 'home'
-})
 
 // Keyboard shortcut handler
 function handleKeyPress(e: KeyboardEvent) {
@@ -246,21 +192,10 @@ function handleKeyPress(e: KeyboardEvent) {
   }
 }
 
-// Template selection handler
-function handleTemplateSelected(templateId: string) {
-  router.push(`/collection/${templateId}`)
-}
-
-function handleOpenInNewTab(templateId: string) {
-  // Open in new tab by navigating to the path
-  router.push(`/collection/${templateId}`)
-}
-
 // Tab closing logic
 function handleCloseTab(tabId: string) {
   const index = tabs.value.findIndex(t => t.id === tabId)
   if (index !== -1) {
-    const closingTab = tabs.value[index]
     tabs.value.splice(index, 1)
     
     // If closing active tab, go to another tab
@@ -293,35 +228,83 @@ const currentUrl = ref('app/home')
 // Enhanced navigation handler
 function handleNavigation(inputUrl: string) {
   try {
-    // Parse URLs with app/ prefix
-    const url = new URL(inputUrl.startsWith('http') ? inputUrl : `http://${inputUrl}`)
-    let path = url.pathname
-    
+    // Parse the input URL to get the path
+    const url = new URL(inputUrl.startsWith('http') ? inputUrl : `http://${inputUrl}`);
+    let path = url.pathname;
+
     // Handle app/ prefix
     if (path.startsWith('/app/')) {
-      path = path.replace('/app', '')
+      path = path.replace('/app', '');
     } else if (path.startsWith('app/')) {
-      path = '/' + path.slice(4)
+      path = '/' + path.slice(4);
     }
 
-    // Validate and navigate
-    if (isValidPath(path)) {
-      // Force reload if same path but different params
-      if (path === route.path) {
-        router.replace(path).then(() => {
-          window.location.reload();
-        });
+    // Validate path
+    if (!isValidPath(path)) {
+      toast({ title: 'Invalid URL', description: 'Please check the entered path' });
+      return;
+    }
+
+    // Check if any existing tab has this path
+    const existingTab = tabs.value.find(tab => tab.path === path);
+    if (existingTab && existingTab.id !== activeTabId.value) {
+      // Switch to the existing tab
+      activeTabId.value = existingTab.id;
+      router.push(path);
+      return;
+    }
+
+    // Otherwise, update the current active tab's path
+    const activeTab = tabs.value.find(t => t.id === activeTabId.value);
+    if (activeTab) {
+      // Update the active tab's details
+      activeTab.path = path;
+      if (path.startsWith('/collection/')) {
+        const collectionName = path.split('/')[2];
+        activeTab.title = collectionName;
+        activeTab.type = 'collection';
+        activeTab.collectionName = collectionName;
+      } else if (path === '/home') {
+        activeTab.title = 'Home';
+        activeTab.type = 'home';
       } else {
+        activeTab.title = path;
+      }
+      // Push the new path to the router
+      router.push(path);
+    }
+  } catch (error) {
+    // Handle invalid URL format
+    const cleanPath = inputUrl.replace(/^app\/?/, '');
+    if (isValidPath('/' + cleanPath)) {
+      const path = '/' + cleanPath;
+      // Check existing tabs
+      const existingTab = tabs.value.find(tab => tab.path === path);
+      if (existingTab) {
+        activeTabId.value = existingTab.id;
+        router.push(path);
+        return;
+      }
+
+      // Update current tab
+      const activeTab = tabs.value.find(t => t.id === activeTabId.value);
+      if (activeTab) {
+        activeTab.path = path;
+        if (path.startsWith('/collection/')) {
+          const collectionName = path.split('/')[2];
+          activeTab.title = collectionName;
+          activeTab.type = 'collection';
+          activeTab.collectionName = collectionName;
+        } else if (path === '/home') {
+          activeTab.title = 'Home';
+          activeTab.type = 'home';
+        } else {
+          activeTab.title = path;
+        }
         router.push(path);
       }
-    }
-  } catch {
-    // Handle simple path inputs
-    const cleanPath = inputUrl.replace(/^app\/?/, '')
-    if (isValidPath('/' + cleanPath)) {
-      router.push('/' + cleanPath)
     } else {
-      toast({ title: 'Invalid URL', description: 'Please check the entered path' })
+      toast({ title: 'Invalid URL', description: 'Please check the entered path' });
     }
   }
 }
@@ -337,8 +320,13 @@ function isValidPath(path: string): boolean {
   })
 }
 
+// Implementation of reload functionality
 function handleReload() {
-  // Your colleague will implement this
+  const activeTab = tabs.value.find(t => t.id === activeTabId.value)
+  if (activeTab) {
+    // Increment reload counter to force component re-render
+    activeTab.reloadCount++
+  }
 }
 
 function handleBack() {
@@ -377,13 +365,6 @@ function handleDocumentAction(_event: { type: string, collectionName: string }) 
   });
 }
 
-// Sidebar state
-provide('sidebarState', {
-  isOpen: isSidebarOpen,
-  toggle: () => isSidebarOpen.value = !isSidebarOpen.value,
-  close: () => isSidebarOpen.value = false
-})
-
 // Lifecycle hooks
 onMounted(() => {
   window.addEventListener('keydown', handleKeyPress)
@@ -394,7 +375,7 @@ onMounted(() => {
   currentUrl.value = `app${route.path}`
   
   // Make sure we're starting with just one tab
-  tabs.value = [{ id: 'home', title: 'Home', type: 'home', path: '/home' }]
+  tabs.value = [{ id: 'home', title: 'Home', type: 'home', path: '/home', reloadCount: 0 }]
   activeTabId.value = 'home'
 })
 
@@ -424,7 +405,6 @@ onUnmounted(() => {
     />
     
     <div class="flex flex-1">
-      <Sidebar :activeTab="activeTab" @selectTab="activeTab = $event" />
       
       <main class="flex-1 overflow-auto">
         <!-- Apply zoom styling to this wrapper div -->
@@ -452,70 +432,41 @@ onUnmounted(() => {
               ref="containerRef"
               class="flex h-full relative"
               :class="{ 'select-none': isDragging }">
-            <!-- Left Pane -->
-            <div class="h-full overflow-auto" :style="{ width: `${leftWidth}%` }">
-              <div class="h-full">
-                <!-- <MongoDBTableNavbar 
-                  v-if="tabs[0].type === 'collection'"
-                  :title="tabs[0].title"
-                  class="sticky top-0 z-50"
-                /> -->
-                <!-- <TemplateGalleryNavbar
-                  v-else
-                  :title="tabs[0].title"
-                  :showSearch="tabs[0].type === 'home'"
-                  class="sticky top-0 z-50"
-                /> -->
-                <!-- Create a dynamically imported component for the first tab -->
-                <component 
-                  :is="resolveComponent(tabs[0])" 
-                  v-bind="resolveProps(tabs[0])"
-                />
+              <!-- Left Pane -->
+              <div class="h-full overflow-auto" :style="{ width: `${leftWidth}%` }">
+                <div class="h-full">
+                  <!-- Create a dynamically imported component for the first tab with reload key -->
+                  <component 
+                    :is="resolveComponent(tabs[0])" 
+                    :key="`${tabs[0].id}-${tabs[0].reloadCount}`"
+                    v-bind="resolveProps(tabs[0])"
+                  />
+                </div>
+              </div>
+
+              <div class="w-1 bg-gray-200 hover:bg-blue-400 cursor-col-resize relative"
+                @mousedown="startResize"
+                :class="{ 'bg-blue-400': isDragging }"
+              ></div>
+
+              <!-- Right Pane -->
+              <div class="h-full overflow-auto" :style="{ width: `${100 - leftWidth}%` }">
+                <div class="h-full">
+                  <!-- Create a dynamically imported component for the second tab with reload key -->
+                  <component 
+                    :is="resolveComponent(tabs[1])" 
+                    :key="`${tabs[1].id}-${tabs[1].reloadCount}`"
+                    v-bind="resolveProps(tabs[1])"
+                  />
+                </div>
               </div>
             </div>
-
-            <div class="w-1 bg-gray-200 hover:bg-blue-400 cursor-col-resize relative"
-              @mousedown="startResize"
-              :class="{ 'bg-blue-400': isDragging }"
-            ></div>
-
-            <!-- Right Pane -->
-            <div class="h-full overflow-auto" :style="{ width: `${100 - leftWidth}%` }">
-              <div class="h-full">
-                <!-- <MongoDBTableNavbar 
-                  v-if="tabs[1].type === 'collection'"
-                  :title="tabs[1].title"
-                  class="sticky top-0 z-50"
-                /> -->
-                <!-- <TemplateGalleryNavbar
-                  v-else
-                  :title="tabs[1].title"
-                  :showSearch="tabs[1].type === 'home'"
-                  class="sticky top-0 z-50"
-                /> -->
-                <!-- Create a dynamically imported component for the second tab -->
-                <component 
-                  :is="resolveComponent(tabs[1])" 
-                  v-bind="resolveProps(tabs[1])"
-                />
-              </div>
-            </div>
-          </div>
 
             <div v-else>
-              <!-- <MongoDBTableNavbar 
-                v-if="activeTabType === 'collection'"
-                :title="navbarTitle" 
-                class="sticky top-0 z-50"
-              /> -->
-              <!-- <TemplateGalleryNavbar
-                v-else
-                :title="navbarTitle" 
-                :showSearch="showSearch"
-                class="fixed top-0 z-50"
-              /> -->
-              
-              <router-view :key="route.fullPath" />
+              <!-- Add reloadCount to the key to force re-rendering when reload happens -->
+              <router-view 
+                :key="activeTabId + '-' + (tabs.find(t => t.id === activeTabId)?.reloadCount || 0)"
+              />
             </div>
           </div>
         </div>

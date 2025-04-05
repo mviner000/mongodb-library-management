@@ -1,6 +1,6 @@
 <!-- src/components/TemplateGalleryNavbar.vue -->
 <script setup lang="ts">
-import { ref, inject, watch } from 'vue';
+import { ref, watch } from 'vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -16,12 +16,6 @@ const title = ref(props.title || 'Library Manager');
 // Track search visibility
 const showSearch = ref(props.showSearch !== true);
 
-// Get sidebar state from parent
-const sidebarState = inject('sidebarState') as {
-  isOpen: { value: boolean },
-  toggle: () => void,
-  close: () => void
-}
 
 // Watch for title prop changes
 watch(() => props.title, (newTitle) => {
@@ -42,7 +36,7 @@ watch(() => props.showSearch, (newValue) => {
   <header class="fixed top-0 z-50 flex items-center w-full h-14 px-2 border-b bg-white">
     <!-- Left section: Menu, logo and title -->
     <div class="flex items-center gap-2">
-      <Button variant="ghost" size="icon" class="text-gray-500" @click="sidebarState.toggle()">
+      <Button variant="ghost" size="icon" class="text-gray-500" >
         <!-- Hamburger Menu Icon -->
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="3" y1="12" x2="21" y2="12"></line>

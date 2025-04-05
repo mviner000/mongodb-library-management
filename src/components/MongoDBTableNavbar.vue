@@ -1,18 +1,11 @@
 <!-- src/components/MongoDBTableNavbar.vue -->
 <script setup lang="ts">
-import { inject } from 'vue';
 import { useRouter } from 'vue-router';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 
 defineProps<{
   title?: string;
 }>();
-
-const sidebarState = inject('sidebarState') as {
-  isOpen: { value: boolean },
-  toggle: () => void,
-  close: () => void
-}
 
 const router = useRouter();
 
@@ -26,7 +19,7 @@ const menuItems = [
     <!-- Left section: Menu and title -->
     <div class="flex items-center gap-2">
         
-      <Button variant="ghost" size="icon" class="text-gray-500" @click="sidebarState.toggle()">
+      <Button variant="ghost" size="icon" class="text-gray-500">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="3" y1="12" x2="21" y2="12"></line>
           <line x1="3" y1="6" x2="21" y2="6"></line>
