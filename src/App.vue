@@ -353,7 +353,7 @@ onUnmounted(() => {
                     v-else
                     :title="tabs[1].title"
                     :showSearch="tabs[1].type === 'default'"
-                    class="sticky top-0 z-50"
+                    class="fixed top-0 z-50"
                   />
                   <div v-for="(tab, index) in tabs" :key="tab.id">
                     <div v-if="index === 1" class="h-full">
@@ -398,7 +398,7 @@ onUnmounted(() => {
                 v-else
                 :title="navbarTitle" 
                 :showSearch="showSearch"
-                class="sticky top-0 z-50"
+                class="fixed top-0 z-50"
               />
               
               <div v-for="tab in tabs" :key="tab.id">

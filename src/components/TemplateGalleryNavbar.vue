@@ -1,4 +1,4 @@
-<!-- src/components/SheetsNavbar.vue -->
+<!-- src/components/TemplateGalleryNavbar.vue -->
 <script setup lang="ts">
 import { ref, inject, watch } from 'vue';
 import { Button } from '@/components/ui/button';
@@ -39,7 +39,7 @@ watch(() => props.showSearch, (newValue) => {
 </script>
 
 <template>
-  <header class="sticky top-0 z-50 flex items-center w-full h-14 px-2 border-b bg-white">
+  <header class="fixed top-0 z-50 flex items-center w-full h-14 px-2 border-b bg-white">
     <!-- Left section: Menu, logo and title -->
     <div class="flex items-center gap-2">
       <Button variant="ghost" size="icon" class="text-gray-500" @click="sidebarState.toggle()">
