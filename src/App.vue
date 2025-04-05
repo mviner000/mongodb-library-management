@@ -102,7 +102,10 @@ const tabManager = reactive({
     };
     tabs.value.push(newTab);
     activeTabId.value = newTabId;
-    router.push('/home');
+    
+    if (!isSplit.value) {
+      router.push('/home');
+    }
   },
 
   closeTab: (tabId: string) => {
@@ -184,20 +187,25 @@ function syncTabsWithRoute() {
 
 // Watch for route changes
 watch(() => route.path, () => {
+  // Skip route sync when in split view
+  if (isSplit.value) return;
+  
   // Don't call syncTabsWithRoute on initial load
   // Only sync when route actually changes from browser navigation
   if (route.fullPath !== '/home') {
     syncTabsWithRoute()
   }
-}, { immediate: false }) // Change immediate to false
+}, { immediate: false })
 
 // Watch route changes to update URL
 watch(() => route.path, (newPath) => {
-  currentUrl.value = `app${newPath}`
-  // Update active tab's path
-  const activeTab = tabs.value.find(t => t.id === activeTabId.value)
-  if (activeTab) {
-    activeTab.path = newPath
+  if (!isSplit.value) {
+    currentUrl.value = `app${newPath}`
+    // Update active tab's path
+    const activeTab = tabs.value.find(t => t.id === activeTabId.value)
+    if (activeTab) {
+      activeTab.path = newPath
+    }
   }
 })
 
@@ -212,6 +220,13 @@ function handleKeyPress(e: KeyboardEvent) {
     e.preventDefault()
     if (tabs.value.length === 2) {
       isSplit.value = !isSplit.value
+      
+      // Preserve both tab paths when splitting
+      if (isSplit.value) {
+        tabs.value.forEach(tab => {
+          if (!tab.path) tab.path = '/home';
+        });
+      }
     } else if (tabs.value.length > 2) {
       toast({
         title: 'Split Tab Error',
@@ -348,6 +363,73 @@ function handleNavigation(inputUrl: string) {
   }
 }
 
+// Tab-specific navigation handler
+function handleTabNavigation(inputUrl: string, tabId: string) {
+  const tab = tabs.value.find(t => t.id === tabId);
+  if (!tab) return;
+
+  try {
+    // Process URL to get the path
+    const url = new URL(inputUrl.startsWith('http') ? inputUrl : `http://${inputUrl}`);
+    let path = url.pathname;
+
+    // Handle app/ prefix
+    if (path.startsWith('/app/')) {
+      path = path.replace('/app', '');
+    } else if (path.startsWith('app/')) {
+      path = '/' + path.slice(4);
+    }
+
+    // Validate path
+    if (!isValidPath(path)) {
+      toast({ title: 'Invalid URL', description: 'Please check the entered path' });
+      return;
+    }
+
+    // Update tab properties
+    tab.path = path;
+    tab.reloadCount++; // Force re-render
+
+    // Update title and type based on path
+    if (path.startsWith('/collection/')) {
+      const collectionName = path.split('/')[2];
+      tab.title = collectionName;
+      tab.type = 'collection';
+      tab.collectionName = collectionName;
+    } else if (path === '/home') {
+      tab.title = 'Home';
+      tab.type = 'home';
+    } else {
+      tab.title = path;
+    }
+  } catch (error) {
+    // Handle invalid URL format
+    const cleanPath = inputUrl.replace(/^app\/?/, '');
+    if (isValidPath('/' + cleanPath)) {
+      const path = '/' + cleanPath;
+      
+      // Update tab properties
+      tab.path = path;
+      tab.reloadCount++; // Force re-render
+
+      // Update title and type based on path
+      if (path.startsWith('/collection/')) {
+        const collectionName = path.split('/')[2];
+        tab.title = collectionName;
+        tab.type = 'collection';
+        tab.collectionName = collectionName;
+      } else if (path === '/home') {
+        tab.title = 'Home';
+        tab.type = 'home';
+      } else {
+        tab.title = path;
+      }
+    } else {
+      toast({ title: 'Invalid URL', description: 'Please check the entered path' });
+    }
+  }
+}
+
 // Path validation helper
 function isValidPath(path: string): boolean {
   // Access routes from the router instance
@@ -365,6 +447,14 @@ function handleReload() {
   if (activeTab) {
     // Increment reload counter to force component re-render
     activeTab.reloadCount++
+  }
+}
+
+// Tab-specific reload handler
+function handleTabReload(tabId: string) {
+  const tab = tabs.value.find(t => t.id === tabId);
+  if (tab) {
+    tab.reloadCount++;
   }
 }
 
@@ -435,7 +525,9 @@ onUnmounted(() => {
       @add-tab="handleAddTab"
     />
 
+    <!-- Main BrowserNavbar (only when not in split view) -->
     <BrowserNavbar 
+      v-if="!isSplit"
       :current-url="currentUrl" 
       @navigate="handleNavigation"
       @reload="handleReload"
@@ -444,7 +536,6 @@ onUnmounted(() => {
     />
     
     <div class="flex flex-1">
-      
       <main class="flex-1 overflow-auto">
         <!-- Apply zoom styling to this wrapper div -->
         <div :style="zoomStyle">
@@ -473,6 +564,13 @@ onUnmounted(() => {
               :class="{ 'select-none': isDragging }">
               <!-- Left Pane -->
               <div class="h-full overflow-auto" :style="{ width: `${leftWidth}%` }">
+                <BrowserNavbar 
+                  :current-url="`app${tabs[0].path}`"
+                  @navigate="(url) => handleTabNavigation(url, tabs[0].id)"
+                  @reload="() => handleTabReload(tabs[0].id)"
+                  @back="handleBack"
+                  @forward="handleForward"
+                />
                 <div class="h-full">
                   <!-- Create a dynamically imported component for the first tab with reload key -->
                   <component 
@@ -490,6 +588,13 @@ onUnmounted(() => {
 
               <!-- Right Pane -->
               <div class="h-full overflow-auto" :style="{ width: `${100 - leftWidth}%` }">
+                <BrowserNavbar 
+                  :current-url="`app${tabs[1].path}`"
+                  @navigate="(url) => handleTabNavigation(url, tabs[1].id)"
+                  @reload="() => handleTabReload(tabs[1].id)"
+                  @back="handleBack"
+                  @forward="handleForward"
+                />
                 <div class="h-full">
                   <!-- Create a dynamically imported component for the second tab with reload key -->
                   <component 
