@@ -43,6 +43,7 @@ defineProps({
       title: string;
       type: string;
       path?: string;
+      reloadCount?: number;
     }>,
     required: true
   },

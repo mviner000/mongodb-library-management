@@ -1,6 +1,6 @@
 <!-- src/App.vue -->
 <script setup lang="ts">
-import { ref, onMounted, provide, onUnmounted, watch, markRaw } from 'vue'
+import { ref, onMounted, provide, onUnmounted, watch, markRaw, reactive } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useZoom } from '@/composables/useZoom'
 import { useRoute, useRouter } from 'vue-router'
@@ -68,7 +68,6 @@ const tabs = ref<Tab[]>([
   { id: 'home', title: 'Home', type: 'home', path: '/home', reloadCount: 0 }
 ])
 
-
 const activeTabId = ref<string>('home')
 const activeTab = ref<'home' | 'settings'>('home')
 const dataTableRef = ref<InstanceType<typeof MongoDBDataTable>[]>([]);
@@ -77,6 +76,47 @@ const connectionError = ref('')
 const isSplit = ref(false)
 const { toast } = useToast()
 
+// Tab management functionality
+const tabManager = reactive({
+  openNewTab: (tab: Tab) => {
+    // Check if a tab with this path already exists
+    const existingTab = tabs.value.find(t => t.path === tab.path);
+    if (existingTab) {
+      // If it exists, just activate it
+      activeTabId.value = existingTab.id;
+      router.push(existingTab.path);
+      return;
+    }
+    
+    // Add the new tab
+    tabs.value.push(tab);
+    
+    // Activate the new tab
+    activeTabId.value = tab.id;
+    
+    // Navigate to the tab's path
+    router.push(tab.path);
+  },
+  
+  // Method to add new tab with any content
+  addNewTab: () => {
+    const newTabId = `tab-${Date.now()}`;
+    const newTab: Tab = { 
+      id: newTabId, 
+      title: 'New Tab', 
+      type: 'home', 
+      path: '/home', 
+      reloadCount: 0 
+    };
+    
+    tabs.value.push(newTab);
+    activeTabId.value = newTabId;
+    router.push('/home');
+  }
+});
+
+// Provide the tab manager to child components
+provide('tabManager', tabManager);
 
 // Use the zoom composable
 const { zoomLevel, zoomIn, zoomOut, resetZoom, zoomStyle } = useZoom()
@@ -143,9 +183,6 @@ function syncTabsWithRoute() {
   }
 }
 
-
-
-
 // Watch for route changes
 watch(() => route.path, () => {
   // Don't call syncTabsWithRoute on initial load
@@ -154,7 +191,6 @@ watch(() => route.path, () => {
     syncTabsWithRoute()
   }
 }, { immediate: false }) // Change immediate to false
-
 
 // Watch route changes to update URL
 watch(() => route.path, (newPath) => {
@@ -166,12 +202,11 @@ watch(() => route.path, (newPath) => {
   }
 })
 
-
 // Keyboard shortcut handler
 function handleKeyPress(e: KeyboardEvent) {
   if (e.ctrlKey && e.key.toLowerCase() === 't') {
     e.preventDefault()
-    router.push('/hello')
+    tabManager.addNewTab();
   }
   
   if (e.ctrlKey && e.key === '\\') {
@@ -220,6 +255,11 @@ function handleTabClick(tabId: string) {
     activeTabId.value = tabId
     router.push(tab.path)
   }
+}
+
+// Handle adding a new tab from TabBar
+function handleAddTab() {
+  tabManager.addNewTab();
 }
 
 // browser nav functions
@@ -369,9 +409,7 @@ function handleDocumentAction(_event: { type: string, collectionName: string }) 
 onMounted(() => {
   window.addEventListener('keydown', handleKeyPress)
   autoConnectMongoDB()
-  // Remove or comment out this line:
-  // syncTabsWithRoute() // Initial sync
-
+  
   currentUrl.value = `app${route.path}`
   
   // Make sure we're starting with just one tab
@@ -394,6 +432,7 @@ onUnmounted(() => {
       :active-tab-id="activeTabId"
       @close-tab="handleCloseTab"
       @tab-click="handleTabClick"
+      @add-tab="handleAddTab"
     />
 
     <BrowserNavbar 

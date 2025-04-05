@@ -1,6 +1,6 @@
 <!-- src/components/TemplateGallery.vue -->
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, inject } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'vue-router';
 import { Button } from '@/components/ui/button';
@@ -18,11 +18,29 @@ interface Template {
   image: string;
 }
 
+// Define the TabManager interface to match the structure in App.vue
+interface Tab {
+  id: string;
+  title: string;
+  type: 'home' | 'collection' | 'hello';
+  path: string;
+  collectionName?: string;
+  reloadCount: number;
+}
+
+interface TabManager {
+  openNewTab: (tab: Tab) => void;
+  addNewTab: () => void;
+}
+
 // Will be populated with MongoDB collections
 const templates = ref<Template[]>([]);
 const isLoading = ref(true);
 const error = ref('');
 const router = useRouter();
+
+// Inject the global event bus or tab management function with proper typing
+const tabManager = inject<TabManager>('tabManager');
 
 // Fetch collections from MongoDB
 async function fetchCollections() {
@@ -68,7 +86,26 @@ const handleTemplateSelect = (templateId: string) => {
 
 // Handle opening template in new tab
 const handleOpenInNewTab = (templateId: string) => {
-  router.push(`/collection/${templateId}`);
+  // Use the emitter or tab manager to create a new tab
+  if (tabManager) {
+    // Create a new tab with unique ID and set its path to the collection route
+    const newTabId = `tab-${Date.now()}`;
+    const path = `/collection/${templateId}`;
+    const title = templateId.charAt(0).toUpperCase() + templateId.slice(1);
+    
+    // Tell the parent to create a new tab
+    tabManager.openNewTab({
+      id: newTabId,
+      title: title,
+      type: 'collection',
+      path: path,
+      collectionName: templateId,
+      reloadCount: 0
+    });
+  } else {
+    // Fallback: just navigate in current tab if tab manager isn't available
+    router.push(`/collection/${templateId}`);
+  }
 };
 
 onMounted(() => {
