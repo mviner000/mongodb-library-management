@@ -530,22 +530,6 @@ const onPageChange = (page: number) => {
 <template>
   <MongoDBTableNavbar class="sticky top-0 z-50" />
   <div class="border rounded-md p-4 w-full">
-    <div class="flex flex-col md:flex-row gap-4 mb-4">
-      <!-- Collection selector - show only when not passed as route param or prop -->
-      <div class="w-full md:w-1/4" v-if="!$route.params.name && !selectedCollection">
-        <Label for="collection-select">Collection</Label>
-        <Select v-model="collectionName">
-          <SelectTrigger class="mt-1">
-            <SelectValue placeholder="Select a collection" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem v-for="collection in collectionsList" :key="collection" :value="collection">
-              {{ collection }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-    </div>
     
     <div v-if="errorMessage" class="my-2 p-2 bg-red-100 text-red-700 rounded">
       {{ errorMessage }}

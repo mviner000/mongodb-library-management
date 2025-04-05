@@ -79,26 +79,18 @@ const { toast } = useToast()
 // Tab management functionality
 const tabManager = reactive({
   openNewTab: (tab: Tab) => {
-    // Check if a tab with this path already exists
     const existingTab = tabs.value.find(t => t.path === tab.path);
     if (existingTab) {
-      // If it exists, just activate it
       activeTabId.value = existingTab.id;
       router.push(existingTab.path);
       return;
     }
     
-    // Add the new tab
     tabs.value.push(tab);
-    
-    // Activate the new tab
     activeTabId.value = tab.id;
-    
-    // Navigate to the tab's path
     router.push(tab.path);
   },
-  
-  // Method to add new tab with any content
+
   addNewTab: () => {
     const newTabId = `tab-${Date.now()}`;
     const newTab: Tab = { 
@@ -108,11 +100,18 @@ const tabManager = reactive({
       path: '/home', 
       reloadCount: 0 
     };
-    
     tabs.value.push(newTab);
     activeTabId.value = newTabId;
     router.push('/home');
-  }
+  },
+
+  closeTab: (tabId: string) => {
+    handleCloseTab(tabId);
+  },
+
+  getActiveTabId: () => activeTabId.value,
+
+  getTab: (tabId: string) => tabs.value.find(t => t.id === tabId)
 });
 
 // Provide the tab manager to child components
@@ -404,6 +403,7 @@ function handleDocumentAction(_event: { type: string, collectionName: string }) 
     comp.fetchCollections();
   });
 }
+
 
 // Lifecycle hooks
 onMounted(() => {

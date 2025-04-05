@@ -2,12 +2,69 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';  // Make sure to import Button
+import { inject } from 'vue'; // Add this import
+
+// Define the Tab interface
+interface Tab {
+  id: string;
+  title: string;
+  type: 'home' | 'collection' | 'hello';
+  path: string;
+  collectionName?: string;
+  reloadCount: number;
+}
+
+// Define the TabManager interface
+interface TabManager {
+  openNewTab: (tab: Tab) => void;
+  addNewTab: () => void;
+  closeTab: (tabId: string) => void;
+  getActiveTabId: () => string;
+  getTab: (tabId: string) => Tab | undefined;
+}
 
 defineProps<{
   title?: string;
 }>();
 
 const router = useRouter();
+
+// Get the tab manager from the parent component with proper typing
+const tabManager = inject<TabManager>('tabManager');
+
+const navigateToHome = () => {
+  if (tabManager) {
+    const currentTabId = tabManager.getActiveTabId();
+    const currentTab = tabManager.getTab(currentTabId);
+    
+    // If the current tab is already a home tab, just open a new home tab
+    if (currentTab?.type === 'home') {
+      const newTabId = `tab-${Date.now()}`;
+      tabManager.openNewTab({
+        id: newTabId,
+        title: 'Home',
+        type: 'home',
+        path: '/home',
+        reloadCount: 0
+      });
+      return; // Do not close the current tab
+    }
+    
+    // Proceed to open a new home tab and close the current one
+    const newTabId = `tab-${Date.now()}`;
+    tabManager.openNewTab({
+      id: newTabId,
+      title: 'Home',
+      type: 'home',
+      path: '/home',
+      reloadCount: 0
+    });
+    tabManager.closeTab(currentTabId);
+  } else {
+    router.replace('/home');
+  }
+};
 
 const menuItems = [
   'File', 'Edit', 'View', 'Insert', 'Format', 'Data', 'Tools', 'Extensions', 'Help'
@@ -31,7 +88,7 @@ const menuItems = [
       <Button 
           variant="ghost" 
           size="sm" 
-          @click="router.push('/home')"
+          @click="navigateToHome"
           class="text-gray-500 hover:text-gray-800"
         >
         Home
