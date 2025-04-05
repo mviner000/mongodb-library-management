@@ -1,4 +1,4 @@
-<!-- src/components/ApiServerStatus.vue -->
+<!-- src/components/BrowserNavbar.vue -->
 <script setup lang="ts">
 import { inject, ref, watch } from 'vue'
 import { useZoom } from '@/composables/useZoom'
@@ -19,13 +19,15 @@ const { zoomLevel, zoomIn, zoomOut, resetZoom } = inject('zoom')! as ReturnType<
 // Update input when currentUrl prop changes
 watch(() => props.currentUrl, (newUrl) => {
   if (newUrl) {
-    urlInput.value = newUrl
+    const cleanUrl = newUrl.replace(/^app\/?/, '')
+    urlInput.value = `app/${cleanUrl}`.replace(/\/$/, '')
   }
 }, { immediate: true })
 
 // Handle URL submission
 function handleSubmit() {
-  emit('navigate', urlInput.value)
+  const cleanUrl = urlInput.value.replace(/^(app\/|https?:\/\/)/, '');
+  emit('navigate', `app/${cleanUrl}`);
 }
 
 // Handle navigation actions

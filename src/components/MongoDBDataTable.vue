@@ -40,6 +40,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/components/ui/toast/use-toast';
 import { PlusCircledIcon } from '@radix-icons/vue';
+import MongoDBTableNavbar from './MongoDBTableNavbar.vue';
 
 const { toast } = useToast();
 const route = useRoute();
@@ -527,8 +528,8 @@ const onPageChange = (page: number) => {
 // We already have a watch on collectionName that calls fetchDocuments
 </script>
 <template>
+  <MongoDBTableNavbar class="sticky top-0 z-50" />
   <div class="border rounded-md p-4 w-full">
-    
     <div class="flex flex-col md:flex-row gap-4 mb-4">
       <!-- Collection selector - show only when not passed as route param or prop -->
       <div class="w-full md:w-1/4" v-if="!$route.params.name && !selectedCollection">

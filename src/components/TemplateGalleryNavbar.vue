@@ -14,7 +14,7 @@ const props = defineProps<{
 const title = ref(props.title || 'Library Manager');
 
 // Track search visibility
-const showSearch = ref(props.showSearch !== false);
+const showSearch = ref(props.showSearch !== true);
 
 // Get sidebar state from parent
 const sidebarState = inject('sidebarState') as {

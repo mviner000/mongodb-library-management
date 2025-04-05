@@ -22,6 +22,7 @@ import HelloWorldTab from './components/HelloWorldTab.vue'
 
 const route = useRoute()
 const router = useRouter()
+const routes = router.getRoutes()
 
 const componentCache = ref(new Map())
 
@@ -84,6 +85,7 @@ const isSidebarOpen = ref(false)
 const isSplit = ref(false)
 const { toast } = useToast()
 
+
 // Use the zoom composable
 const { zoomLevel, zoomIn, zoomOut, resetZoom, zoomStyle } = useZoom()
 
@@ -125,6 +127,14 @@ function syncTabsWithRoute() {
   const existingTab = tabs.value.find(tab => tab.path === currentPath);
   
   if (existingTab) {
+    // Update existing tab's title if collection name changed
+    if (currentPath.startsWith('/collection/') && existingTab.type === 'collection') {
+      const newCollectionName = currentPath.split('/')[2];
+      existingTab.title = newCollectionName;
+      existingTab.collectionName = newCollectionName;
+    }
+    
+    // Activate existing tab
     activeTabId.value = existingTab.id;
   } else {
     const activeTabIndex = tabs.value.findIndex(t => t.id === activeTabId.value);
@@ -195,6 +205,16 @@ watch(() => route.path, () => {
 // Existing computed properties
 const navbarTitle = computed(() => {
   return tabs.value.find(t => t.id === activeTabId.value)?.title || 'Library Manager'
+})
+
+// Watch route changes to update URL
+watch(() => route.path, (newPath) => {
+  currentUrl.value = `app${newPath}`
+  // Update active tab's path
+  const activeTab = tabs.value.find(t => t.id === activeTabId.value)
+  if (activeTab) {
+    activeTab.path = newPath
+  }
 })
 
 const showSearch = computed(() => {
@@ -268,11 +288,53 @@ function handleTabClick(tabId: string) {
 }
 
 // browser nav functions
-const currentUrl = ref('')
+const currentUrl = ref('app/home')
 
-// Add these empty function stubs that your colleague can implement later
-function handleNavigation(_url: string) {
-  // Your colleague will implement this
+// Enhanced navigation handler
+function handleNavigation(inputUrl: string) {
+  try {
+    // Parse URLs with app/ prefix
+    const url = new URL(inputUrl.startsWith('http') ? inputUrl : `http://${inputUrl}`)
+    let path = url.pathname
+    
+    // Handle app/ prefix
+    if (path.startsWith('/app/')) {
+      path = path.replace('/app', '')
+    } else if (path.startsWith('app/')) {
+      path = '/' + path.slice(4)
+    }
+
+    // Validate and navigate
+    if (isValidPath(path)) {
+      // Force reload if same path but different params
+      if (path === route.path) {
+        router.replace(path).then(() => {
+          window.location.reload();
+        });
+      } else {
+        router.push(path);
+      }
+    }
+  } catch {
+    // Handle simple path inputs
+    const cleanPath = inputUrl.replace(/^app\/?/, '')
+    if (isValidPath('/' + cleanPath)) {
+      router.push('/' + cleanPath)
+    } else {
+      toast({ title: 'Invalid URL', description: 'Please check the entered path' })
+    }
+  }
+}
+
+// Path validation helper
+function isValidPath(path: string): boolean {
+  // Access routes from the router instance
+  return router.getRoutes().some(route => {
+    if (route.path === '*') return false
+    const routePath = route.path.replace(/\/:.*?$/g, '/[^/]+')
+    const regex = new RegExp(`^${routePath}$`)
+    return regex.test(path)
+  })
 }
 
 function handleReload() {
@@ -328,6 +390,8 @@ onMounted(() => {
   autoConnectMongoDB()
   // Remove or comment out this line:
   // syncTabsWithRoute() // Initial sync
+
+  currentUrl.value = `app${route.path}`
   
   // Make sure we're starting with just one tab
   tabs.value = [{ id: 'home', title: 'Home', type: 'home', path: '/home' }]
@@ -391,17 +455,17 @@ onUnmounted(() => {
             <!-- Left Pane -->
             <div class="h-full overflow-auto" :style="{ width: `${leftWidth}%` }">
               <div class="h-full">
-                <MongoDBTableNavbar 
+                <!-- <MongoDBTableNavbar 
                   v-if="tabs[0].type === 'collection'"
                   :title="tabs[0].title"
                   class="sticky top-0 z-50"
-                />
-                <TemplateGalleryNavbar
+                /> -->
+                <!-- <TemplateGalleryNavbar
                   v-else
                   :title="tabs[0].title"
                   :showSearch="tabs[0].type === 'home'"
                   class="sticky top-0 z-50"
-                />
+                /> -->
                 <!-- Create a dynamically imported component for the first tab -->
                 <component 
                   :is="resolveComponent(tabs[0])" 
@@ -418,17 +482,17 @@ onUnmounted(() => {
             <!-- Right Pane -->
             <div class="h-full overflow-auto" :style="{ width: `${100 - leftWidth}%` }">
               <div class="h-full">
-                <MongoDBTableNavbar 
+                <!-- <MongoDBTableNavbar 
                   v-if="tabs[1].type === 'collection'"
                   :title="tabs[1].title"
                   class="sticky top-0 z-50"
-                />
-                <TemplateGalleryNavbar
+                /> -->
+                <!-- <TemplateGalleryNavbar
                   v-else
                   :title="tabs[1].title"
                   :showSearch="tabs[1].type === 'home'"
                   class="sticky top-0 z-50"
-                />
+                /> -->
                 <!-- Create a dynamically imported component for the second tab -->
                 <component 
                   :is="resolveComponent(tabs[1])" 
@@ -439,19 +503,19 @@ onUnmounted(() => {
           </div>
 
             <div v-else>
-              <MongoDBTableNavbar 
+              <!-- <MongoDBTableNavbar 
                 v-if="activeTabType === 'collection'"
                 :title="navbarTitle" 
                 class="sticky top-0 z-50"
-              />
-              <TemplateGalleryNavbar
+              /> -->
+              <!-- <TemplateGalleryNavbar
                 v-else
                 :title="navbarTitle" 
                 :showSearch="showSearch"
                 class="fixed top-0 z-50"
-              />
+              /> -->
               
-              <router-view />
+              <router-view :key="route.fullPath" />
             </div>
           </div>
         </div>
