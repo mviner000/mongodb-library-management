@@ -1,6 +1,6 @@
 <!-- src/components/MongoDBDataTable.vue -->
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, Ref, inject } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
 import { ReloadIcon, TrashIcon } from '@radix-icons/vue';
@@ -525,10 +525,15 @@ const onPageChange = (page: number) => {
   currentPage.value = page;
 };
 
+const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
+
 // We already have a watch on collectionName that calls fetchDocuments
 </script>
 <template>
-  <MongoDBTableNavbar class="sticky top-0 z-50" />
+  <MongoDBTableNavbar 
+    :isSplitActive="isSplit" 
+    class="sticky top-0 z-50" 
+  />
   <div class="border rounded-md p-4 w-full">
     
     <div v-if="errorMessage" class="my-2 p-2 bg-red-100 text-red-700 rounded">

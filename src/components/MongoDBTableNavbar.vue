@@ -1,9 +1,9 @@
 <!-- src/components/MongoDBTableNavbar.vue -->
 <script setup lang="ts">
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { Button } from '@/components/ui/button';  // Make sure to import Button
-import { inject } from 'vue'; // Add this import
+import { Button } from '@/components/ui/button';
+import { computed, inject, ref, watch } from 'vue'; // Add watch
 
 // Define the Tab interface
 interface Tab {
@@ -15,6 +15,14 @@ interface Tab {
   reloadCount: number;
 }
 
+// Accept both direct prop and route param
+const props = defineProps<{
+  selectedCollection?: string;
+  name?: string; // From route params
+  title?: string;
+  isSplitActive?: boolean; // Prop to determine if split mode is active
+}>();
+
 // Define the TabManager interface
 interface TabManager {
   openNewTab: (tab: Tab) => void;
@@ -24,14 +32,28 @@ interface TabManager {
   getTab: (tabId: string) => Tab | undefined;
 }
 
-defineProps<{
-  title?: string;
-}>();
-
 const router = useRouter();
+const route = useRoute(); // Add this to access route params
 
 // Get the tab manager from the parent component with proper typing
 const tabManager = inject<TabManager>('tabManager');
+
+// Use route param or direct prop, with fallback to 'users'
+const collectionName = ref(props.name || props.selectedCollection || 'users');
+
+// Watch for route changes to update collection name
+watch(() => route.params.name, (newVal) => {
+  if (newVal && newVal !== collectionName.value) {
+    collectionName.value = newVal as string;
+  }
+}, { immediate: true });
+
+// Watch for prop changes from parent
+watch(() => props.selectedCollection, (newVal) => {
+  if (newVal && newVal !== collectionName.value) {
+    collectionName.value = newVal;
+  }
+});
 
 const navigateToHome = () => {
   if (tabManager) {
@@ -69,6 +91,13 @@ const navigateToHome = () => {
 const menuItems = [
   'File', 'Edit', 'View', 'Insert', 'Format', 'Data', 'Tools', 'Extensions', 'Help'
 ];
+
+// Expose setCollection method to parent components
+defineExpose({
+  setCollection: (name: string) => {
+    collectionName.value = name;
+  }
+});
 </script>
 
 <template>
@@ -84,8 +113,9 @@ const menuItems = [
         </svg>
       </Button>
 
-
+      <!-- Only show Home button when not in split mode -->
       <Button 
+          v-if="!isSplitActive"
           variant="ghost" 
           size="sm" 
           @click="navigateToHome"
@@ -93,6 +123,9 @@ const menuItems = [
         >
         Home
       </Button>
+      {{ collectionName }}
+
+      
       
       <div class="flex items-center gap-2">
         <span class="font-medium text-lg text-gray-800">{{ title }}</span>

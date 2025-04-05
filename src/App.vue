@@ -125,6 +125,8 @@ const { zoomLevel, zoomIn, zoomOut, resetZoom, zoomStyle } = useZoom()
 
 provide('zoom', { zoomLevel, zoomIn, zoomOut, resetZoom, zoomStyle })
 
+provide('isSplit', isSplit);
+
 // Split pane resizing
 const leftWidth = ref(50)
 const isDragging = ref(false)
