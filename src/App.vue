@@ -61,7 +61,7 @@ interface Tab {
   content?: string
   collectionName?: string
   path: string
-  reloadCount: number // Added reload counter
+  reloadCount: number
 }
 
 const tabs = ref<Tab[]>([
@@ -247,6 +247,11 @@ function handleCloseTab(tabId: string) {
   if (index !== -1) {
     tabs.value.splice(index, 1)
     
+    // Exit split view if less than 2 tabs remain
+    if (tabs.value.length < 2) {
+      isSplit.value = false
+    }
+    
     // If closing active tab, go to another tab
     if (activeTabId.value === tabId) {
       const newActiveTab = tabs.value[tabs.value.length - 1]
@@ -267,7 +272,10 @@ function handleTabClick(tabId: string) {
   const tab = tabs.value.find(t => t.id === tabId)
   if (tab) {
     activeTabId.value = tabId
-    router.push(tab.path)
+    // Only navigate if not in split view
+    if (!isSplit.value) {
+      router.push(tab.path)
+    }
   }
 }
 
@@ -494,7 +502,6 @@ function handleDocumentAction(_event: { type: string, collectionName: string }) 
   });
 }
 
-
 // Lifecycle hooks
 onMounted(() => {
   window.addEventListener('keydown', handleKeyPress)
@@ -517,7 +524,9 @@ onUnmounted(() => {
   <div class="flex flex-col min-h-screen">
     <ApiServerStatus />
 
+    <!-- Top-level TabBar (non-split view) -->
     <TabBar 
+      v-if="!isSplit"
       :tabs="tabs"
       :active-tab-id="activeTabId"
       @close-tab="handleCloseTab"
@@ -558,12 +567,25 @@ onUnmounted(() => {
 
           <!-- Use router-view for tab content -->
           <div v-else>
+            <!-- Split View Panes -->
             <div v-if="isSplit && tabs.length === 2" 
               ref="containerRef"
               class="flex h-full relative"
               :class="{ 'select-none': isDragging }">
+              
               <!-- Left Pane -->
-              <div class="h-full overflow-auto" :style="{ width: `${leftWidth}%` }">
+              <div 
+                class="h-full overflow-auto" 
+                :style="{ width: `${leftWidth}%` }"
+                @click="activeTabId = tabs[0].id"
+              >
+                <TabBar 
+                  :tabs="[tabs[0]]"
+                  :active-tab-id="activeTabId"
+                  :show-add-button="false"
+                  @close-tab="handleCloseTab"
+                  @tab-click="handleTabClick"
+                />
                 <BrowserNavbar 
                   :current-url="`app${tabs[0].path}`"
                   @navigate="(url) => handleTabNavigation(url, tabs[0].id)"
@@ -572,7 +594,6 @@ onUnmounted(() => {
                   @forward="handleForward"
                 />
                 <div class="h-full">
-                  <!-- Create a dynamically imported component for the first tab with reload key -->
                   <component 
                     :is="resolveComponent(tabs[0])" 
                     :key="`${tabs[0].id}-${tabs[0].reloadCount}`"
@@ -581,13 +602,25 @@ onUnmounted(() => {
                 </div>
               </div>
 
+              <!-- Resize Handle -->
               <div class="w-1 bg-gray-200 hover:bg-blue-400 cursor-col-resize relative"
                 @mousedown="startResize"
                 :class="{ 'bg-blue-400': isDragging }"
               ></div>
 
               <!-- Right Pane -->
-              <div class="h-full overflow-auto" :style="{ width: `${100 - leftWidth}%` }">
+              <div 
+                class="h-full overflow-auto" 
+                :style="{ width: `${100 - leftWidth}%` }"
+                @click="activeTabId = tabs[1].id"
+              >
+                <TabBar 
+                  :tabs="[tabs[1]]"
+                  :active-tab-id="activeTabId"
+                  :show-add-button="false"
+                  @close-tab="handleCloseTab"
+                  @tab-click="handleTabClick"
+                />
                 <BrowserNavbar 
                   :current-url="`app${tabs[1].path}`"
                   @navigate="(url) => handleTabNavigation(url, tabs[1].id)"
@@ -596,7 +629,6 @@ onUnmounted(() => {
                   @forward="handleForward"
                 />
                 <div class="h-full">
-                  <!-- Create a dynamically imported component for the second tab with reload key -->
                   <component 
                     :is="resolveComponent(tabs[1])" 
                     :key="`${tabs[1].id}-${tabs[1].reloadCount}`"

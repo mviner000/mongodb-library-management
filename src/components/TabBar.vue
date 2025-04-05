@@ -2,17 +2,17 @@
 <template>
   <div class="flex border-b">
     <div class="flex-1 flex overflow-x-auto">
-      <div 
-        v-for="tab in tabs" 
-        :key="tab.id" 
+      <div
+        v-for="tab in tabs"
+        :key="tab.id"
         class="flex items-center px-4 py-2 border-r cursor-pointer whitespace-nowrap"
         :class="{ 'bg-blue-50': tab.id === activeTabId }"
         @click="$emit('tab-click', tab.id)"
       >
         {{ tab.title }}
-        <button 
+        <button
           v-if="tabs.length > 1"
-          class="ml-2 text-gray-500 hover:text-gray-700" 
+          class="ml-2 text-gray-500 hover:text-gray-700"
           @click.stop="$emit('close-tab', tab.id)"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -21,9 +21,9 @@
         </button>
       </div>
     </div>
-    <div class="flex items-center px-2 border-l">
-      <button 
-        class="p-1 text-gray-500 hover:text-gray-700" 
+    <div v-if="showAddButton" class="flex items-center px-2 border-l">
+      <button
+        class="p-1 text-gray-500 hover:text-gray-700"
         @click="$emit('add-tab')"
         title="New Tab (Ctrl+T)"
       >
@@ -50,6 +50,10 @@ defineProps({
   activeTabId: {
     type: String,
     required: true
+  },
+  showAddButton: {
+    type: Boolean,
+    default: true
   }
 })
 
