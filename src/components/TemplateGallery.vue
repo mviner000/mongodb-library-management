@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { useRouter } from 'vue-router';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
@@ -20,16 +21,7 @@ interface Template {
 const templates = ref<Template[]>([]);
 const isLoading = ref(true);
 const error = ref('');
-
-const emit = defineEmits(['templateSelected', 'openInNewTab']);
-
-const handleTemplateSelect = (templateId: string) => {
-  emit('templateSelected', templateId);
-};
-
-const handleOpenInNewTab = (templateId: string) => {
-  emit('openInNewTab', templateId);
-};
+const router = useRouter();
 
 // Fetch collections from MongoDB
 async function fetchCollections() {
@@ -67,6 +59,16 @@ async function fetchCollections() {
     isLoading.value = false;
   }
 }
+
+// Handle template selection - navigate to collection route
+const handleTemplateSelect = (templateId: string) => {
+  router.push(`/collection/${templateId}`);
+};
+
+// Handle opening template in new tab
+const handleOpenInNewTab = (templateId: string) => {
+  router.push(`/collection/${templateId}`);
+};
 
 onMounted(() => {
   fetchCollections();

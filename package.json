@@ -22,7 +22,8 @@
     "reka-ui": "^2.2.0",
     "tailwind-merge": "^3.0.2",
     "tailwindcss-animate": "^1.0.7",
-    "vue": "^3.5.13"
+    "vue": "^3.5.13",
+    "vue-router": "4"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

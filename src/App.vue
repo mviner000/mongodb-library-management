@@ -1,42 +1,45 @@
-<!-- src/components/App.vue -->
+<!-- src/App.vue -->
 <script setup lang="ts">
 import { ref, onMounted, provide, computed, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useZoom } from '@/composables/useZoom'
+import { useRoute, useRouter } from 'vue-router'
 
 import Toaster from '@/components/ui/toast/Toaster.vue'
 import TemplateGalleryNavbar from '@/components/TemplateGalleryNavbar.vue'
 import Sidebar from '@/components/Sidebar.vue'
 import TabBar from '@/components/TabBar.vue'
-import TemplateGallery from '@/components/TemplateGallery.vue'
 import SudoPasswordModal from '@/components/SudoPasswordModal.vue'
 import MongoDBStatus from '@/components/MongoDBStatus.vue'
 import MongoDBOperations from '@/components/MongoDBOperations.vue'
 import MongoDBDataTable from '@/components/MongoDBDataTable.vue'
 import BrowserNavbar from '@/components/BrowserNavbar.vue'
 import MongoDBTableNavbar from '@/components/MongoDBTableNavbar.vue'
-import HelloWorldTab from '@/components/HelloWorldTab.vue'
 import { useToast } from './components/ui/toast'
 import ApiServerStatus from './components/ApiServerStatus.vue'
+
+const route = useRoute()
+const router = useRouter()
 
 interface Tab {
   id: string
   title: string
-  type: 'default' | 'collection' | 'hello'
+  type: 'home' | 'collection' | 'hello'
   content?: string
   collectionName?: string
+  path: string
 }
 
 const tabs = ref<Tab[]>([
-  { id: 'default', title: 'untitled', type: 'default' }
+  { id: 'home', title: 'Home', type: 'home', path: '/home' }
 ])
 
 const activeTabType = computed(() => {
   const activeTab = tabs.value.find(t => t.id === activeTabId.value)
-  return activeTab?.type || 'default'
+  return activeTab?.type || 'home'
 })
 
-const activeTabId = ref<string>('default')
+const activeTabId = ref<string>('home')
 const activeTab = ref<'home' | 'settings'>('home')
 const dataTableRef = ref<InstanceType<typeof MongoDBDataTable>[]>([]);
 const isConnecting = ref(false)
@@ -79,27 +82,69 @@ watch(isSplit, (newVal) => {
   if (newVal) leftWidth.value = 50
 })
 
+// Router integration
+function syncTabsWithRoute() {
+  const currentPath = route.path
+  
+  // Check if tab for current route already exists
+  const existingTab = tabs.value.find(tab => tab.path === currentPath)
+  
+  if (existingTab) {
+    // If exists, just activate it
+    activeTabId.value = existingTab.id
+  } else {
+    // Create a new tab based on the route
+    let newTab: Tab
+    
+    if (currentPath === '/home') {
+      newTab = { id: 'home', title: 'Home', type: 'home', path: '/home' }
+    } else if (currentPath.startsWith('/collection/')) {
+      const collectionName = route.params.name as string
+      newTab = { 
+        id: `col-${Date.now()}`, 
+        title: collectionName, 
+        type: 'collection', 
+        collectionName, 
+        path: currentPath 
+      }
+    } else if (currentPath === '/hello') {
+      newTab = { 
+        id: `hello-${Date.now()}`, 
+        title: 'Hello World', 
+        type: 'hello', 
+        content: 'Hello World',
+        path: '/hello' 
+      }
+    } else {
+      // Default fallback
+      newTab = { id: 'home', title: 'Home', type: 'home', path: '/home' }
+      router.push('/home')
+    }
+    
+    tabs.value.push(newTab)
+    activeTabId.value = newTab.id
+  }
+}
+
+// Watch for route changes
+watch(() => route.path, () => {
+  syncTabsWithRoute()
+}, { immediate: true })
+
 // Existing computed properties
 const navbarTitle = computed(() => {
   return tabs.value.find(t => t.id === activeTabId.value)?.title || 'Library Manager'
 })
 
 const showSearch = computed(() => {
-  return tabs.value.find(t => t.id === activeTabId.value)?.type === 'default'
+  return tabs.value.find(t => t.id === activeTabId.value)?.type === 'home'
 })
 
 // Keyboard shortcut handler
 function handleKeyPress(e: KeyboardEvent) {
   if (e.ctrlKey && e.key.toLowerCase() === 't') {
     e.preventDefault()
-    const newTabId = `tab-${Date.now()}`
-    tabs.value.push({
-      id: newTabId,
-      title: 'New Tab',
-      type: 'hello',
-      content: 'Hello World'
-    })
-    activeTabId.value = newTabId
+    router.push('/hello')
   }
   
   if (e.ctrlKey && e.key === '\\') {
@@ -122,55 +167,42 @@ function handleKeyPress(e: KeyboardEvent) {
 
 // Template selection handler
 function handleTemplateSelected(templateId: string) {
-  // Open in the current tab if it's the default tab
-  const currentTab = tabs.value.find(t => t.id === activeTabId.value);
-  
-  if (currentTab?.type === 'default') {
-    // Update the current tab instead of creating a new one
-    const updatedTabs = tabs.value.map(tab => {
-      if (tab.id === activeTabId.value) {
-        return {
-          ...tab,
-          title: templateId,
-          type: 'collection' as const, // Use 'as const' to enforce literal type
-          collectionName: templateId
-        };
-      }
-      return tab;
-    });
-    
-    // Explicitly type the assignment to satisfy TypeScript
-    tabs.value = updatedTabs as Tab[];
-  } else {
-    // Create a new tab if we're not on the default tab
-    createCollectionTab(templateId);
-  }
+  router.push(`/collection/${templateId}`)
 }
 
 function handleOpenInNewTab(templateId: string) {
-  // Always create a new tab for context menu "open in new tab"
-  createCollectionTab(templateId);
-}
-
-function createCollectionTab(templateId: string) {
-  const newTabId = `col-${Date.now()}`;
-  tabs.value.push({
-    id: newTabId,
-    title: templateId,
-    type: 'collection',
-    collectionName: templateId
-  });
-  activeTabId.value = newTabId;
+  // Open in new tab by navigating to the path
+  router.push(`/collection/${templateId}`)
 }
 
 // Tab closing logic
 function handleCloseTab(tabId: string) {
   const index = tabs.value.findIndex(t => t.id === tabId)
   if (index !== -1) {
+    const closingTab = tabs.value[index]
     tabs.value.splice(index, 1)
+    
+    // If closing active tab, go to another tab
     if (activeTabId.value === tabId) {
-      activeTabId.value = tabs.value[tabs.value.length - 1]?.id || 'default'
+      const newActiveTab = tabs.value[tabs.value.length - 1]
+      activeTabId.value = newActiveTab?.id || 'home'
+      
+      // Navigate to the new active tab's path
+      if (newActiveTab) {
+        router.push(newActiveTab.path)
+      } else {
+        router.push('/home')
+      }
     }
+  }
+}
+
+// Tab clicking handler
+function handleTabClick(tabId: string) {
+  const tab = tabs.value.find(t => t.id === tabId)
+  if (tab) {
+    activeTabId.value = tabId
+    router.push(tab.path)
   }
 }
 
@@ -187,11 +219,11 @@ function handleReload() {
 }
 
 function handleBack() {
-  // Your colleague will implement this
+  router.back()
 }
 
 function handleForward() {
-  // Your colleague will implement this
+  router.forward()
 }
 
 // MongoDB connection logic
@@ -233,6 +265,7 @@ provide('sidebarState', {
 onMounted(() => {
   window.addEventListener('keydown', handleKeyPress)
   autoConnectMongoDB()
+  syncTabsWithRoute() // Initial sync
 })
 
 onUnmounted(() => {
@@ -243,14 +276,13 @@ onUnmounted(() => {
 <template>
   <Toaster />
   <div class="flex flex-col min-h-screen">
-
     <ApiServerStatus />
 
     <TabBar 
       :tabs="tabs"
       :active-tab-id="activeTabId"
       @close-tab="handleCloseTab"
-      @tab-click="activeTabId = $event"
+      @tab-click="handleTabClick"
     />
 
     <BrowserNavbar 
@@ -284,7 +316,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- Only show tab content when not in settings -->
+          <!-- Use router-view for tab content -->
           <div v-else>
             <div v-if="isSplit && tabs.length === 2" 
                 ref="containerRef"
@@ -301,38 +333,10 @@ onUnmounted(() => {
                   <TemplateGalleryNavbar
                     v-else
                     :title="tabs[0].title"
-                    :showSearch="tabs[0].type === 'default'"
+                    :showSearch="tabs[0].type === 'home'"
                     class="sticky top-0 z-50"
                   />
-                  <div v-for="(tab, index) in tabs" :key="tab.id">
-                    <div v-if="index === 0" class="h-full">
-                      <HelloWorldTab 
-                        v-if="tab.type === 'hello'" 
-                        :content="tab.content" 
-                      />
-                      <template v-else-if="tab.type === 'collection'">
-                        <div class="p-2">
-                          <Button variant="ghost" size="sm" class="mb-2" @click="handleCloseTab(tab.id)">
-                            <span class="flex items-center">
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-                                <path d="M19 12H5M12 19l-7-7 7-7"></path>
-                              </svg>
-                              Back to Collections
-                            </span>
-                          </Button>
-                        </div>
-                        <MongoDBDataTable 
-                          ref="dataTableRef" 
-                          :selected-collection="tab.collectionName"
-                        />
-                      </template>
-                      <TemplateGallery 
-                        v-else-if="tab.type === 'default'" 
-                        @templateSelected="handleTemplateSelected"
-                        @openInNewTab="handleOpenInNewTab"
-                      />
-                    </div>
-                  </div>
+                  <router-view v-if="tabs[0].path === route.path" />
                 </div>
               </div>
 
@@ -352,38 +356,10 @@ onUnmounted(() => {
                   <TemplateGalleryNavbar
                     v-else
                     :title="tabs[1].title"
-                    :showSearch="tabs[1].type === 'default'"
+                    :showSearch="tabs[1].type === 'home'"
                     class="fixed top-0 z-50"
                   />
-                  <div v-for="(tab, index) in tabs" :key="tab.id">
-                    <div v-if="index === 1" class="h-full">
-                      <HelloWorldTab 
-                        v-if="tab.type === 'hello'" 
-                        :content="tab.content" 
-                      />
-                      <template v-else-if="tab.type === 'collection'">
-                        <div class="p-2">
-                          <Button variant="ghost" size="sm" class="mb-2" @click="handleCloseTab(tab.id)">
-                            <span class="flex items-center">
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-                                <path d="M19 12H5M12 19l-7-7 7-7"></path>
-                              </svg>
-                              Back to Collections
-                            </span>
-                          </Button>
-                        </div>
-                        <MongoDBDataTable 
-                          ref="dataTableRef" 
-                          :selected-collection="tab.collectionName"
-                        />
-                      </template>
-                      <TemplateGallery 
-                        v-else-if="tab.type === 'default'" 
-                        @templateSelected="handleTemplateSelected"
-                        @openInNewTab="handleOpenInNewTab"
-                      />
-                    </div>
-                  </div>
+                  <router-view v-if="tabs[1].path === route.path" />
                 </div>
               </div>
             </div>
@@ -401,45 +377,7 @@ onUnmounted(() => {
                 class="fixed top-0 z-50"
               />
               
-              <div v-for="tab in tabs" :key="tab.id">
-                <div v-if="tab.id === activeTabId" class="h-full">
-                  <HelloWorldTab 
-                    v-if="tab.type === 'hello'" 
-                    :content="tab.content" 
-                  />
-                  <template v-else-if="tab.type === 'collection'">
-                    <div class="p-2">
-                      <Button variant="ghost" size="sm" class="mb-2" @click="handleCloseTab(tab.id)">
-                        <span class="flex items-center">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-                            <path d="M19 12H5M12 19l-7-7 7-7"></path>
-                          </svg>
-                          Back to Collections
-                        </span>
-                      </Button>
-                    </div>
-                    <MongoDBDataTable 
-                      ref="dataTableRef" 
-                      :selected-collection="tab.collectionName"
-                    />
-                  </template>
-                  <TemplateGallery 
-                    v-else-if="tab.type === 'default'" 
-                    @templateSelected="handleTemplateSelected"
-                    @openInNewTab="handleOpenInNewTab"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div v-if="!activeTabId">
-              <div class="p-4">
-                <h1 class="text-2xl font-bold mb-6 text-center">MongoDB Database Manager</h1>
-                <div class="flex flex-col items-center w-full gap-6">
-                  <MongoDBStatus class="w-full max-w-3xl" @connection-status-changed="autoConnectMongoDB" />
-                  <MongoDBOperations class="w-full max-w-3xl" @document-action="handleDocumentAction" />
-                </div>
-              </div>
+              <router-view />
             </div>
           </div>
         </div>

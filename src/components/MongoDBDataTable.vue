@@ -1,6 +1,7 @@
 <!-- src/components/MongoDBDataTable.vue -->
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
 import { ReloadIcon, TrashIcon } from '@radix-icons/vue';
 import { Button } from '@/components/ui/button';
@@ -41,12 +42,17 @@ import { useToast } from '@/components/ui/toast/use-toast';
 import { PlusCircledIcon } from '@radix-icons/vue';
 
 const { toast } = useToast();
+const route = useRoute();
+const router = useRouter();
 
+// Accept both direct prop and route param
 const props = defineProps<{
   selectedCollection?: string;
+  name?: string; // From route params
 }>();
 
-const collectionName = ref(props.selectedCollection || 'users');
+// Use route param or direct prop, with fallback to 'users'
+const collectionName = ref(props.name || props.selectedCollection || 'users');
 const documents = ref<any[]>([]);
 const isLoading = ref(false);
 const errorMessage = ref('');
@@ -121,9 +127,14 @@ const filteredOptions = (field: string) => {
   return options.filter(opt => opt.label.toLowerCase().includes(query));
 };
 
-// Add immediate: true to collectionName watcher
+// Watch for collection name changes with immediate execution
 watch(collectionName, async (newVal) => {
   try {
+    // Update route if it doesn't match the current collection
+    if (route.params.name !== newVal) {
+      router.push(`/collection/${newVal}`);
+    }
+    
     const response = await fetch(`${API_BASE}/collections/${newVal}/schema`);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const { success, data, error } = await response.json();
@@ -150,7 +161,14 @@ watch(collectionName, async (newVal) => {
   }
 }, { immediate: true });
 
-// Watch for prop changes
+// Watch for route changes to update collection name
+watch(() => route.params.name, (newVal) => {
+  if (newVal && newVal !== collectionName.value) {
+    collectionName.value = newVal as string;
+  }
+}, { immediate: true });
+
+// Watch for prop changes from parent
 watch(() => props.selectedCollection, (newVal) => {
   if (newVal && newVal !== collectionName.value) {
     collectionName.value = newVal;
@@ -479,6 +497,7 @@ const fetchCollections = async () => {
     if (success) {
       collectionsList.value = data;
       if (data.length > 0 && !data.includes(collectionName.value)) {
+        // If current collection not in list, select first
         collectionName.value = data[0];
       }
     } else {
@@ -493,20 +512,26 @@ onMounted(() => {
   fetchCollections();
 });
 
-defineExpose({ fetchDocuments, fetchCollections });
+defineExpose({ 
+  fetchDocuments, 
+  fetchCollections,
+  setCollection: (name: string) => {
+    collectionName.value = name;
+  }
+});
 
 const onPageChange = (page: number) => {
   currentPage.value = page;
 };
 
-watch(collectionName, fetchDocuments);
+// We already have a watch on collectionName that calls fetchDocuments
 </script>
 <template>
   <div class="border rounded-md p-4 w-full">
     
     <div class="flex flex-col md:flex-row gap-4 mb-4">
-      <!-- Conditionally show collection selector -->
-      <div class="w-full md:w-1/4" v-if="!selectedCollection">
+      <!-- Collection selector - show only when not passed as route param or prop -->
+      <div class="w-full md:w-1/4" v-if="!$route.params.name && !selectedCollection">
         <Label for="collection-select">Collection</Label>
         <Select v-model="collectionName">
           <SelectTrigger class="mt-1">
@@ -518,6 +543,19 @@ watch(collectionName, fetchDocuments);
             </SelectItem>
           </SelectContent>
         </Select>
+      </div>
+      
+      <!-- Show collection name when passed as route param -->
+      <div v-else class="flex items-center gap-2">
+        <h2 class="text-xl font-semibold">{{ collectionName }}</h2>
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          @click="router.push('/home')"
+          class="text-gray-500 hover:text-gray-800"
+        >
+          (Change)
+        </Button>
       </div>
     </div>
     
@@ -715,37 +753,36 @@ watch(collectionName, fetchDocuments);
           </TableRow>
           
           <!-- Regular Data Rows -->
-          <!-- In the template section -->
-<TableRow v-for="(doc, rowIndex) in paginatedDocuments" :key="rowIndex">
-  <TableCell v-for="header in tableHeaders" :key="`${rowIndex}-${header}`" 
-    class="border-r border-b border-gray-200 p-0">
-    <div class="h-full">
-      <div v-if="editingCell?.rowIndex === rowIndex && editingCell?.header === header" 
-          class="h-full">
-        <!-- Boolean field editing -->
-        <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" 
-          class="flex items-center justify-center h-full p-2">
-          <input 
-            type="checkbox" 
-            v-model="editValue" 
-            @change="saveEdit"
-            class="h-4 w-4"
-          />
-        </div>
-        <!-- Reference field editing -->
-        <div v-else-if="isReferenceField(header)" class="p-1">
-          <Select v-model="editValue" @update:modelValue="saveEdit">
-            <SelectTrigger>
-              <SelectValue :placeholder="`Select ${getReferencedCollection(header)}`" :model-value="editValue" />
-            </SelectTrigger>
-            <SelectContent>
-              <ScrollArea class="h-48">
-                <div class="p-1">
-                  <Input 
-                    v-model="searchQuery[header]"
-                    placeholder="Search..."
-                    class="mb-2"
-                  />
+          <TableRow v-for="(doc, rowIndex) in paginatedDocuments" :key="rowIndex">
+            <TableCell v-for="header in tableHeaders" :key="`${rowIndex}-${header}`" 
+              class="border-r border-b border-gray-200 p-0">
+              <div class="h-full">
+                <div v-if="editingCell?.rowIndex === rowIndex && editingCell?.header === header" 
+                    class="h-full">
+                  <!-- Boolean field editing -->
+                  <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" 
+                    class="flex items-center justify-center h-full p-2">
+                    <input 
+                      type="checkbox" 
+                      v-model="editValue" 
+                      @change="saveEdit"
+                      class="h-4 w-4"
+                    />
+                  </div>
+                  <!-- Reference field editing -->
+                  <div v-else-if="isReferenceField(header)" class="p-1">
+                    <Select v-model="editValue" @update:modelValue="saveEdit">
+                      <SelectTrigger>
+                        <SelectValue :placeholder="`Select ${getReferencedCollection(header)}`" :model-value="editValue" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <ScrollArea class="h-48">
+                          <div class="p-1">
+                            <Input 
+                              v-model="searchQuery[header]"
+                              placeholder="Search..."
+                              class="mb-2"
+                            />
                   <div v-if="filteredOptions(header).length">
                     <SelectItem 
                       v-for="option in filteredOptions(header)"
