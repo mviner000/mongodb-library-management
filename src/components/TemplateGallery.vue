@@ -62,7 +62,7 @@ async function fetchCollections() {
 
 // Handle template selection - navigate to collection route
 const handleTemplateSelect = (templateId: string) => {
-  router.push(`/collection/${templateId}`);
+  router.replace(`/collection/${templateId}`);
 };
 
 // Handle opening template in new tab

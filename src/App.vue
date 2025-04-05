@@ -1,6 +1,6 @@
 <!-- src/App.vue -->
 <script setup lang="ts">
-import { ref, onMounted, provide, computed, onUnmounted, watch } from 'vue'
+import { ref, onMounted, provide, computed, onUnmounted, watch, markRaw } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useZoom } from '@/composables/useZoom'
 import { useRoute, useRouter } from 'vue-router'
@@ -17,9 +17,45 @@ import BrowserNavbar from '@/components/BrowserNavbar.vue'
 import MongoDBTableNavbar from '@/components/MongoDBTableNavbar.vue'
 import { useToast } from './components/ui/toast'
 import ApiServerStatus from './components/ApiServerStatus.vue'
+import TemplateGallery from './components/TemplateGallery.vue'
+import HelloWorldTab from './components/HelloWorldTab.vue'
 
 const route = useRoute()
 const router = useRouter()
+
+const componentCache = ref(new Map())
+
+function resolveComponent(tab: Tab) {
+  if (componentCache.value.has(tab.id)) {
+    return componentCache.value.get(tab.id)
+  }
+  
+  let component
+  
+  switch (tab.type) {
+    case 'home':
+      component = markRaw(TemplateGallery)
+      break
+    case 'collection':
+      component = markRaw(MongoDBDataTable)
+      break
+    case 'hello':
+      component = markRaw(HelloWorldTab)
+      break
+    default:
+      component = markRaw(TemplateGallery)
+  }
+  
+  componentCache.value.set(tab.id, component)
+  return component
+}
+
+function resolveProps(tab: Tab) {
+  if (tab.type === 'collection' && tab.collectionName) {
+    return { name: tab.collectionName }
+  }
+  return {}
+}
 
 interface Tab {
   id: string
@@ -84,52 +120,77 @@ watch(isSplit, (newVal) => {
 
 // Router integration
 function syncTabsWithRoute() {
-  const currentPath = route.path
+  const currentPath = route.path;
   
-  // Check if tab for current route already exists
-  const existingTab = tabs.value.find(tab => tab.path === currentPath)
+  const existingTab = tabs.value.find(tab => tab.path === currentPath);
   
   if (existingTab) {
-    // If exists, just activate it
-    activeTabId.value = existingTab.id
+    activeTabId.value = existingTab.id;
   } else {
-    // Create a new tab based on the route
-    let newTab: Tab
-    
-    if (currentPath === '/home') {
-      newTab = { id: 'home', title: 'Home', type: 'home', path: '/home' }
-    } else if (currentPath.startsWith('/collection/')) {
-      const collectionName = route.params.name as string
-      newTab = { 
-        id: `col-${Date.now()}`, 
-        title: collectionName, 
-        type: 'collection', 
-        collectionName, 
-        path: currentPath 
-      }
-    } else if (currentPath === '/hello') {
-      newTab = { 
-        id: `hello-${Date.now()}`, 
-        title: 'Hello World', 
-        type: 'hello', 
-        content: 'Hello World',
-        path: '/hello' 
-      }
+    const activeTabIndex = tabs.value.findIndex(t => t.id === activeTabId.value);
+    const activeTab = tabs.value[activeTabIndex];
+
+    // Replace home tab when navigating to collection
+    if (activeTab?.type === 'home' && currentPath.startsWith('/collection/')) {
+      const collectionName = currentPath.split('/')[2];
+      const newTab: Tab = {
+        id: `col-${Date.now()}`,
+        title: collectionName,
+        type: 'collection', // This is now properly typed as 'collection'
+        collectionName,
+        path: currentPath
+      };
+      tabs.value.splice(activeTabIndex, 1, newTab);
+      activeTabId.value = newTab.id;
     } else {
-      // Default fallback
-      newTab = { id: 'home', title: 'Home', type: 'home', path: '/home' }
-      router.push('/home')
+      // Create new tab for other cases
+      const newTab = createNewTabBasedOnRoute(currentPath);
+      tabs.value.push(newTab);
+      activeTabId.value = newTab.id;
     }
-    
-    tabs.value.push(newTab)
-    activeTabId.value = newTab.id
   }
 }
 
+// Helper function to create tabs
+function createNewTabBasedOnRoute(path: string): Tab {
+  if (path === '/home') {
+    return { id: 'home', title: 'Home', type: 'home', path: '/home' };
+  }
+  
+  if (path.startsWith('/collection/')) {
+    const collectionName = path.split('/')[2];
+    return {
+      id: `col-${Date.now()}`,
+      title: collectionName,
+      type: 'collection',
+      collectionName,
+      path: path
+    };
+  }
+  
+  if (path === '/hello') {
+    return {
+      id: `hello-${Date.now()}`,
+      title: 'Hello World',
+      type: 'hello',
+      content: 'Hello World',
+      path: '/hello'
+    };
+  }
+  
+  // Default fallback
+  return { id: 'home', title: 'Home', type: 'home', path: '/home' };
+}
+
+
 // Watch for route changes
 watch(() => route.path, () => {
-  syncTabsWithRoute()
-}, { immediate: true })
+  // Don't call syncTabsWithRoute on initial load
+  // Only sync when route actually changes from browser navigation
+  if (route.fullPath !== '/home') {
+    syncTabsWithRoute()
+  }
+}, { immediate: false }) // Change immediate to false
 
 // Existing computed properties
 const navbarTitle = computed(() => {
@@ -265,7 +326,12 @@ provide('sidebarState', {
 onMounted(() => {
   window.addEventListener('keydown', handleKeyPress)
   autoConnectMongoDB()
-  syncTabsWithRoute() // Initial sync
+  // Remove or comment out this line:
+  // syncTabsWithRoute() // Initial sync
+  
+  // Make sure we're starting with just one tab
+  tabs.value = [{ id: 'home', title: 'Home', type: 'home', path: '/home' }]
+  activeTabId.value = 'home'
 })
 
 onUnmounted(() => {
@@ -319,50 +385,58 @@ onUnmounted(() => {
           <!-- Use router-view for tab content -->
           <div v-else>
             <div v-if="isSplit && tabs.length === 2" 
-                ref="containerRef"
-                class="flex h-full relative"
-                :class="{ 'select-none': isDragging }">
-              <!-- Left Pane -->
-              <div class="h-full overflow-auto" :style="{ width: `${leftWidth}%` }">
-                <div class="h-full">
-                  <MongoDBTableNavbar 
-                    v-if="tabs[0].type === 'collection'"
-                    :title="tabs[0].title"
-                    class="sticky top-0 z-50"
-                  />
-                  <TemplateGalleryNavbar
-                    v-else
-                    :title="tabs[0].title"
-                    :showSearch="tabs[0].type === 'home'"
-                    class="sticky top-0 z-50"
-                  />
-                  <router-view v-if="tabs[0].path === route.path" />
-                </div>
-              </div>
-
-              <div class="w-1 bg-gray-200 hover:bg-blue-400 cursor-col-resize relative"
-                @mousedown="startResize"
-                :class="{ 'bg-blue-400': isDragging }"
-              ></div>
-
-              <!-- Right Pane -->
-              <div class="h-full overflow-auto" :style="{ width: `${100 - leftWidth}%` }">
-                <div class="h-full">
-                  <MongoDBTableNavbar 
-                    v-if="tabs[1].type === 'collection'"
-                    :title="tabs[1].title"
-                    class="sticky top-0 z-50"
-                  />
-                  <TemplateGalleryNavbar
-                    v-else
-                    :title="tabs[1].title"
-                    :showSearch="tabs[1].type === 'home'"
-                    class="fixed top-0 z-50"
-                  />
-                  <router-view v-if="tabs[1].path === route.path" />
-                </div>
+              ref="containerRef"
+              class="flex h-full relative"
+              :class="{ 'select-none': isDragging }">
+            <!-- Left Pane -->
+            <div class="h-full overflow-auto" :style="{ width: `${leftWidth}%` }">
+              <div class="h-full">
+                <MongoDBTableNavbar 
+                  v-if="tabs[0].type === 'collection'"
+                  :title="tabs[0].title"
+                  class="sticky top-0 z-50"
+                />
+                <TemplateGalleryNavbar
+                  v-else
+                  :title="tabs[0].title"
+                  :showSearch="tabs[0].type === 'home'"
+                  class="sticky top-0 z-50"
+                />
+                <!-- Create a dynamically imported component for the first tab -->
+                <component 
+                  :is="resolveComponent(tabs[0])" 
+                  v-bind="resolveProps(tabs[0])"
+                />
               </div>
             </div>
+
+            <div class="w-1 bg-gray-200 hover:bg-blue-400 cursor-col-resize relative"
+              @mousedown="startResize"
+              :class="{ 'bg-blue-400': isDragging }"
+            ></div>
+
+            <!-- Right Pane -->
+            <div class="h-full overflow-auto" :style="{ width: `${100 - leftWidth}%` }">
+              <div class="h-full">
+                <MongoDBTableNavbar 
+                  v-if="tabs[1].type === 'collection'"
+                  :title="tabs[1].title"
+                  class="sticky top-0 z-50"
+                />
+                <TemplateGalleryNavbar
+                  v-else
+                  :title="tabs[1].title"
+                  :showSearch="tabs[1].type === 'home'"
+                  class="sticky top-0 z-50"
+                />
+                <!-- Create a dynamically imported component for the second tab -->
+                <component 
+                  :is="resolveComponent(tabs[1])" 
+                  v-bind="resolveProps(tabs[1])"
+                />
+              </div>
+            </div>
+          </div>
 
             <div v-else>
               <MongoDBTableNavbar 

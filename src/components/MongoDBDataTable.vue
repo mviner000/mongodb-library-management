@@ -544,19 +544,6 @@ const onPageChange = (page: number) => {
           </SelectContent>
         </Select>
       </div>
-      
-      <!-- Show collection name when passed as route param -->
-      <div v-else class="flex items-center gap-2">
-        <h2 class="text-xl font-semibold">{{ collectionName }}</h2>
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          @click="router.push('/home')"
-          class="text-gray-500 hover:text-gray-800"
-        >
-          (Change)
-        </Button>
-      </div>
     </div>
     
     <div v-if="errorMessage" class="my-2 p-2 bg-red-100 text-red-700 rounded">
