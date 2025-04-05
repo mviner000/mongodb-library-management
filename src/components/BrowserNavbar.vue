@@ -1,6 +1,7 @@
-<!-- src/components/BrowserNavbar.vue -->
+<!-- src/components/ApiServerStatus.vue -->
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { inject, ref, watch } from 'vue'
+import { useZoom } from '@/composables/useZoom'
 
 // Props for the component
 const props = defineProps<{
@@ -11,6 +12,9 @@ const emit = defineEmits(['navigate', 'reload', 'back', 'forward'])
 
 // Track URL input value
 const urlInput = ref('')
+
+// Use the zoom composable
+const { zoomLevel, zoomIn, zoomOut, resetZoom } = inject('zoom')! as ReturnType<typeof useZoom>
 
 // Update input when currentUrl prop changes
 watch(() => props.currentUrl, (newUrl) => {
@@ -100,7 +104,40 @@ function handleBookmark() {
     </div>
     
     <!-- Action Buttons -->
-    <div class="flex items-center space-x-1 ml-2">
+    <div class="flex items-center space-x-0 p-0 ml-2">
+      <!-- Zoom Controls -->
+      <div class="flex space-x-0 absolute right-20 mr-1 mt-1">
+        <button 
+          @click="zoomOut"
+          :disabled="zoomLevel <= 50"
+          class="mt-0.5 w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]"
+          title="Zoom Out (Ctrl+-)"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 12h14"/>
+          </svg>
+        </button>
+
+        <button 
+          @click="resetZoom"
+          class="mx-1 w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]"
+          title="Reset Zoom (Ctrl+0)"
+        >
+          <span class="text-xs">{{ zoomLevel }}%</span>
+        </button>
+
+        <button 
+          @click="zoomIn"
+          :disabled="zoomLevel >= 200"
+          class="mt-0.5 w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]"
+          title="Zoom In (Ctrl+=)"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+        </button>
+      </div>
+
       <!-- Bookmark Button -->
       <button 
         @click="handleBookmark"

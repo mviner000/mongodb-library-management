@@ -1,7 +1,8 @@
-<!-- src/App.vue -->
+<!-- src/components/App.vue -->
 <script setup lang="ts">
 import { ref, onMounted, provide, computed, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { useZoom } from '@/composables/useZoom'
 
 import Toaster from '@/components/ui/toast/Toaster.vue'
 import TemplateGalleryNavbar from '@/components/TemplateGalleryNavbar.vue'
@@ -43,6 +44,11 @@ const connectionError = ref('')
 const isSidebarOpen = ref(false)
 const isSplit = ref(false)
 const { toast } = useToast()
+
+// Use the zoom composable
+const { zoomLevel, zoomIn, zoomOut, resetZoom, zoomStyle } = useZoom()
+
+provide('zoom', { zoomLevel, zoomIn, zoomOut, resetZoom, zoomStyle })
 
 // Split pane resizing
 const leftWidth = ref(50)
@@ -188,7 +194,6 @@ function handleForward() {
   // Your colleague will implement this
 }
 
-
 // MongoDB connection logic
 async function autoConnectMongoDB() {
   isConnecting.value = true;
@@ -238,6 +243,9 @@ onUnmounted(() => {
 <template>
   <Toaster />
   <div class="flex flex-col min-h-screen">
+
+    <ApiServerStatus />
+
     <TabBar 
       :tabs="tabs"
       :active-tab-id="activeTabId"
@@ -257,179 +265,180 @@ onUnmounted(() => {
       <Sidebar :activeTab="activeTab" @selectTab="activeTab = $event" />
       
       <main class="flex-1 overflow-auto">
-        <SudoPasswordModal />
-        
-        <div v-if="connectionError" class="mb-4 p-3 bg-red-100 text-red-700 rounded-md">
-          {{ connectionError }}
-        </div>
-
-        <ApiServerStatus />
-
-        <!-- Show settings when activeTab is 'settings' -->
-        <div v-if="activeTab === 'settings'">
-          <div class="p-4">
-            <h1 class="text-2xl font-bold mb-6 text-center">MongoDB Database Manager</h1>
-            <div class="flex flex-col items-center w-full gap-6">
-              <MongoDBStatus class="w-full max-w-3xl" @connection-status-changed="autoConnectMongoDB" />
-              <MongoDBOperations class="w-full max-w-3xl" @document-action="handleDocumentAction" />
-            </div>
-          </div>
-        </div>
-
-        <!-- Only show tab content when not in settings -->
-        <div v-else>
-          <div v-if="isSplit && tabs.length === 2" 
-               ref="containerRef"
-               class="flex h-full relative"
-               :class="{ 'select-none': isDragging }">
-            <!-- Left Pane -->
-            <div class="h-full overflow-auto" :style="{ width: `${leftWidth}%` }">
-              <div class="h-full">
-                <MongoDBTableNavbar 
-                  v-if="tabs[0].type === 'collection'"
-                  :title="tabs[0].title"
-                  class="sticky top-0 z-50"
-                />
-                <TemplateGalleryNavbar
-                  v-else
-                  :title="tabs[0].title"
-                  :showSearch="tabs[0].type === 'default'"
-                  class="sticky top-0 z-50"
-                />
-                <div v-for="(tab, index) in tabs" :key="tab.id">
-                  <div v-if="index === 0" class="h-full">
-                    <HelloWorldTab 
-                      v-if="tab.type === 'hello'" 
-                      :content="tab.content" 
-                    />
-                    <template v-else-if="tab.type === 'collection'">
-                      <div class="p-2">
-                        <Button variant="ghost" size="sm" class="mb-2" @click="handleCloseTab(tab.id)">
-                          <span class="flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-                              <path d="M19 12H5M12 19l-7-7 7-7"></path>
-                            </svg>
-                            Back to Collections
-                          </span>
-                        </Button>
-                      </div>
-                      <MongoDBDataTable 
-                        ref="dataTableRef" 
-                        :selected-collection="tab.collectionName"
-                      />
-                    </template>
-                    <TemplateGallery 
-                      v-else-if="tab.type === 'default'" 
-                      @templateSelected="handleTemplateSelected"
-                      @openInNewTab="handleOpenInNewTab"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="w-1 bg-gray-200 hover:bg-blue-400 cursor-col-resize relative"
-              @mousedown="startResize"
-              :class="{ 'bg-blue-400': isDragging }"
-            ></div>
-
-            <!-- Right Pane -->
-            <div class="h-full overflow-auto" :style="{ width: `${100 - leftWidth}%` }">
-              <div class="h-full">
-                <MongoDBTableNavbar 
-                  v-if="tabs[1].type === 'collection'"
-                  :title="tabs[1].title"
-                  class="sticky top-0 z-50"
-                />
-                <TemplateGalleryNavbar
-                  v-else
-                  :title="tabs[1].title"
-                  :showSearch="tabs[1].type === 'default'"
-                  class="sticky top-0 z-50"
-                />
-                <div v-for="(tab, index) in tabs" :key="tab.id">
-                  <div v-if="index === 1" class="h-full">
-                    <HelloWorldTab 
-                      v-if="tab.type === 'hello'" 
-                      :content="tab.content" 
-                    />
-                    <template v-else-if="tab.type === 'collection'">
-                      <div class="p-2">
-                        <Button variant="ghost" size="sm" class="mb-2" @click="handleCloseTab(tab.id)">
-                          <span class="flex items-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-                              <path d="M19 12H5M12 19l-7-7 7-7"></path>
-                            </svg>
-                            Back to Collections
-                          </span>
-                        </Button>
-                      </div>
-                      <MongoDBDataTable 
-                        ref="dataTableRef" 
-                        :selected-collection="tab.collectionName"
-                      />
-                    </template>
-                    <TemplateGallery 
-                      v-else-if="tab.type === 'default'" 
-                      @templateSelected="handleTemplateSelected"
-                      @openInNewTab="handleOpenInNewTab"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
+        <!-- Apply zoom styling to this wrapper div -->
+        <div :style="zoomStyle">
+          <SudoPasswordModal />
+          
+          <div v-if="connectionError" class="mb-4 p-3 bg-red-100 text-red-700 rounded-md">
+            {{ connectionError }}
           </div>
 
-          <div v-else>
-            <MongoDBTableNavbar 
-              v-if="activeTabType === 'collection'"
-              :title="navbarTitle" 
-              class="sticky top-0 z-50"
-            />
-            <TemplateGalleryNavbar
-              v-else
-              :title="navbarTitle" 
-              :showSearch="showSearch"
-              class="sticky top-0 z-50"
-            />
-            
-            <div v-for="tab in tabs" :key="tab.id">
-              <div v-if="tab.id === activeTabId" class="h-full">
-                <HelloWorldTab 
-                  v-if="tab.type === 'hello'" 
-                  :content="tab.content" 
-                />
-                <template v-else-if="tab.type === 'collection'">
-                  <div class="p-2">
-                    <Button variant="ghost" size="sm" class="mb-2" @click="handleCloseTab(tab.id)">
-                      <span class="flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-                          <path d="M19 12H5M12 19l-7-7 7-7"></path>
-                        </svg>
-                        Back to Collections
-                      </span>
-                    </Button>
-                  </div>
-                  <MongoDBDataTable 
-                    ref="dataTableRef" 
-                    :selected-collection="tab.collectionName"
-                  />
-                </template>
-                <TemplateGallery 
-                  v-else-if="tab.type === 'default'" 
-                  @templateSelected="handleTemplateSelected"
-                  @openInNewTab="handleOpenInNewTab"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div v-if="!activeTabId">
+          <!-- Show settings when activeTab is 'settings' -->
+          <div v-if="activeTab === 'settings'">
             <div class="p-4">
               <h1 class="text-2xl font-bold mb-6 text-center">MongoDB Database Manager</h1>
               <div class="flex flex-col items-center w-full gap-6">
                 <MongoDBStatus class="w-full max-w-3xl" @connection-status-changed="autoConnectMongoDB" />
                 <MongoDBOperations class="w-full max-w-3xl" @document-action="handleDocumentAction" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Only show tab content when not in settings -->
+          <div v-else>
+            <div v-if="isSplit && tabs.length === 2" 
+                ref="containerRef"
+                class="flex h-full relative"
+                :class="{ 'select-none': isDragging }">
+              <!-- Left Pane -->
+              <div class="h-full overflow-auto" :style="{ width: `${leftWidth}%` }">
+                <div class="h-full">
+                  <MongoDBTableNavbar 
+                    v-if="tabs[0].type === 'collection'"
+                    :title="tabs[0].title"
+                    class="sticky top-0 z-50"
+                  />
+                  <TemplateGalleryNavbar
+                    v-else
+                    :title="tabs[0].title"
+                    :showSearch="tabs[0].type === 'default'"
+                    class="sticky top-0 z-50"
+                  />
+                  <div v-for="(tab, index) in tabs" :key="tab.id">
+                    <div v-if="index === 0" class="h-full">
+                      <HelloWorldTab 
+                        v-if="tab.type === 'hello'" 
+                        :content="tab.content" 
+                      />
+                      <template v-else-if="tab.type === 'collection'">
+                        <div class="p-2">
+                          <Button variant="ghost" size="sm" class="mb-2" @click="handleCloseTab(tab.id)">
+                            <span class="flex items-center">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+                                <path d="M19 12H5M12 19l-7-7 7-7"></path>
+                              </svg>
+                              Back to Collections
+                            </span>
+                          </Button>
+                        </div>
+                        <MongoDBDataTable 
+                          ref="dataTableRef" 
+                          :selected-collection="tab.collectionName"
+                        />
+                      </template>
+                      <TemplateGallery 
+                        v-else-if="tab.type === 'default'" 
+                        @templateSelected="handleTemplateSelected"
+                        @openInNewTab="handleOpenInNewTab"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="w-1 bg-gray-200 hover:bg-blue-400 cursor-col-resize relative"
+                @mousedown="startResize"
+                :class="{ 'bg-blue-400': isDragging }"
+              ></div>
+
+              <!-- Right Pane -->
+              <div class="h-full overflow-auto" :style="{ width: `${100 - leftWidth}%` }">
+                <div class="h-full">
+                  <MongoDBTableNavbar 
+                    v-if="tabs[1].type === 'collection'"
+                    :title="tabs[1].title"
+                    class="sticky top-0 z-50"
+                  />
+                  <TemplateGalleryNavbar
+                    v-else
+                    :title="tabs[1].title"
+                    :showSearch="tabs[1].type === 'default'"
+                    class="sticky top-0 z-50"
+                  />
+                  <div v-for="(tab, index) in tabs" :key="tab.id">
+                    <div v-if="index === 1" class="h-full">
+                      <HelloWorldTab 
+                        v-if="tab.type === 'hello'" 
+                        :content="tab.content" 
+                      />
+                      <template v-else-if="tab.type === 'collection'">
+                        <div class="p-2">
+                          <Button variant="ghost" size="sm" class="mb-2" @click="handleCloseTab(tab.id)">
+                            <span class="flex items-center">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+                                <path d="M19 12H5M12 19l-7-7 7-7"></path>
+                              </svg>
+                              Back to Collections
+                            </span>
+                          </Button>
+                        </div>
+                        <MongoDBDataTable 
+                          ref="dataTableRef" 
+                          :selected-collection="tab.collectionName"
+                        />
+                      </template>
+                      <TemplateGallery 
+                        v-else-if="tab.type === 'default'" 
+                        @templateSelected="handleTemplateSelected"
+                        @openInNewTab="handleOpenInNewTab"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-else>
+              <MongoDBTableNavbar 
+                v-if="activeTabType === 'collection'"
+                :title="navbarTitle" 
+                class="sticky top-0 z-50"
+              />
+              <TemplateGalleryNavbar
+                v-else
+                :title="navbarTitle" 
+                :showSearch="showSearch"
+                class="sticky top-0 z-50"
+              />
+              
+              <div v-for="tab in tabs" :key="tab.id">
+                <div v-if="tab.id === activeTabId" class="h-full">
+                  <HelloWorldTab 
+                    v-if="tab.type === 'hello'" 
+                    :content="tab.content" 
+                  />
+                  <template v-else-if="tab.type === 'collection'">
+                    <div class="p-2">
+                      <Button variant="ghost" size="sm" class="mb-2" @click="handleCloseTab(tab.id)">
+                        <span class="flex items-center">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+                            <path d="M19 12H5M12 19l-7-7 7-7"></path>
+                          </svg>
+                          Back to Collections
+                        </span>
+                      </Button>
+                    </div>
+                    <MongoDBDataTable 
+                      ref="dataTableRef" 
+                      :selected-collection="tab.collectionName"
+                    />
+                  </template>
+                  <TemplateGallery 
+                    v-else-if="tab.type === 'default'" 
+                    @templateSelected="handleTemplateSelected"
+                    @openInNewTab="handleOpenInNewTab"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div v-if="!activeTabId">
+              <div class="p-4">
+                <h1 class="text-2xl font-bold mb-6 text-center">MongoDB Database Manager</h1>
+                <div class="flex flex-col items-center w-full gap-6">
+                  <MongoDBStatus class="w-full max-w-3xl" @connection-status-changed="autoConnectMongoDB" />
+                  <MongoDBOperations class="w-full max-w-3xl" @document-action="handleDocumentAction" />
+                </div>
               </div>
             </div>
           </div>
