@@ -1,9 +1,8 @@
 // src/session.rs
+use crate::mongodb_manager::MongoDbState;
 use chrono::{DateTime, Utc};
+use mongodb::{bson::{self, doc}, Collection};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,40 +15,61 @@ pub struct Session {
 
 #[derive(Debug, Clone)]
 pub struct SessionManager {
-    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    mongodb_state: MongoDbState,
 }
 
 impl SessionManager {
-    pub fn new() -> Self {
-        Self {
-            sessions: Arc::new(Mutex::new(HashMap::new())),
-        }
+    pub fn new(mongodb_state: MongoDbState) -> Self {
+        Self { mongodb_state }
     }
 
-    pub async fn create_session(&self, user_id: &str) -> Session {
+    pub async fn create_session(&self, user_id: &str) -> Result<Session, String> {
         let token = Uuid::new_v4().to_string();
-        let expires_at = Utc::now() + chrono::Duration::hours(9);
-        
-        let session = Session {
-            user_id: user_id.to_string(),
-            token: token.clone(),
-            expires_at,
+        let expires_at = Utc::now() + chrono::Duration::minutes(1);
+        let created_at = Utc::now();
+
+        let expires_at_millis = expires_at.timestamp_millis();
+        let session_doc = doc! {
+            "session_token": &token,
+            "user_id": user_id,
+            "expires_at": bson::DateTime::from_millis(expires_at_millis),
+            "is_valid": true,
+            "created_at": bson::DateTime::from_millis(created_at.timestamp_millis()),
+            "label": "auth_login"
         };
 
-        self.sessions.lock().await.insert(token.clone(), session.clone());
-        session
+        let db = self.mongodb_state.get_database().await?;
+        let collection: Collection<bson::Document> = db.collection("sessions");
+        
+        collection.insert_one(session_doc, None)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        Ok(Session {
+            user_id: user_id.to_string(),
+            token,
+            expires_at,
+        })
     }
 
     pub async fn validate_session(&self, token: &str) -> bool {
-        let sessions = self.sessions.lock().await;
-        match sessions.get(token) {
-            Some(session) => session.expires_at > Utc::now(),
-            None => false,
-        }
-    }
+        let db = match self.mongodb_state.get_database().await {
+            Ok(db) => db,
+            Err(_) => return false,
+        };
+        let collection: Collection<bson::Document> = db.collection("sessions");
 
-    pub async fn cleanup_expired(&self) {
-        let mut sessions = self.sessions.lock().await;
-        sessions.retain(|_, session| session.expires_at > Utc::now());
+        let now = Utc::now();
+        let filter = doc! {
+            "session_token": token,
+            "is_valid": true,
+            "expires_at": { "$gt": bson::DateTime::from_millis(now.timestamp_millis()) }
+        };
+
+        match collection.find_one(filter, None).await {
+            Ok(Some(_)) => true,
+            Ok(None) => false,
+            Err(_) => false,
+        }
     }
 }

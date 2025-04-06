@@ -30,18 +30,8 @@ pub fn run() {
             app.manage(mongodb_state.clone());
 
             // Initialize session manager
-            let session_manager = session::SessionManager::new();
+            let session_manager = session::SessionManager::new(mongodb_state.clone());
             app.manage(session_manager.clone());
-            
-            // Add session cleanup task
-            let cleanup_session_manager = session_manager.clone();
-            tauri::async_runtime::spawn(async move {
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
-                loop {
-                    interval.tick().await;
-                    cleanup_session_manager.cleanup_expired().await;
-                }
-            });
 
             // Initialize API server state with MongoDB reference
             let api_server_state = Arc::new(Mutex::new(api_server::ApiServerState::new(mongodb_state)));

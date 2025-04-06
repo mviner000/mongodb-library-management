@@ -11,6 +11,7 @@ use anyhow::Result;
 use futures_util::stream::StreamExt;
 
 // Define MongoDB connection state
+#[derive(Debug)]
 pub struct MongoDbState {
     pub client: Arc<Mutex<Option<Client>>>, // Add pub modifier here
     pub database_name: String,              // And here if needed

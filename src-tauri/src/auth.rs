@@ -40,7 +40,8 @@ pub async fn login(
         .map_err(|_| "Invalid user ID")?
         .to_hex();
 
-    let session = session_manager.create_session(&user_id).await;
+    let session = session_manager.create_session(&user_id).await
+        .map_err(|e| format!("Failed to create session: {}", e))?;
     println!("Generated token for user {}: {}", user_id, session.token);
     Ok(session.token)
 }

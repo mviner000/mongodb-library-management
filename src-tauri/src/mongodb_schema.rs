@@ -4,6 +4,7 @@ use mongodb::{
     Database,
     IndexModel,
 };
+use std::time::Duration;
 use mongodb::bson::{doc, Document};
 use anyhow::Result;
 
@@ -14,6 +15,7 @@ pub async fn initialize_database(db: &Database) -> Result<()> {
     create_purposes_collection(db).await?;
     create_semesters_collection(db).await?;
     create_settings_styles_collection(db).await?;
+    create_sessions_collection(db).await?;
     Ok(())
 }
 
@@ -177,6 +179,75 @@ async fn create_users_collection(db: &Database) -> Result<()> {
         None
     ).await?;
 
+    Ok(())
+}
+
+async fn create_sessions_collection(db: &Database) -> Result<()> {
+    let collection = db.collection::<Document>("sessions");
+    
+    // Create indexes
+    let indexes = vec![
+        IndexModel::builder()
+            .keys(doc! { "session_token": 1 })
+            .options(Some(IndexOptions::builder()
+                .unique(true)
+                .build()))
+            .build(),
+        IndexModel::builder()
+            .keys(doc! { "user_id": 1 })
+            .build(),
+        IndexModel::builder()
+            .keys(doc! { "expires_at": 1 })
+            .options(Some(IndexOptions::builder()
+                .expire_after(Some(Duration::from_secs(0))) // TTL index (expire after 0 seconds)
+                .build()))
+            .build(),
+    ];
+
+    collection.create_indexes(indexes, None).await?;
+    
+    // Apply validator schema using collMod
+    db.run_command(
+        doc! {
+            "collMod": "sessions",
+            "validator": {
+                "$jsonSchema": {
+                    "bsonType": "object",
+                    "required": ["session_token", "user_id", "expires_at", "is_valid", "created_at", "label"],
+                    "properties": {
+                        "session_token": { 
+                            "bsonType": "string", 
+                            "description": "Unique session token (required)" 
+                        },
+                        "user_id": { 
+                            "bsonType": "string", 
+                            "description": "REF:users | Reference to user (required)" 
+                        },
+                        "expires_at": { 
+                            "bsonType": "date", 
+                            "description": "Expiration timestamp (required)" 
+                        },
+                        "is_valid": { 
+                            "bsonType": "bool", 
+                            "description": "Validity status (required)" 
+                        },
+                        "created_at": { 
+                            "bsonType": "date", 
+                            "description": "Creation timestamp (required)" 
+                        },
+                        "label": {
+                            "bsonType": "string",
+                            "description": "Session label (required)"
+                        }
+                    }
+                }
+            },
+            "validationLevel": "moderate",
+            "validationAction": "error"
+        },
+        None
+    ).await?;
+    
     Ok(())
 }
 
