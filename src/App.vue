@@ -17,6 +17,8 @@ import ApiServerStatus from './components/ApiServerStatus.vue'
 import TemplateGallery from './components/TemplateGallery.vue'
 import HelloWorldTab from './components/HelloWorldTab.vue'
 import AuthTabs from './components/auth/AuthTabs.vue'
+import { LoginResponse, SessionCheckResponse } from './types/auth'
+import { apiFetch } from './utils/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -584,8 +586,12 @@ onMounted(async () => {
 
   if (authToken.value) {
     try {
-      const isValid = await invoke<boolean>('check_session', { token: authToken.value })
-      if (!isValid) {
+      const response = await apiFetch<SessionCheckResponse>('/api/auth/check-session', {
+        method: 'POST',
+        body: JSON.stringify({ token: authToken.value })
+      })
+      
+      if (!response.valid) {
         authToken.value = null
         localStorage.removeItem('token')
         showAuthModal.value = true
@@ -605,39 +611,47 @@ onMounted(async () => {
 // login handler
 const handleLogin = async (identifier: string, password: string) => {
   try {
-    const token = await invoke<string>('login', { identifier, password })
-    authToken.value = token
-    localStorage.setItem('token', token)
-    showAuthModal.value = false
+    const response = await apiFetch<LoginResponse>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ identifier, password })
+    })
+
+    // Update parent state
+    authToken.value = response.token
+    localStorage.setItem('token', response.token)
+    
+    // No need to close the modal here - AuthTabs will do it after delay
+    // showAuthModal.value = false // This is now handled by AuthTabs after delay
+
     toast({
       title: 'Login Successful',
       description: 'Welcome back!',
     })
   } catch (error) {
     console.error('Login failed:', error)
-    
     toast({
       title: 'Login Failed',
-      description: typeof error === 'string' ? error : 'Invalid credentials',
+      description: error instanceof Error ? error.message : 'Invalid credentials',
       variant: 'destructive'
     })
-    
     throw error
   }
 }
 
 const handleRegister = async (username: string, email: string, password: string) => {
-  console.log('Initiating registration for:', username, email);
   try {
-    await invoke('register', { username, email, password });
+    await apiFetch<void>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, email, password })
+    })
+    
     toast({
       title: 'Registration successful',
       description: 'You can now log in with your credentials',
-    });
-    // No need to switch modals, the component handles this
+    })
   } catch (error) {
-    console.error('Registration failed:', error);
-    throw new Error(error instanceof Error ? error.message : 'Registration failed');
+    console.error('Registration failed:', error)
+    throw new Error(error instanceof Error ? error.message : 'Registration failed')
   }
 }
 

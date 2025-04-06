@@ -25,7 +25,7 @@ impl SessionManager {
 
     pub async fn create_session(&self, user_id: &str) -> Result<Session, String> {
         let token = Uuid::new_v4().to_string();
-        let expires_at = Utc::now() + chrono::Duration::minutes(1);
+        let expires_at = Utc::now() + chrono::Duration::minutes(30);
         let created_at = Utc::now();
 
         let expires_at_millis = expires_at.timestamp_millis();

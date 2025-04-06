@@ -34,7 +34,10 @@ pub fn run() {
             app.manage(session_manager.clone());
 
             // Initialize API server state with MongoDB reference
-            let api_server_state = Arc::new(Mutex::new(api_server::ApiServerState::new(mongodb_state)));
+            let api_server_state = Arc::new(Mutex::new(api_server::ApiServerState::new(
+                mongodb_state.clone(),
+                session_manager.clone()
+            )));
             
             // Clone the state for the auto-start task
             let auto_start_state = api_server_state.clone();

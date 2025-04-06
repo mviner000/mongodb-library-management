@@ -5,6 +5,9 @@ use axum::{
     http::{StatusCode, Method},
     Json, Router, extract::Path, extract::State, response::IntoResponse,
 };
+use bcrypt;
+use chrono;
+use crate::session::SessionManager;
 
 use axum::extract::Query;
 
@@ -14,7 +17,7 @@ use serde_json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
-use tracing::{info, error};
+use tracing::{info, warn, error, debug};
 use std::time::SystemTime;
 
 use crate::mongodb_manager::MongoDbState;
@@ -22,13 +25,15 @@ use crate::mongodb_manager::MongoDbState;
 // API server state
 pub struct ApiServerState {
     mongodb_state: Arc<Mutex<MongoDbState>>,
+    session_manager: Arc<Mutex<SessionManager>>,
     server_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl ApiServerState {
-    pub fn new(mongodb_state: MongoDbState) -> Self {
+    pub fn new(mongodb_state: MongoDbState, session_manager: SessionManager) -> Self {
         Self {
             mongodb_state: Arc::new(Mutex::new(mongodb_state)),
+            session_manager: Arc::new(Mutex::new(session_manager)),
             server_handle: None,
         }
     }
@@ -59,6 +64,35 @@ pub struct DeleteResponse {
     deleted_count: u64,
 }
 
+// Add DTOs
+#[derive(Deserialize)]
+struct LoginPayload {
+    identifier: String,
+    password: String,
+}
+
+#[derive(Serialize)]
+struct LoginResponse {
+    token: String,
+}
+
+#[derive(Deserialize)]
+struct RegisterPayload {
+    username: String,
+    email: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
+struct SessionCheckPayload {
+    token: String,
+}
+
+#[derive(Serialize)]
+struct SessionCheckResponse {
+    valid: bool,
+}
+
 // Error helper - Updated to return concrete type
 fn error_response<T: Serialize>(status: StatusCode, message: String) -> (StatusCode, Json<ApiResponse<T>>) {
     (status, Json(ApiResponse {
@@ -75,6 +109,192 @@ async fn get_database(mongodb_state: &Arc<Mutex<MongoDbState>>) -> Result<Databa
         Ok(db) => Ok(db),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
+}
+
+async fn login_user(
+    mongodb_state: &Arc<Mutex<MongoDbState>>,
+    session_manager: &Arc<Mutex<SessionManager>>,
+    identifier: &str,
+    password: &str,
+) -> Result<String, String> {
+    debug!("Attempting login process for: {}", identifier);
+    let db = mongodb_state.lock().await.get_database().await.map_err(|e| {
+        error!("Database connection error during login: {}", e);
+        e.to_string()
+    })?;
+    
+    let collection = db.collection::<Document>("users");
+    let filter = doc! { "$or": [{ "email": identifier }, { "username": identifier }] };
+
+    let user = collection.find_one(filter, None)
+        .await
+        .map_err(|e| {
+            error!("Database query error: {}", e);
+            format!("Database error: {}", e)
+        })?
+        .ok_or_else(|| {
+            warn!("User not found: {}", identifier);
+            "User not found".to_string()
+        })?;
+
+    let stored_hash = user.get_str("password")
+        .map_err(|_| {
+            warn!("Invalid password format for user: {}", identifier);
+            "Invalid user data".to_string()
+        })?;
+    
+    bcrypt::verify(password, stored_hash)
+        .map_err(|e| {
+            error!("Password verification error: {}", e);
+            format!("Password verification failed: {}", e)
+        })?
+        .then_some(())
+        .ok_or_else(|| {
+            warn!("Password mismatch for: {}", identifier);
+            "Invalid password".to_string()
+        })?;
+
+    let user_id = user.get_object_id("_id")
+        .map_err(|_| {
+            error!("Invalid user ID format for: {}", identifier);
+            "Invalid user ID".to_string()
+        })?
+        .to_hex();
+
+    session_manager.lock().await.create_session(&user_id)
+        .await
+        .map(|session| {
+            debug!("Session created successfully for: {}", user_id);
+            session.token
+        })
+        .map_err(|e| {
+            error!("Session creation failed for {}: {}", user_id, e);
+            format!("Session creation failed: {}", e)
+        })
+}
+
+async fn register_user(
+    mongodb_state: &Arc<Mutex<MongoDbState>>,
+    username: &str,
+    email: &str,
+    password: &str,
+) -> Result<(), String> {
+    debug!("Starting registration for: {}", username);
+    let db = mongodb_state.lock().await.get_database().await.map_err(|e| {
+        error!("Database connection error during registration: {}", e);
+        e.to_string()
+    })?;
+    
+    let collection = db.collection::<Document>("users");
+    let existing = collection.find_one(
+        doc! { "$or": [{ "email": email }, { "username": username }] }, 
+        None
+    )
+    .await
+    .map_err(|e| {
+        error!("Database query error during registration check: {}", e);
+        format!("Database error: {}", e)
+    })?;
+
+    if existing.is_some() {
+        warn!("Duplicate registration attempt - Email: {}, Username: {}", email, username);
+        return Err("Email or username already registered".into());
+    }
+
+    let hashed = bcrypt::hash(password, bcrypt::DEFAULT_COST)
+        .map_err(|e| {
+            error!("Password hashing error: {}", e);
+            format!("Password hashing failed: {}", e)
+        })?;
+
+    let now = mongodb::bson::DateTime::now();
+    let user = doc! {
+        "username": username,
+        "email": email,
+        "password": hashed,
+        "created_at": now,
+        "updated_at": now
+    };
+
+    collection.insert_one(user, None)
+        .await
+        .map(|_| {
+            debug!("User successfully registered: {}", username);
+            Ok(())
+        })
+        .map_err(|e| {
+            error!("User creation failed for {}: {}", username, e);
+            format!("User creation failed: {}", e)
+        })?
+}
+
+
+async fn auth_login_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Json(payload): Json<LoginPayload>,
+) -> impl IntoResponse {
+    info!("Login attempt for identifier: {}", payload.identifier);
+    let state = state.lock().await;
+    let mongodb_state = &state.mongodb_state;
+    let session_manager = &state.session_manager;
+
+    match login_user(mongodb_state, session_manager, &payload.identifier, &payload.password).await {
+        Ok(token) => {
+            info!("Successful login for identifier: {}", payload.identifier);
+            (StatusCode::OK, Json(ApiResponse {
+                success: true,
+                data: Some(LoginResponse { token }),
+                error: None,
+            }))
+        },
+        Err(e) => {
+            error!("Login failed for {}: {}", payload.identifier, e);
+            error_response::<LoginResponse>(StatusCode::UNAUTHORIZED, e)
+        },
+    }
+}
+
+async fn auth_register_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Json(payload): Json<RegisterPayload>,
+) -> impl IntoResponse {
+    info!("Registration attempt - Username: {}, Email: {}", payload.username, payload.email);
+    let state = state.lock().await;
+    let mongodb_state = &state.mongodb_state;
+    
+    match register_user(mongodb_state, &payload.username, &payload.email, &payload.password).await {
+        Ok(()) => {
+            info!("Successful registration for username: {}", payload.username);
+            (StatusCode::CREATED, Json(ApiResponse {
+                success: true,
+                data: None,
+                error: None,
+            }))
+        },
+        Err(e) => {
+            error!("Registration failed for {}: {}", payload.username, e);
+            error_response::<()>(StatusCode::BAD_REQUEST, e)
+        },
+    }
+}
+
+async fn auth_check_session_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Json(payload): Json<SessionCheckPayload>,
+) -> impl IntoResponse {
+    let token_snippet = payload.token.chars().take(6).collect::<String>();
+    debug!("Session check request for token: {}...", token_snippet);
+    let state = state.lock().await;
+    let session_manager = &state.session_manager;
+    
+    let valid = session_manager.lock().await.validate_session(&payload.token).await;
+    info!("Session validation result for {}...: {}", token_snippet, valid);
+    
+    (StatusCode::OK, Json(ApiResponse {
+        success: true,
+        data: Some(SessionCheckResponse { valid }),
+        error: None,
+    }))
 }
 
 async fn list_collections_handler(
@@ -550,6 +770,9 @@ fn create_api_router() -> Router<Arc<Mutex<ApiServerState>>> {
         .route("/collections/:collection_name/documents", post(insert_document_handler))
         .route("/collections/:collection_name/documents/:id", put(update_document_handler))
         .route("/collections/:collection_name/documents/:id", delete(delete_document_handler))
+        .route("/api/auth/login", post(auth_login_handler))
+        .route("/api/auth/register", post(auth_register_handler))
+        .route("/api/auth/check-session", post(auth_check_session_handler))
         .layer(cors)
 }
 
