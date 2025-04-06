@@ -19,6 +19,9 @@ import HelloWorldTab from './components/HelloWorldTab.vue'
 import AuthTabs from './components/auth/AuthTabs.vue'
 import { LoginResponse, SessionCheckResponse } from './types/auth'
 import { apiFetch } from './utils/api'
+import ConnectionSettingsButton from './components/ConnectionSettingsButton.vue'
+import ConnectionSettingsModal from './components/ConnectionSettingsModal.vue';
+import ConnectionTester from './components/ConnectionTester.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -655,6 +658,16 @@ const handleRegister = async (username: string, email: string, password: string)
   }
 }
 
+const handleLogout = () => {
+  // Navigate to home
+  router.push('/home');
+  // Clear authentication state
+  authToken.value = null;
+  localStorage.removeItem('token');
+  // Show auth modal
+  showAuthModal.value = true;
+};
+
 // Simplified close handler
 const handleCloseAuthModal = () => {
   // Only allow closing if authenticated
@@ -662,10 +675,41 @@ const handleCloseAuthModal = () => {
     showAuthModal.value = false
   }
 }
+
+// this to the data section
+const showConnectionSettingsModal = ref(false)
+
+// Add/modify the connection settings handler
+const handleConnectionSettings = () => {
+  showConnectionSettingsModal.value = true
+}
+
+// this handler for saving connection settings
+const handleSaveConnectionSettings = (ipAddress: string) => {
+  // Close the modal
+  showConnectionSettingsModal.value = false
+  
+  // Force app reload to apply the new API base URL
+  // This will reload all components and re-establish connections
+  window.location.reload()
+}
+
+// this handler for closing connection settings modal
+const handleCloseConnectionSettings = () => {
+  showConnectionSettingsModal.value = false
+}
+
 </script>
 
 <template>
   <Toaster />
+  <ConnectionTester />
+  <ConnectionSettingsModal
+      :is-open="showConnectionSettingsModal"
+      @close="handleCloseConnectionSettings"
+      @save="handleSaveConnectionSettings"
+    />
+
   <AuthTabs
     v-if="showAuthModal"
     :isAuthenticated="!!authToken"
@@ -694,6 +738,7 @@ const handleCloseAuthModal = () => {
       @reload="handleReload"
       @back="handleBack"
       @forward="handleForward"
+      @logout="handleLogout"
     />
     
     <div class="flex flex-1">
@@ -744,6 +789,7 @@ const handleCloseAuthModal = () => {
                   @reload="() => handleTabReload(tabs[0].id)"
                   @back="handleBack"
                   @forward="handleForward"
+                  @logout="handleLogout"
                 />
                 <div class="h-full">
                   <component 
@@ -779,6 +825,7 @@ const handleCloseAuthModal = () => {
                   @reload="() => handleTabReload(tabs[1].id)"
                   @back="handleBack"
                   @forward="handleForward"
+                  @logout="handleLogout"
                 />
                 <div class="h-full">
                   <component 
@@ -800,5 +847,7 @@ const handleCloseAuthModal = () => {
         </div>
       </main>
     </div>
+    
+    <ConnectionSettingsButton @click="handleConnectionSettings" />
   </div>
 </template>

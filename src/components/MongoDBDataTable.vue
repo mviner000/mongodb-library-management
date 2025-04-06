@@ -65,7 +65,8 @@ const newDocument = ref<Record<string, any>>({});
 const isAdding = ref(false);
 const showSchemaAsRow = ref(true);
 
-const API_BASE = 'http://localhost:3000';
+import { getApiBaseUrl } from '@/utils/api';
+const API_BASE = getApiBaseUrl();
 
 // Reference handling
 const referenceOptions = ref<Record<string, Array<{ id: string; label: string }>>>({});
@@ -85,13 +86,38 @@ const getReferencedCollection = (field: string) => {
 async function fetchReferenceOptions(collectionName: string) {
   loadingReferences.value[collectionName] = true;
   try {
-    const response = await fetch(`${API_BASE}/collections/${collectionName}/documents`);
-    const { success, data, error } = await response.json();
+    // Fetch the referenced collection's schema
+    const schemaResponse = await fetch(`${API_BASE}/collections/${collectionName}/schema`);
+    const { success: schemaSuccess, data: schemaData, error: schemaError } = await schemaResponse.json();
+    
+    if (!schemaSuccess) throw new Error(schemaError || 'Failed to fetch schema');
+    
+    // Determine label field from schema
+    let labelField = '_id';
+    const properties = schemaData.properties || {};
+    
+    // Find unique string fields (e.g., username, email, label)
+    const uniqueStringFields = Object.keys(properties).filter(field => {
+      const prop = properties[field];
+      return prop.bsonType === 'string' && prop.unique === true;
+    });
+    
+    // Fallback to common label fields if no unique fields
+    if (uniqueStringFields.length > 0) {
+      labelField = uniqueStringFields[0];
+    } else {
+      const candidates = ['label', 'name', 'title', 'username'];
+      labelField = candidates.find(f => properties[f]?.bsonType === 'string') || '_id';
+    }
+    
+    // Fetch documents from the referenced collection
+    const docsResponse = await fetch(`${API_BASE}/collections/${collectionName}/documents`);
+    const { success, data, error } = await docsResponse.json();
     
     if (success) {
       const options = data.map((doc: any) => ({
         id: doc._id.$oid,
-        label: doc.label || doc.name || doc._id.$oid,
+        label: doc[labelField] || doc._id.$oid, // Use determined label field
       }));
       referenceOptions.value[collectionName] = options;
       

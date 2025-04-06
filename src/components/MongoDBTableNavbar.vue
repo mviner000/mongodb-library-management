@@ -3,7 +3,7 @@
 import { useRouter, useRoute } from 'vue-router';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { computed, inject, ref, watch } from 'vue'; // Add watch
+import { inject, ref, watch } from 'vue'; // Add watch
 
 // Define the Tab interface
 interface Tab {
@@ -101,7 +101,7 @@ defineExpose({
 </script>
 
 <template>
-  <header class="sticky top-0 z-50 flex items-center w-full h-14 px-2 border-b bg-white">
+  <header class="sticky top-0 z-0 flex items-center w-full h-14 px-2 border-b bg-white">
     <!-- Left section: Menu and title -->
     <div class="flex items-center gap-2">
         

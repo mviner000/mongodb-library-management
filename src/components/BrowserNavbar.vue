@@ -1,20 +1,24 @@
 <!-- src/components/BrowserNavbar.vue -->
 <script setup lang="ts">
-import { inject, ref, watch } from 'vue'
+import { inject, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useZoom } from '@/composables/useZoom'
+import { ShieldIcon, PasswordIcon, UserIcon, EditIcon, SyncIcon, SettingsIcon, LogoutIcon, MinusIcon, PlusIcon, BookmarkIcon, DotsIcon, BackIcon, ForwardIcon, ReloadIcon } from '@/components/Icons';
 
 // Props for the component
 const props = defineProps<{
   currentUrl?: string
 }>()
 
-const emit = defineEmits(['navigate', 'reload', 'back', 'forward'])
+const emit = defineEmits(['navigate', 'reload', 'back', 'forward', 'logout']);
 
 // Track URL input value
 const urlInput = ref('')
 
 // Use the zoom composable
 const { zoomLevel, zoomIn, zoomOut, resetZoom } = inject('zoom')! as ReturnType<typeof useZoom>
+
+// Track profile dropdown state
+const showProfileDropdown = ref(false)
 
 // Update input when currentUrl prop changes
 watch(() => props.currentUrl, (newUrl) => {
@@ -47,6 +51,37 @@ function handleBookmark() {
   // Add bookmark functionality
   console.log('Bookmark added')
 }
+
+function toggleProfileDropdown() {
+  showProfileDropdown.value = !showProfileDropdown.value
+}
+
+// Close dropdown when clicking outside
+function closeDropdown(event: MouseEvent) {
+  const target = event.target as HTMLElement
+  if (!target.closest('.profile-dropdown') && !target.closest('.profile-button')) {
+    showProfileDropdown.value = false
+  }
+}
+
+function handleLogout() {
+  emit('logout');
+  showProfileDropdown.value = false; // Close dropdown when logout is pressed
+}
+
+// Add global click handler to close dropdown when clicking outside
+function handleGlobalClick(event: MouseEvent) {
+  closeDropdown(event);
+}
+
+// Add and remove event listener for global click
+onMounted(() => {
+  document.addEventListener('click', handleGlobalClick);
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleGlobalClick);
+})
 </script>
 
 <template>
@@ -57,29 +92,21 @@ function handleBookmark() {
       <button 
         @click="handleBack"
         class="w-8 h-8 rounded flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M19 12H5M12 19l-7-7 7-7"></path>
-        </svg>
+        <BackIcon />
       </button>
       
       <!-- Forward Button -->
       <button 
         @click="handleForward"
         class="w-8 h-8 rounded flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M5 12h14M12 5l7 7-7 7"></path>
-        </svg>
+        <ForwardIcon />
       </button>
       
       <!-- Reload Button -->
       <button 
         @click="handleReload"
         class="w-8 h-8 rounded flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M1 4v6h6"></path>
-          <path d="M23 20v-6h-6"></path>
-          <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"></path>
-        </svg>
+        <ReloadIcon />
       </button>
     </div>
     
@@ -88,9 +115,7 @@ function handleBookmark() {
       <div class="relative flex items-center w-full">
         <!-- Security/Site Info Icon -->
         <div class="absolute left-2 flex items-center justify-center text-gray-400">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-          </svg>
+          <ShieldIcon />
         </div>
         
         <!-- URL Input -->
@@ -108,16 +133,14 @@ function handleBookmark() {
     <!-- Action Buttons -->
     <div class="flex items-center space-x-0 p-0 ml-2">
       <!-- Zoom Controls -->
-      <div class="flex space-x-0 absolute right-20 mr-1 mt-1">
+      <div class="flex space-x-0 mr-2">
         <button 
           @click="zoomOut"
           :disabled="zoomLevel <= 50"
           class="mt-0.5 w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]"
           title="Zoom Out (Ctrl+-)"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M5 12h14"/>
-          </svg>
+          <MinusIcon />
         </button>
 
         <button 
@@ -134,9 +157,7 @@ function handleBookmark() {
           class="mt-0.5 w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]"
           title="Zoom In (Ctrl+=)"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 5v14M5 12h14"/>
-          </svg>
+          <PlusIcon />
         </button>
       </div>
 
@@ -144,19 +165,91 @@ function handleBookmark() {
       <button 
         @click="handleBookmark"
         class="w-8 h-8 rounded flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
-        </svg>
+        <BookmarkIcon />
       </button>
       
       <!-- Extensions Button (placeholder for your browser-like UI) -->
       <button class="w-8 h-8 rounded flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="1"></circle>
-          <circle cx="19" cy="12" r="1"></circle>
-          <circle cx="5" cy="12" r="1"></circle>
-        </svg>
+        <DotsIcon />
       </button>
+
+      <!-- User Profile Button -->
+      <div class="relative ml-2">
+        <button 
+          @click.stop="toggleProfileDropdown" 
+          class="profile-button w-8 h-8 rounded-full flex items-center justify-center overflow-hidden border border-gray-600 hover:border-gray-400"
+        >
+          <!-- Default profile icon or user image -->
+          <div class="w-full h-full bg-gray-600 flex items-center justify-center text-white">
+            <span class="text-xs">U</span>
+          </div>
+        </button>
+
+        <!-- Profile Dropdown Menu -->
+        <div 
+          v-if="showProfileDropdown" 
+          class="profile-dropdown absolute right-0 top-10 w-64 bg-[#2A2A2A] border border-gray-700 rounded shadow-lg z-50"
+        >
+          <!-- User Profile Header -->
+          <div class="p-3 flex flex-col items-center border-b border-gray-700">
+            <div class="w-14 h-14 rounded-full bg-gray-600 flex items-center justify-center text-white mb-2">
+              <span class="text-lg">U</span>
+            </div>
+            <div class="text-gray-200 font-medium">User Name</div>
+            <div class="text-gray-400 text-sm">user@example.com</div>
+          </div>
+
+          <!-- Dropdown Menu Items -->
+          <div class="py-1">
+            <button class="w-full px-4 py-2 text-left text-gray-300 hover:bg-[#3A3A3A] flex items-center">
+              <PasswordIcon class="w-4 h-4 mr-3" />
+              Passwords and autofill
+            </button>
+            <button class="w-full px-4 py-2 text-left text-gray-300 hover:bg-[#3A3A3A] flex items-center">
+              <UserIcon class="w-4 h-4 mr-3" />
+              Manage your Account
+            </button>
+            <button class="w-full px-4 py-2 text-left text-gray-300 hover:bg-[#3A3A3A] flex items-center">
+              <EditIcon class="w-4 h-4 mr-3" />
+              Customize profile
+            </button>
+            <button class="w-full px-4 py-2 text-left text-gray-300 hover:bg-[#3A3A3A] flex items-center">
+              <SyncIcon class="w-4 h-4 mr-3" />
+              Sync is on
+            </button>
+          </div>
+
+          <!-- Other Profiles Section -->
+          <div class="border-t border-gray-700 pt-2 pb-1">
+            <div class="px-4 py-1 text-sm text-gray-400">Other Chrome profiles</div>
+            <button class="w-full px-4 py-2 text-left text-gray-300 hover:bg-[#3A3A3A] flex items-center">
+              <div class="w-5 h-5 rounded-full bg-orange-500 mr-3 flex items-center justify-center text-white">
+                <span class="text-xs">O</span>
+              </div>
+              Oscar
+            </button>
+            <button class="w-full px-4 py-2 text-left text-gray-300 hover:bg-[#3A3A3A] flex items-center">
+              <EditIcon class="w-5 h-5 mr-3" />
+              Add Chrome profile
+            </button>
+            <button class="w-full px-4 py-2 text-left text-gray-300 hover:bg-[#3A3A3A] flex items-center">
+              <UserIcon class="w-5 h-5 mr-3" />
+              Open Guest profile
+            </button>
+            <button class="w-full px-4 py-2 text-left text-gray-300 hover:bg-[#3A3A3A] flex items-center">
+              <SettingsIcon class="w-5 h-5 mr-3" />
+              Manage Chrome profiles
+            </button>
+            <button 
+              @click="handleLogout"
+              class="w-full px-4 py-2 text-left text-gray-300 hover:bg-[#3A3A3A] flex items-center"
+            >
+              <LogoutIcon class="w-5 h-5 mr-3" />
+              Log out
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>

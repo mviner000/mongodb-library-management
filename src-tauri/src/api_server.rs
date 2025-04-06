@@ -111,6 +111,11 @@ async fn get_database(mongodb_state: &Arc<Mutex<MongoDbState>>) -> Result<Databa
     }
 }
 
+async fn health_check_handler() -> impl IntoResponse {
+    // Simple 200 OK response
+    StatusCode::OK
+}
+
 async fn login_user(
     mongodb_state: &Arc<Mutex<MongoDbState>>,
     session_manager: &Arc<Mutex<SessionManager>>,
@@ -773,6 +778,7 @@ fn create_api_router() -> Router<Arc<Mutex<ApiServerState>>> {
         .route("/api/auth/login", post(auth_login_handler))
         .route("/api/auth/register", post(auth_register_handler))
         .route("/api/auth/check-session", post(auth_check_session_handler))
+        .route("/api/health", get(health_check_handler))
         .layer(cors)
 }
 

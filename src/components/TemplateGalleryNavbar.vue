@@ -3,7 +3,7 @@
 import { ref, watch } from 'vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import UserAvatarNavigation from '@/components/UserAvatarNavigation.vue';
 
 const props = defineProps<{
   showSearch?: boolean;
@@ -15,7 +15,6 @@ const title = ref(props.title || 'Library Manager');
 
 // Track search visibility
 const showSearch = ref(props.showSearch !== true);
-
 
 // Watch for title prop changes
 watch(() => props.title, (newTitle) => {
@@ -78,34 +77,7 @@ watch(() => props.showSearch, (newValue) => {
     <!-- Empty div for spacing when search is hidden -->
     <div v-else class="flex-1"></div>
 
-    <!-- Right section: User profile and actions -->
-    <div class="flex items-center gap-2">
-      <Button variant="ghost" size="icon" class="text-gray-500">
-        <!-- More Vertical Icon (3 dots) -->
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="1"></circle>
-          <circle cx="12" cy="5" r="1"></circle>
-          <circle cx="12" cy="19" r="1"></circle>
-        </svg>
-      </Button>
-      
-      <div class="flex items-center gap-1 ml-2">
-        <div class="flex -space-x-2">
-          <Avatar class="h-8 w-8 border-2 border-white">
-            <AvatarFallback class="text-xs">GJC</AvatarFallback>
-          </Avatar>
-          <Avatar class="h-8 w-8 border-2 border-white">
-            <AvatarImage src="" alt="User" />
-            <AvatarFallback class="bg-gray-200">
-              <span class="sr-only">User</span>
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-500">
-                <circle cx="12" cy="8" r="5" />
-                <path d="M20 21a8 8 0 0 0-16 0" />
-              </svg>
-            </AvatarFallback>
-          </Avatar>
-        </div>
-      </div>
-    </div>
+    <!-- Right section: Using the separated UserAvatarNavigation component -->
+    <UserAvatarNavigation />
   </header>
 </template>
