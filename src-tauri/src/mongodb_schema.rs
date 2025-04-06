@@ -118,16 +118,26 @@ async fn create_attendance_collection(db: &Database) -> Result<()> {
 
 async fn create_users_collection(db: &Database) -> Result<()> {
     let collection = db.collection::<Document>("users");
-    
-    let index = IndexModel::builder()
+
+    // Create a unique index on "username"
+    let username_index = IndexModel::builder()
         .keys(doc! { "username": 1 })
         .options(Some(mongodb::options::IndexOptions::builder()
             .unique(true)
             .build()))
         .build();
 
-    collection.create_index(index, None).await?;
-    
+    // Create a unique index on "email"
+    let email_index = IndexModel::builder()
+        .keys(doc! { "email": 1 })
+        .options(Some(mongodb::options::IndexOptions::builder()
+            .unique(true)
+            .build()))
+        .build();
+
+    collection.create_index(username_index, None).await?;
+    collection.create_index(email_index, None).await?;
+
     // Apply validator schema using collMod
     db.run_command(
         doc! {
@@ -135,12 +145,29 @@ async fn create_users_collection(db: &Database) -> Result<()> {
             "validator": {
                 "$jsonSchema": {
                     "bsonType": "object",
-                    "required": ["username", "password", "created_at", "updated_at"],
+                    "required": ["username", "email", "password", "created_at", "updated_at"],
                     "properties": {
-                        "username": { "bsonType": "string", "description": "Username (required, unique)" },
-                        "password": { "bsonType": "string", "description": "Password (hashed, required)" },
-                        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
-                        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
+                        "username": {
+                            "bsonType": "string",
+                            "description": "Username (required, unique)"
+                        },
+                        "email": {
+                            "bsonType": "string",
+                            "pattern": "^[\\w.-]+@[\\w.-]+\\.[a-zA-Z]{2,}$",
+                            "description": "Email (required, unique, must match pattern)"
+                        },
+                        "password": {
+                            "bsonType": "string",
+                            "description": "Password (hashed, required)"
+                        },
+                        "created_at": {
+                            "bsonType": "date",
+                            "description": "Creation timestamp (required)"
+                        },
+                        "updated_at": {
+                            "bsonType": "date",
+                            "description": "Last update timestamp (required)"
+                        }
                     }
                 }
             },
@@ -149,9 +176,10 @@ async fn create_users_collection(db: &Database) -> Result<()> {
         },
         None
     ).await?;
-    
+
     Ok(())
 }
+
 
 async fn create_purposes_collection(db: &Database) -> Result<()> {
     let collection = db.collection::<Document>("purposes");

@@ -16,9 +16,15 @@ import { useToast } from './components/ui/toast'
 import ApiServerStatus from './components/ApiServerStatus.vue'
 import TemplateGallery from './components/TemplateGallery.vue'
 import HelloWorldTab from './components/HelloWorldTab.vue'
+import LoginModal from './components/auth/LoginModal.vue'
+import RegisterModal from './components/auth/RegisterModal.vue'
 
 const route = useRoute()
 const router = useRouter()
+
+const showLoginModal = ref(true)
+const showRegisterModal = ref(false)
+const authToken = ref(localStorage.getItem('token') || null)
 
 const componentCache = ref(new Map())
 
@@ -573,10 +579,107 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyPress);
 });
+
+onMounted(async () => {
+  // Start with the modal hidden during authentication check
+  showLoginModal.value = false
+
+  if (authToken.value) {
+    try {
+      const isValid = await invoke<boolean>('check_session', { token: authToken.value })
+      if (!isValid) {
+        authToken.value = null
+        localStorage.removeItem('token')
+        showLoginModal.value = true
+      }
+    } catch (error) {
+      console.error('Session check failed:', error)
+      authToken.value = null
+      localStorage.removeItem('token')
+      showLoginModal.value = true
+    }
+  } else {
+    // No token found, show login modal
+    showLoginModal.value = true
+  }
+})
+
+// login handler
+const handleLogin = async (identifier: string, password: string) => {
+  try {
+    const token = await invoke<string>('login', { identifier, password })
+    authToken.value = token
+    localStorage.setItem('token', token)
+    showLoginModal.value = false
+    toast({
+      title: 'Login Successful',
+      description: 'Welcome back!',
+    })
+  } catch (error) {
+    console.error('Login failed:', error)
+    
+    // Show a toast notification for the error
+    toast({
+      title: 'Login Failed',
+      description: typeof error === 'string' ? error : 'Invalid credentials',
+      variant: 'destructive'
+    })
+    
+    // Re-throw the error so it can be caught by the LoginModal component
+    throw error
+  }
+}
+
+const handleRegister = async (username: string, email: string, password: string) => {
+  console.log('Initiating registration for:', username, email);
+  try {
+    // Pass username as first parameter
+    await invoke('register', { username, email, password });
+    toast({
+      title: 'Registration successful',
+      description: 'You can now log in with your credentials',
+    });
+    showRegisterModal.value = false;
+    showLoginModal.value = true;
+  } catch (error) {
+    console.error('Registration failed:', error);
+    throw new Error(error instanceof Error ? error.message : 'Registration failed');
+  }
+}
+
+const showRegister = () => {
+  showLoginModal.value = false
+  showRegisterModal.value = true
+}
+
+const showLogin = () => {
+  showRegisterModal.value = false
+  showLoginModal.value = true
+}
+
+const handleCloseModal = () => {
+  // Only allow closing if authenticated
+  if (authToken.value) {
+    showLoginModal.value = false
+  }
+}
 </script>
 
 <template>
   <Toaster />
+  <LoginModal 
+    v-if="showLoginModal" 
+    :isAuthenticated="!!authToken" 
+    @login="handleLogin" 
+    @close="handleCloseModal"
+    @show-register="showRegister"
+  />
+  <RegisterModal
+    v-if="showRegisterModal" 
+    @register="handleRegister"
+    @close="showRegisterModal = false"
+    @show-login="showLogin"
+  />
   <div class="flex flex-col min-h-screen">
     <ApiServerStatus />
 

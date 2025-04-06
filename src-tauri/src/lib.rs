@@ -7,7 +7,9 @@ use tokio::sync::Mutex;
 mod mongodb_installer;
 mod mongodb_manager;
 mod mongodb_schema;
-mod api_server; // Add this new module
+mod api_server;
+mod session; // Add the session module
+mod auth; // Add the auth module
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -26,6 +28,20 @@ pub fn run() {
             // Initialize MongoDB state
             let mongodb_state = mongodb_manager::MongoDbState::new("app_database");
             app.manage(mongodb_state.clone());
+
+            // Initialize session manager
+            let session_manager = session::SessionManager::new();
+            app.manage(session_manager.clone());
+            
+            // Add session cleanup task
+            let cleanup_session_manager = session_manager.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+                loop {
+                    interval.tick().await;
+                    cleanup_session_manager.cleanup_expired().await;
+                }
+            });
 
             // Initialize API server state with MongoDB reference
             let api_server_state = Arc::new(Mutex::new(api_server::ApiServerState::new(mongodb_state)));
@@ -78,6 +94,11 @@ pub fn run() {
             api_server::start_api_server,
             api_server::stop_api_server,
             api_server::list_api_routes,
+            
+            // Authentication commands
+            auth::login,
+            auth::register,
+            auth::check_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

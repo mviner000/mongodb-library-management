@@ -8,12 +8,12 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tauri::State;
 use anyhow::Result;
-use futures_util::stream::StreamExt; // Add this import for cursor.next()
+use futures_util::stream::StreamExt;
 
 // Define MongoDB connection state
 pub struct MongoDbState {
-    client: Arc<Mutex<Option<Client>>>,
-    database_name: String,
+    pub client: Arc<Mutex<Option<Client>>>, // Add pub modifier here
+    pub database_name: String,              // And here if needed
 }
 
 impl MongoDbState {

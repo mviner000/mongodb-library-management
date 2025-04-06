@@ -441,14 +441,6 @@ fn process_double_field(doc: &mut Document, field: &str) -> Result<(), String> {
     Ok(())
 }
 
-// Legacy function for backward compatibility (now calls the more comprehensive process_document_fields)
-async fn process_date_fields(
-    db: &Database, 
-    collection_name: &str, 
-    doc: &mut Document
-) -> Result<(), String> {
-    process_document_fields(db, collection_name, doc).await
-}
 
 async fn update_document_handler(
     State(state): State<Arc<Mutex<ApiServerState>>>,
