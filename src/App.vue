@@ -235,6 +235,8 @@ watch(() => route.path, (newPath) => {
   }
 }, { immediate: true });
 
+
+
 // Keyboard shortcut handler
 function handleKeyPress(e: KeyboardEvent) {
   if (e.ctrlKey && e.key.toLowerCase() === 't') {
@@ -244,14 +246,30 @@ function handleKeyPress(e: KeyboardEvent) {
   
   if (e.ctrlKey && e.key === '\\') {
     e.preventDefault()
+    
     if (tabs.value.length === 2) {
-      isSplit.value = !isSplit.value
+      // Check if any tab is Home
+      const hasHomeTab = tabs.value.some(tab => {
+        // Check for multiple possible ways the home tab might be identified
+        return tab.path === '/home' || 
+               tab.path === '/app/home' || 
+               tab.path === '/' || 
+               tab.type === 'home';
+      });
       
-      // Preserve both tab paths when splitting
-      if (isSplit.value) {
-        tabs.value.forEach(tab => {
-          if (!tab.path) tab.path = '/home';
-        });
+      if (!hasHomeTab) {
+        isSplit.value = !isSplit.value
+        // Preserve both tab paths when splitting
+        if (isSplit.value) {
+          tabs.value.forEach(tab => {
+            if (!tab.path) tab.path = '/home';
+          });
+        }
+      } else {
+        toast({
+          title: 'Split Tab Error',
+          description: 'One of tab is set to Home, change it to other link please',
+        })
       }
     } else if (tabs.value.length > 2) {
       toast({

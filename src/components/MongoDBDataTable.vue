@@ -163,9 +163,9 @@ watch(collectionName, async (newVal) => {
 }, { immediate: true });
 
 // Watch for route changes to update collection name
-watch(() => route.params.name, (newVal) => {
+watch(() => props.name, (newVal) => {
   if (newVal && newVal !== collectionName.value) {
-    collectionName.value = newVal as string;
+    collectionName.value = newVal;
   }
 }, { immediate: true });
 
