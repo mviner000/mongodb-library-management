@@ -193,19 +193,18 @@ watch(isSplit, (newVal) => {
   if (newVal) leftWidth.value = 50
 })
 
-// MODIFIED: Updated watch for route.path with renamed variable
 watch(() => route.path, (newPath, oldPath) => {
   // Skip if in split view or if the path hasn't meaningfully changed
   if (isSplit.value || newPath === oldPath) return;
 
-  // Find the currently active tab's data (RENAMED from activeTabInstance)
+  // Always update the URL display first
+  currentUrl.value = `app${newPath}`;
+
+  // Find the currently active tab's data
   const currentActiveTabData = tabs.value.find(t => t.id === activeTabId.value);
 
   if (currentActiveTabData) {
-    // Update the active tab's properties to reflect the route change (e.g., from back/forward)
-    // Check if the tab's path already matches the newPath. This can happen if
-    // navigation was initiated *within* the app (e.g., handleNavigation).
-    // Only update if the path differs, indicating external change (back/forward).
+    // Update the active tab's properties to reflect the route change
     if (currentActiveTabData.path !== newPath) {
       currentActiveTabData.path = newPath;
 
@@ -232,24 +231,24 @@ watch(() => route.path, (newPath, oldPath) => {
       }
     }
 
-    // Update the BrowserNavbar's URL display (if not split)
-    currentUrl.value = `app${newPath}`;
+    // Don't log history entry if the path is history
+    if (newPath !== '/history') {
+      // Log history entry
+      const historyEntry = {
+        tabId: activeTabId.value,
+        nameOfTheOpenedLink: currentActiveTabData.title,
+        created_at: new Date().toISOString(),
+        urlLink: `app${newPath}`
+      };
+
+      const history = JSON.parse(sessionStorage.getItem('browserHistory') || '[]');
+      history.push(historyEntry);
+      sessionStorage.setItem('browserHistory', JSON.stringify(history));
+    }
   } else {
-    // This case might occur if the active tab was closed and the route change happens
-    // before a new tab is fully activated. Or maybe on initial load issues.
     console.warn("Route changed but couldn't find active tab:", activeTabId.value, "New path:", newPath);
-    // Decide on fallback behavior: update URL bar anyway
-    currentUrl.value = `app${newPath}`;
   }
 }, { immediate: false });
-
-// Keep this watcher for URL updates
-watch(() => route.path, (newPath) => {
-  if (!isSplit.value) {
-    currentUrl.value = `app${newPath}`
-  }
-}, { immediate: true });
-
 
 
 // Keyboard shortcut handler
@@ -263,6 +262,22 @@ function handleKeyPress(e: KeyboardEvent) {
     e.preventDefault()
     
     if (tabs.value.length === 2) {
+      // Check if any tab is History or has app/history in path
+      const hasHistoryTab = tabs.value.some(tab => {
+        return tab.path === '/history' || 
+               tab.path === '/app/history' || 
+               tab.path?.includes('app/history') ||
+               tab.title === 'History';
+      });
+      
+      if (hasHistoryTab) {
+        toast({
+          title: 'Split Tab Error',
+          description: 'Cannot split when History tab is open',
+        });
+        return;
+      }
+      
       // Check if any tab is Home
       const hasHomeTab = tabs.value.some(tab => {
         // Check for multiple possible ways the home tab might be identified
@@ -283,7 +298,7 @@ function handleKeyPress(e: KeyboardEvent) {
       } else {
         toast({
           title: 'Split Tab Error',
-          description: 'One of tab is set to Home, change it to other link please',
+          description: 'Cannot split when Home tab is open',
         })
       }
     } else if (tabs.value.length > 2) {
@@ -302,6 +317,15 @@ function handleKeyPress(e: KeyboardEvent) {
   // Add new shortcut for history
   if (e.ctrlKey && e.key.toLowerCase() === 'h') {
     e.preventDefault()
+    
+    // Check if split view is active
+    if (isSplit.value) {
+      toast({
+        title: 'History Navigation Error',
+        description: 'History page cannot be opened in split view mode',
+      });
+      return;
+    }
     
     // Get the current active tab
     const currentActiveTab = tabs.value.find(t => t.id === activeTabId.value);
