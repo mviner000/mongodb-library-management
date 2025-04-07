@@ -16,6 +16,7 @@ import { useToast } from './components/ui/toast'
 import ApiServerStatus from './components/ApiServerStatus.vue'
 import TemplateGallery from './components/TemplateGallery.vue'
 import HelloWorldTab from './components/HelloWorldTab.vue'
+import HistoryPage from './components/HistoryPage.vue'
 import AuthTabs from './components/auth/AuthTabs.vue'
 import { LoginResponse, SessionCheckResponse } from './types/auth'
 import { apiFetch } from './utils/api'
@@ -40,7 +41,12 @@ function resolveComponent(tab: Tab) {
   
   switch (tab.type) {
     case 'home':
-      component = markRaw(TemplateGallery)
+      if (tab.path === '/history') {
+        // Special case for history
+        component = markRaw(HistoryPage)
+      } else {
+        component = markRaw(TemplateGallery)
+      }
       break
     case 'collection':
       component = markRaw(MongoDBDataTable)
@@ -290,6 +296,22 @@ function handleKeyPress(e: KeyboardEvent) {
         title: 'Split Tab Error',
         description: 'Not enough tabs to split',
       })
+    }
+  }
+  
+  // Add new shortcut for history
+  if (e.ctrlKey && e.key.toLowerCase() === 'h') {
+    e.preventDefault()
+    
+    // Get the current active tab
+    const currentActiveTab = tabs.value.find(t => t.id === activeTabId.value);
+    
+    if (currentActiveTab) {
+      // Update the current tab to show history
+      currentActiveTab.path = '/history';
+      currentActiveTab.title = 'History';
+      currentActiveTab.type = 'home'; // Reuse home type since it's a placeholder
+      router.push('/history');
     }
   }
 }

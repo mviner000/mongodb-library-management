@@ -4,6 +4,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import TemplateGallery from '@/components/TemplateGallery.vue'
 import MongoDBDataTable from '@/components/MongoDBDataTable.vue'
 import HelloWorldTab from '@/components/HelloWorldTab.vue'
+import HistoryPage from '@/components/HistoryPage.vue'
 
 const routes = [
   {
@@ -30,6 +31,11 @@ const routes = [
     path: '/settings',
     name: 'Settings',
     component: () => import('@/components/MongoDBStatus.vue')
+  },
+  {
+    path: '/history',
+    name: 'History',
+    component: HistoryPage
   }
 ]
 

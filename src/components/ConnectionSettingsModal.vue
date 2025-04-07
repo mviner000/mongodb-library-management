@@ -8,8 +8,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { useToast } from '@/components/ui/toast';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { testConnection } from '@/utils/api';
+import { LoaderCircle } from 'lucide-vue-next';
 
-const props = defineProps<{
+defineProps<{
   isOpen: boolean;
 }>();
 
@@ -22,6 +23,10 @@ const isValidIp = ref(true);
 const showConfirmDialog = ref(false);
 const connectionStatus = ref('❓'); // Default emoji
 const isTestingConnection = ref(false);
+const confirmationMessage = ref('');
+const connectionSuccessful = ref(false);
+const isSaveButtonLoading = ref(false);
+const isSaveButtonDisabled = ref(false);
 
 // IPv4 validation regex
 const ipv4Regex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
@@ -42,11 +47,33 @@ const validateIp = () => {
   return isValidIp.value;
 };
 
-const handleSave = () => {
-  if (validateIp()) {
-    // Show confirmation dialog
-    showConfirmDialog.value = true;
+const handleSave = async () => {
+  if (!validateIp() || isSaveButtonDisabled.value) return;
+  
+  // Set button to loading state and disable it
+  isSaveButtonLoading.value = true;
+  isSaveButtonDisabled.value = true;
+  
+  // First test the connection before showing confirmation dialog
+  await handleTestConnection();
+  
+  // Set confirmation message based on connection test result
+  if (connectionSuccessful.value) {
+    confirmationMessage.value = `✅ Connection Success to ${ipAddress.value}:3000. Are you sure you want to continue?`;
+  } else {
+    confirmationMessage.value = `❌ Connection Failed to ${ipAddress.value}:3000. Are you sure you want to continue?`;
   }
+  
+  // Show confirmation dialog
+  showConfirmDialog.value = true;
+  
+  // Keep button in loading state until connection test is complete
+  isSaveButtonLoading.value = false;
+  
+  // Set a timeout to re-enable the button after 2 seconds
+  setTimeout(() => {
+    isSaveButtonDisabled.value = false;
+  }, 2000);
 };
 
 const confirmSave = () => {
@@ -75,7 +102,7 @@ const cancelSave = () => {
 };
 
 const handleEnterKey = (event: KeyboardEvent) => {
-  if (event.key === 'Enter' && validateIp()) {
+  if (event.key === 'Enter' && validateIp() && !isSaveButtonDisabled.value) {
     handleSave();
   }
 };
@@ -94,7 +121,7 @@ const handleTestConnection = async () => {
       description: 'Please enter a valid IP address before testing the connection.',
       variant: 'destructive'
     });
-    return;
+    return false;
   }
 
   connectionStatus.value = '⏳'; // Loading emoji
@@ -106,6 +133,7 @@ const handleTestConnection = async () => {
   
   try {
     const isConnected = await testConnection();
+    connectionSuccessful.value = isConnected;
     
     if (isConnected) {
       connectionStatus.value = '✅'; // Success emoji
@@ -121,13 +149,16 @@ const handleTestConnection = async () => {
         variant: 'destructive'
       });
     }
+    return isConnected;
   } catch (error) {
     connectionStatus.value = '❌'; // Failure emoji
+    connectionSuccessful.value = false;
     toast({
       title: 'Connection Error',
       description: `Error testing connection: ${error}`,
       variant: 'destructive'
     });
+    return false;
   } finally {
     // Restore the original IP address in localStorage
     if (originalIp) {
@@ -185,9 +216,11 @@ const handleTestConnection = async () => {
       <DialogFooter class="flex justify-between">
         <Button variant="outline" @click="handleClose">Cancel</Button>
         <Button 
-          :disabled="!isValidIp || ipAddress === ''"
+          :disabled="!isValidIp || ipAddress === '' || isSaveButtonDisabled"
           @click="handleSave"
+          :class="{ 'opacity-50 cursor-not-allowed': isSaveButtonDisabled }"
         >
+          <span v-if="isSaveButtonLoading" class="inline-block animate-spin"><LoaderCircle /></span>
           Save Settings
         </Button>
       </DialogFooter>
@@ -199,7 +232,7 @@ const handleTestConnection = async () => {
       <AlertDialogHeader>
         <AlertDialogTitle>Are you sure?</AlertDialogTitle>
         <AlertDialogDescription>
-          This will update the API Base URL to {{ ipAddress }}:3000. The application will reload to apply changes.
+          {{ confirmationMessage }}
         </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
