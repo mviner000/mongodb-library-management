@@ -6,7 +6,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { ReloadIcon, TrashIcon } from '@radix-icons/vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Table,
   TableBody,
@@ -31,12 +30,6 @@ import {
   PaginationNext,
   PaginationPrev,
 } from '@/components/ui/pagination';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger
-} from '@/components/ui/tooltip';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/components/ui/toast/use-toast';
 import { PlusCircledIcon } from '@radix-icons/vue';
@@ -63,7 +56,6 @@ const filterQuery = ref('{}');
 const collectionSchema = ref<any>({});
 const newDocument = ref<Record<string, any>>({});
 const isAdding = ref(false);
-const showSchemaAsRow = ref(true);
 
 import { getApiBaseUrl } from '@/utils/api';
 const API_BASE = getApiBaseUrl();
@@ -240,11 +232,6 @@ const tableHeaders = computed(() => {
   });
 });
 
-// Check if schema is available
-const hasSchema = computed(() => {
-  return collectionSchema.value && collectionSchema.value.properties && Object.keys(collectionSchema.value.properties).length > 0;
-});
-
 // Get schema information for a specific field
 const getSchemaInfo = (field: string) => {
   if (!collectionSchema.value.properties || !collectionSchema.value.properties[field]) return {};
@@ -279,24 +266,6 @@ const formatSchemaValue = (value: any, bsonType: string | string[]) => {
   return String(value);
 };
 
-// Get friendly field type name
-const getFieldTypeName = (field: string) => {
-  const fieldInfo = getSchemaInfo(field);
-  if (!fieldInfo || !fieldInfo.bsonType) return 'Unknown';
-  
-  const bsonType = Array.isArray(fieldInfo.bsonType) ? fieldInfo.bsonType[0] : fieldInfo.bsonType;
-  
-  switch(bsonType) {
-    case 'string': return 'Text';
-    case 'int': return 'Integer';
-    case 'double': return 'Number';
-    case 'bool': return 'Boolean';
-    case 'date': return 'Date';
-    case 'array': return 'Array';
-    case 'object': return 'Object';
-    default: return bsonType;
-  }
-};
 
 watch(collectionName, async (newVal) => {
   try {
@@ -327,10 +296,6 @@ const initializeNewDocument = () => {
       doc[field] = getDefaultValue(prop.bsonType);
     }
   });
-  
-  // Add required timestamps
-  if (properties.created_at) doc.created_at = new Date();
-  if (properties.updated_at) doc.updated_at = new Date();
   
   return doc;
 };
@@ -560,7 +525,7 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
     :isSplitActive="isSplit" 
     class="sticky top-0 z-50" 
   />
-  <div class="border rounded-md p-4 w-full">
+  <div class="border rounded-md w-full">
     
     <div v-if="errorMessage" class="my-2 p-2 bg-red-100 text-red-700 rounded">
       {{ errorMessage }}
@@ -569,196 +534,151 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
     <div v-if="isLoading" class="flex justify-center my-8">
       <ReloadIcon class="h-8 w-8 animate-spin text-gray-500" />
     </div>
-    
-    <!-- Schema info table when no documents found -->
-    <div v-else-if="documents.length === 0 && hasSchema" class="w-full">
-      <div class="mb-4">
-        <h3 class="text-lg font-semibold mb-2">Collection Schema: {{ collectionName }}</h3>
-        <p class="text-gray-600 mb-4">
-          No documents found in this collection. Below is the schema definition.
-        </p>
-        
-        <!-- Excel-style schema fields with tooltips -->
-        <div class="overflow-x-auto pb-2 mb-4">
-          <div class="flex excel-headers">
-            <div v-for="field in tableHeaders" :key="field" class="relative">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div class="excel-header-cell" :class="isFieldRequired(field) ? 'excel-header-required' : ''">
-                      {{ field }}
-                      <span v-if="isFieldRequired(field)" class="text-red-500 ml-1">*</span>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent class="w-64 p-0">
-                    <div class="text-gray-600 bg-white rounded shadow border border-gray-200 p-3">
-                      <div class="font-semibold border-b pb-1 mb-2 text-slate-600">{{ field }}</div>
-                      <div class="grid grid-cols-2 gap-1 text-sm">
-                        <div>Type:</div>
-                        <div class="font-medium">{{ getFieldTypeName(field) }}</div>
-                        
-                        <div>Required:</div>
-                        <div>
-                          <span v-if="isFieldRequired(field)" class="text-green-600 font-medium">Yes</span>
-                          <span v-else class="text-gray-500">No</span>
-                        </div>
-                        
-                        <div>Description:</div>
-                        <div>{{ getSchemaInfo(field).description || 'No description' }}</div>
-                        
-                        <div v-if="isReferenceField(field)">References:</div>
-                        <div v-if="isReferenceField(field)" class="font-medium">{{ getReferencedCollection(field) }}</div>
-                      </div>
-                    </div>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-          </div>
-        </div>
-            
-        <div class="mt-6">
-          <Button @click="startAdding" class="gap-2">
-            <PlusCircledIcon class="h-4 w-4" />
-            <span>Add First Document</span>
-          </Button>
-        </div>
-      </div>
-  
-      <!-- Add document form (updated) -->
-      <div v-if="isAdding" class="mt-6 border rounded-md p-4 bg-gray-50">
-        <h3 class="text-lg font-semibold mb-4">Add New Document</h3>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div v-for="field in tableHeaders" :key="`new-${field}`" class="mb-4">
-            <Label :for="`field-${field}`" class="block mb-1">
-              {{ field }}
-              <span v-if="isFieldRequired(field)" class="text-red-500">*</span>
-            </Label>
-            
-            <!-- Boolean field handling -->
-            <template v-if="getSchemaInfo(field).bsonType === 'bool'">
-              <div class="flex items-center gap-2">
-                <input 
-                  type="checkbox" 
-                  :id="`field-${field}`"
-                  v-model="newDocument[field]"
-                  class="h-4 w-4"
-                />
-                <label :for="`field-${field}`" class="text-sm">
-                  {{ newDocument[field] ? 'True' : 'False' }}
-                </label>
-              </div>
-            </template>
-            
-            <!-- Reference field with dropdown -->
-            <template v-else-if="isReferenceField(field)">
-              <div v-if="loadingReferences[getReferencedCollection(field)]" class="flex items-center gap-2">
-                <ReloadIcon class="h-4 w-4 animate-spin" />
-                <span>Loading options...</span>
-              </div>
-              <Select v-else v-model="newDocument[field]">
-                <SelectTrigger>
-                  <SelectValue :placeholder="`Select ${getReferencedCollection(field)}`" />
-                </SelectTrigger>
-                <SelectContent>
-                  <ScrollArea class="h-48">
-                    <div class="p-1">
-                      <Input 
-                        v-model="searchQuery[field]"
-                        placeholder="Search..."
-                        class="mb-2"
-                      />
-                      <div v-if="filteredOptions(field).length">
-                        <SelectItem 
-                          v-for="option in filteredOptions(field)"
-                          :key="option.id"
-                          :value="option.id"
-                        >
-                          {{ option.label }}
-                        </SelectItem>
-                      </div>
-                      <div v-else class="text-sm text-gray-500 px-2 py-1">
-                        No options found
-                      </div>
-                    </div>
-                  </ScrollArea>
-                </SelectContent>
-              </Select>
-            </template>
 
-            <!-- Regular field -->
-            <template v-else>
-              <Input 
-                v-if="field !== '_id'"
-                :id="`field-${field}`"
-                v-model="newDocument[field]"
-                :type="collectionSchema.properties[field]?.bsonType === 'date' ? 'datetime-local' : 'text'"
-                :class="{ 'border-red-300': isFieldRequired(field) && !newDocument[field] }"
-              />
-              <span v-else class="text-gray-400">(auto-generated)</span>
-            </template>
-            
-            <p class="text-xs text-gray-500 mt-1">
-              {{ getSchemaInfo(field).description || '' }}
-            </p>
-          </div>
-        </div>
-        <div class="flex justify-end gap-2 mt-4">
-          <Button @click="cancelAdding" variant="outline">Cancel</Button>
-          <Button @click="saveNewDocument">Save Document</Button>
-        </div>
-      </div>
-    </div>
-    
-    <!-- No documents and no schema -->
-    <div v-else-if="documents.length === 0 && !hasSchema" class="text-center my-8 text-gray-500">
-      No documents found in collection "{{ collectionName }}" and no schema available.
-      <div class="mt-4">
-        <Button @click="startAdding" class="gap-2">
-          <PlusCircledIcon class="h-4 w-4" />
-          <span>Add First Document</span>
-        </Button>
-      </div>
-    </div>
-    
-    <!-- Regular data table -->
-    <div v-else class="w-full overflow-auto">
-      <Table class="excel-style-table">
+    <!-- Add New Document Form - Matches Image 2 -->
+    <div v-else-if="isAdding && documents.length === 0" class="w-full">
+      <Table class="w-full">
         <TableHeader>
           <TableRow>
-            <TableHead v-for="header in tableHeaders" :key="header" 
-              class="bg-gray-100 font-semibold border-r border-b border-gray-300">
+            <TableHead v-for="header in tableHeaders" :key="header" class="border px-4 py-2 bg-gray-100 font-medium">
               {{ header }}
-              <span v-if="isFieldRequired(header)" class="text-red-500 ml-1">*</span>
+              <span v-if="isFieldRequired(header)" class="text-red-500">*</span>
             </TableHead>
-            <TableHead class="bg-gray-100 font-semibold border-b border-gray-300 text-right">
+            <TableHead class="border px-4 py-2 bg-gray-100 font-medium">
               Actions
             </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          <!-- Schema Info Row -->
-          <TableRow v-if="showSchemaAsRow" class="bg-blue-50 text-xs hidden">
-            <TableCell v-for="header in tableHeaders" :key="`schema-${header}`" 
-              class="border-r border-b border-gray-200 p-2">
-              <div class="flex flex-col">
-                <span class="font-semibold">{{ header }}</span>
-                <span class="text-gray-600">{{ getFieldTypeName(header) }}</span>
-                <span class="text-gray-600">{{ getSchemaInfo(header).description }}</span>
-                <span v-if="isReferenceField(header)" class="text-blue-600">
-                  References: {{ getReferencedCollection(header) }}
-                </span>
+          <!-- Add document form row -->
+          <TableRow>
+            <TableCell v-for="header in tableHeaders" :key="header" class="border p-2">
+              <!-- Timestamp fields - not editable -->
+              <span v-if="['created_at', 'updated_at'].includes(header)" class="text-gray-500">
+                (auto-generated)
+              </span>
+              
+              <!-- Date field -->
+              <Input 
+                v-else-if="header !== '_id' && getSchemaInfo(header).bsonType === 'date'"
+                v-model="newDocument[header]" 
+                type="datetime-local"
+                class="w-full h-10"
+              />
+              
+              <!-- Boolean field -->
+              <div v-else-if="header !== '_id' && getSchemaInfo(header).bsonType === 'bool'" class="flex items-center">
+                <input 
+                  type="checkbox" 
+                  v-model="newDocument[header]"
+                  class="h-4 w-4"
+                />
+              </div>
+              
+              <!-- Reference field -->
+              <Select 
+                v-else-if="header !== '_id' && isReferenceField(header)" 
+                v-model="newDocument[header]"
+                class="w-full"
+              >
+                <SelectTrigger>
+                  <SelectValue :placeholder="`Select ${getReferencedCollection(header)}`" />
+                </SelectTrigger>
+                <SelectContent>
+                  <ScrollArea class="h-48">
+                    <div class="p-1">
+                      <Input 
+                        v-model="searchQuery[header]"
+                        placeholder="Search..."
+                        class="mb-2"
+                      />
+                      <SelectItem 
+                        v-for="option in filteredOptions(header)"
+                        :key="option.id"
+                        :value="option.id"
+                      >
+                        {{ option.label }}
+                      </SelectItem>
+                    </div>
+                  </ScrollArea>
+                </SelectContent>
+              </Select>
+              
+              <!-- Regular field -->
+              <Input 
+                v-else-if="header !== '_id'" 
+                v-model="newDocument[header]" 
+                class="w-full h-10"
+              />
+              
+              <!-- ID field (auto) -->
+              <span v-else class="text-gray-500">
+                (auto)
+              </span>
+            </TableCell>
+            
+            <!-- Action buttons -->
+            <TableCell class="border p-2">
+              <div class="flex space-x-2">
+                <Button @click="saveNewDocument" class="bg-black text-white">Save</Button>
+                <Button @click="cancelAdding" variant="outline">Cancel</Button>
               </div>
             </TableCell>
-            <TableCell class="border-b border-gray-200 p-2 text-right">
-              <span class="text-xs text-gray-500">Schema Info</span>
+          </TableRow>
+        </TableBody>
+      </Table>
+    </div>
+    
+    <!-- Empty Collection View - Matches Image 1 -->
+    <div v-else-if="documents.length === 0" class="w-full">
+      <!-- Table header row -->
+      <Table class="w-full">
+        <TableHeader>
+          <TableRow>
+            <TableHead v-for="header in tableHeaders" :key="header" class="border px-4 py-2 bg-gray-100 font-medium">
+              {{ header }}
+              <span v-if="isFieldRequired(header)" class="text-red-500">*</span>
+            </TableHead>
+            <TableHead class="border px-4 py-2 bg-gray-100 font-medium">
+              Actions
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <!-- Empty state with add document button -->
+          <TableRow class="h-12">
+            <TableCell :colspan="tableHeaders.length + 1" class="text-center p-6 border">
+              <div class="flex justify-center items-center">
+                <Button @click="startAdding" class="flex items-center gap-2">
+                  <span>Add new document</span>
+                </Button>
+              </div>
             </TableCell>
           </TableRow>
-          
+        </TableBody>
+      </Table>
+    </div>
+    
+    <!-- Regular data table -->
+    <div v-else class="w-full overflow-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead v-for="header in tableHeaders" :key="header" 
+              class="bg-gray-100 font-medium border">
+              {{ header }}
+              <span v-if="isFieldRequired(header)" class="text-red-500 ml-1">*</span>
+            </TableHead>
+            <TableHead class="bg-gray-100 font-medium border text-right">
+              Actions
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           <!-- Regular Data Rows -->
           <TableRow v-for="(doc, rowIndex) in paginatedDocuments" :key="rowIndex">
             <TableCell v-for="header in tableHeaders" :key="`${rowIndex}-${header}`" 
-              class="border-r border-b border-gray-200 p-0">
+              class="border p-0">
               <div class="h-full">
                 <div v-if="editingCell?.rowIndex === rowIndex && editingCell?.header === header" 
                     class="h-full">
@@ -786,83 +706,88 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
                               placeholder="Search..."
                               class="mb-2"
                             />
-                  <div v-if="filteredOptions(header).length">
-                    <SelectItem 
-                      v-for="option in filteredOptions(header)"
-                      :key="option.id"
-                      :value="option.id"
-                    >
-                      {{ option.label }}
-                    </SelectItem>
+                            <div v-if="filteredOptions(header).length">
+                              <SelectItem 
+                                v-for="option in filteredOptions(header)"
+                                :key="option.id"
+                                :value="option.id"
+                              >
+                                {{ option.label }}
+                              </SelectItem>
+                            </div>
+                            <div v-else class="text-sm text-gray-500 px-2 py-1">
+                              No options found
+                            </div>
+                          </div>
+                        </ScrollArea>
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <div v-else class="text-sm text-gray-500 px-2 py-1">
-                    No options found
-                  </div>
+                  <!-- Date input for date fields -->
+                  <Input v-else-if="collectionSchema.properties[header]?.bsonType === 'date'"
+                    type="datetime-local"
+                    v-model="editValue"
+                    @blur="saveEdit"
+                    class="h-full rounded-none border-none focus-visible:ring-2"
+                  />
+                  <!-- Default textarea for other fields -->
+                  <textarea v-else
+                    v-model="editValue"
+                    @blur="saveEdit"
+                    @keyup.ctrl.enter="saveEdit"
+                    class="w-full h-full p-2 font-mono text-sm border-none focus:ring-2 focus:ring-blue-500"
+                    rows="3"
+                  />
                 </div>
-              </ScrollArea>
-            </SelectContent>
-          </Select>
-        </div>
-        <!-- Date input for date fields -->
-        <Input v-else-if="collectionSchema.properties[header]?.bsonType === 'date'"
-          type="datetime-local"
-          v-model="editValue"
-          @blur="saveEdit"
-          class="h-full rounded-none border-none focus-visible:ring-2"
-        />
-        <!-- Default textarea for other fields -->
-        <textarea v-else
-          v-model="editValue"
-          @blur="saveEdit"
-          @keyup.ctrl.enter="saveEdit"
-          class="w-full h-full p-2 font-mono text-sm border-none focus:ring-2 focus:ring-blue-500"
-          rows="3"
-        />
-      </div>
-      <div v-else
-        class="p-2 min-h-[40px]"
-        :class="{
-          'cursor-pointer hover:bg-blue-50': !['created_at', 'updated_at'].includes(header),
-          'cursor-not-allowed': ['created_at', 'updated_at'].includes(header)
-        }"
-        @click="!['created_at', 'updated_at', '_id'].includes(header) && handleCellClick(rowIndex, header, doc[header])"
-      >
-        <!-- Show boolean values with checkboxes in read-only mode -->
-        <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" class="flex justify-center">
-          <input type="checkbox" :checked="doc[header]" disabled class="h-4 w-4" />
-        </div>
-        <!-- Show reference field labels in read-only mode -->
-        <div v-else-if="isReferenceField(header)" class="text-blue-600">
-          {{ getReferenceLabel(header, doc[header]) || doc[header] }}
-        </div>
-        <!-- Add disabled display for timestamp fields -->
-        <template v-else-if="['created_at', 'updated_at'].includes(header)">
-          <span class="text-gray-500">
-            {{ formatSchemaValue(doc[header], collectionSchema.properties[header]?.bsonType) }}
-          </span>
-        </template>
-        <template v-else>
-          {{ formatSchemaValue(doc[header], collectionSchema.properties[header]?.bsonType) }}
-        </template>
-      </div>
-    </div>
-  </TableCell>
-  <TableCell class="border-b border-gray-200 text-right p-1">
-    <Button
-      variant="ghost"
-      size="sm"
-      class="text-red-600 hover:text-red-800"
-      @click="deleteDocument(doc._id.$oid)"
-    >
-      <TrashIcon class="h-4 w-4" />
-    </Button>
-  </TableCell>
-</TableRow>
+                <div v-else
+                  class="p-2 min-h-[40px]"
+                  :class="{
+                    'cursor-pointer hover:bg-blue-50': !['created_at', 'updated_at'].includes(header),
+                    'cursor-not-allowed': ['created_at', 'updated_at'].includes(header)
+                  }"
+                  @click="!['created_at', 'updated_at', '_id'].includes(header) && handleCellClick(rowIndex, header, doc[header])"
+                >
+                  <!-- Show boolean values with checkboxes in read-only mode -->
+                  <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" class="flex justify-center">
+                    <input type="checkbox" :checked="doc[header]" disabled class="h-4 w-4" />
+                  </div>
+                  <!-- Show reference field labels in read-only mode -->
+                  <div v-else-if="isReferenceField(header)" class="text-blue-600">
+                    {{ getReferenceLabel(header, doc[header]) || doc[header] }}
+                  </div>
+                  <!-- Add disabled display for timestamp fields -->
+                  <template v-else-if="['created_at', 'updated_at'].includes(header)">
+                    <span class="text-gray-500">
+                      {{ formatSchemaValue(doc[header], collectionSchema.properties[header]?.bsonType) }}
+                    </span>
+                  </template>
+                  <template v-else>
+                    {{ formatSchemaValue(doc[header], collectionSchema.properties[header]?.bsonType) }}
+                  </template>
+                </div>
+              </div>
+            </TableCell>
+            <TableCell class="border text-right p-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                class="text-red-600 hover:text-red-800"
+                @click="deleteDocument(doc._id.$oid)"
+              >
+                <TrashIcon class="h-4 w-4" />
+              </Button>
+            </TableCell>
+          </TableRow>
 
           <TableRow v-if="isAdding" class="bg-blue-50">
             <TableCell v-for="header in tableHeaders" :key="header" class="p-1">
+              <!-- Timestamp fields - not editable -->
+              <span v-if="['created_at', 'updated_at'].includes(header)" class="text-gray-500">
+                (auto-generated)
+              </span>
+              
               <!-- Boolean field in inline add mode -->
-              <div v-if="header !== '_id' && collectionSchema.properties[header]?.bsonType === 'bool'" 
+              <div v-else-if="header !== '_id' && collectionSchema.properties[header]?.bsonType === 'bool'" 
                 class="flex items-center justify-center">
                 <input 
                   type="checkbox" 
@@ -923,7 +848,7 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
         </TableBody>
       </Table>
       
-      <div v-if="totalPages > 1" class="mt-4">
+      <div v-if="totalPages > 1" class="mt-4 p-4">
         <Pagination :page="currentPage" :itemsPerPage="pageSize" :total="documents.length"
           @update:page="onPageChange" :siblingCount="1">
           <PaginationList>
@@ -946,7 +871,7 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
         </Pagination>
       </div>
       
-      <div class="flex items-center gap-2 mt-4">
+      <div class="flex items-center gap-2 p-4">
         <span class="text-sm text-gray-500">Rows per page:</span>
         <Select v-model="pageSize">
           <SelectTrigger class="w-16">
@@ -970,6 +895,7 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
     </div>
   </div>
 </template>
+
 
 <style>
 .checkbox-cell {
