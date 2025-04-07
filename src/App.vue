@@ -1,6 +1,6 @@
 <!-- src/App.vue -->
 <script setup lang="ts">
-import { ref, onMounted, provide, onUnmounted, watch, markRaw, reactive } from 'vue'
+import { ref, onMounted, provide, onUnmounted, watch, markRaw, reactive, nextTick, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useZoom } from '@/composables/useZoom'
 import { useRoute, useRouter } from 'vue-router'
@@ -83,6 +83,138 @@ const tabs = ref<Tab[]>([
   { id: 'home', title: 'Home', type: 'home', path: '/home', reloadCount: 0 }
 ])
 
+// --- Per-Tab History State ---
+const tabHistories = reactive<Record<string, string[]>>({})
+const tabHistoryPositions = reactive<Record<string, number>>({})
+const isNavigatingHistory = ref(false)
+
+// Initialize history for initial tab
+tabHistories['home'] = ['/home']
+tabHistoryPositions['home'] = 0
+
+// --- Navigation Controls ---
+const canGoBack = computed(() => {
+  if (!activeTabId.value) return false
+  return (tabHistoryPositions[activeTabId.value] ?? 0) > 0
+})
+
+const canGoForward = computed(() => {
+  if (!activeTabId.value) return false
+  const history = tabHistories[activeTabId.value] || []
+  const position = tabHistoryPositions[activeTabId.value] ?? -1
+  return position < history.length - 1
+})
+
+// For split view: compute canGoBack/Forward for each tab separately
+function canTabGoBack(tabId: string): boolean {
+  return (tabHistoryPositions[tabId] ?? 0) > 0
+}
+
+function canTabGoForward(tabId: string): boolean {
+  const history = tabHistories[tabId] || []
+  const position = tabHistoryPositions[tabId] ?? -1
+  return position < history.length - 1
+}
+
+function navigateHistory(direction: 'back' | 'forward', tabId: string) {
+  const history = tabHistories[tabId]
+  const currentPosition = tabHistoryPositions[tabId]
+  if (!history || currentPosition === undefined) return
+
+  let newPosition = currentPosition
+  if (direction === 'back' && currentPosition > 0) newPosition--
+  else if (direction === 'forward' && currentPosition < history.length - 1) newPosition++
+  else return
+
+  const targetPath = history[newPosition]
+  tabHistoryPositions[tabId] = newPosition
+
+  const tab = tabs.value.find(t => t.id === tabId)
+  if (tab) tab.path = targetPath
+
+  isNavigatingHistory.value = true
+  
+  // Only use router.push if this is the active tab (or we're not in split view)
+  if (!isSplit.value || tabId === activeTabId.value) {
+    router.push(targetPath).finally(() => {
+      nextTick(() => { isNavigatingHistory.value = false })
+    })
+  } else {
+    // For non-active tab in split view, just update the tab's path
+    isNavigatingHistory.value = false
+  }
+}
+
+function handleBack() {
+  if (canGoBack.value) {
+    navigateHistory('back', activeTabId.value)
+  }
+}
+
+function handleForward() {
+  if (canGoForward.value) {
+    navigateHistory('forward', activeTabId.value)
+  }
+}
+
+// Update the split-tab navigation handlers
+function handleSplitTabBack(tabId: string) {
+  if (canTabGoBack(tabId)) {
+    navigateHistory('back', tabId)
+  }
+}
+
+function handleSplitTabForward(tabId: string) {
+  if (canTabGoForward(tabId)) {
+    navigateHistory('forward', tabId)
+  }
+}
+
+// --- Updated History Management ---
+function updateHistory(tabId: string, newPath: string) {
+  // Skip history updates during back/forward navigation
+  if (isNavigatingHistory.value) return
+
+  const history = tabHistories[tabId] || []
+  const currentPosition = tabHistoryPositions[tabId] ?? -1
+
+  // Don't add duplicate entries
+  if (history[currentPosition] === newPath) return
+
+  // When navigating, trim history after current position before adding new entry
+  const newHistory = history.slice(0, currentPosition + 1)
+  newHistory.push(newPath)
+
+  tabHistories[tabId] = newHistory
+  tabHistoryPositions[tabId] = newHistory.length - 1
+
+  // Don't log history entry if the path is history
+  if (newPath !== '/history') {
+    try {
+      const tab = tabs.value.find(t => t.id === tabId)
+      if (tab) {
+        const storedHistory = JSON.parse(sessionStorage.getItem('browserHistory') || '[]')
+        storedHistory.push({
+          tabId,
+          nameOfTheOpenedLink: tab.title,
+          created_at: new Date().toISOString(),
+          urlLink: `app${newPath}`
+        })
+        sessionStorage.setItem('browserHistory', JSON.stringify(storedHistory))
+      }
+    } catch (e) {
+      console.error("History update failed:", e)
+    }
+  }
+}
+
+// Initialize history when creating a new tab
+function initTabHistory(tabId: string, initialPath: string) {
+  tabHistories[tabId] = [initialPath]
+  tabHistoryPositions[tabId] = 0
+}
+
+
 const activeTabId = ref<string>('home')
 const activeTab = ref<'home' | 'settings'>('home')
 const dataTableRef = ref<InstanceType<typeof MongoDBDataTable>[]>([]);
@@ -122,9 +254,12 @@ function isValidPath(path: string): boolean {
 // Tab management functionality
 const tabManager = reactive({
   openNewTab: (tab: Tab) => {
-    // MODIFIED: Removed existingTab check to allow multiple tabs with same URL
     tabs.value.push(tab);
     activeTabId.value = tab.id;
+    
+    // Initialize history for the new tab
+    initTabHistory(tab.id, tab.path);
+    
     router.push(tab.path);
   },
 
@@ -139,6 +274,9 @@ const tabManager = reactive({
     };
     tabs.value.push(newTab);
     activeTabId.value = newTabId;
+    
+    // Initialize history for the new tab
+    initTabHistory(newTabId, '/home');
     
     if (!isSplit.value) {
       router.push('/home');
@@ -194,15 +332,20 @@ watch(isSplit, (newVal) => {
 })
 
 watch(() => route.path, (newPath, oldPath) => {
-  // Skip if in split view or if the path hasn't meaningfully changed
+  // Skip history updates if in split view, or if the paths are identical
   if (isSplit.value || newPath === oldPath) return;
 
-  // Always update the URL display first
+  // Skip if we're currently navigating through history
+  if (isNavigatingHistory.value) return;
+
+  // Update the URL display first
   currentUrl.value = `app${newPath}`;
+
+  // Update history for the active tab
+  updateHistory(activeTabId.value, newPath);
 
   // Find the currently active tab's data
   const currentActiveTabData = tabs.value.find(t => t.id === activeTabId.value);
-
   if (currentActiveTabData) {
     // Update the active tab's properties to reflect the route change
     if (currentActiveTabData.path !== newPath) {
@@ -230,23 +373,6 @@ watch(() => route.path, (newPath, oldPath) => {
         else currentActiveTabData.type = 'home'; // Fallback
       }
     }
-
-    // Don't log history entry if the path is history
-    if (newPath !== '/history') {
-      // Log history entry
-      const historyEntry = {
-        tabId: activeTabId.value,
-        nameOfTheOpenedLink: currentActiveTabData.title,
-        created_at: new Date().toISOString(),
-        urlLink: `app${newPath}`
-      };
-
-      const history = JSON.parse(sessionStorage.getItem('browserHistory') || '[]');
-      history.push(historyEntry);
-      sessionStorage.setItem('browserHistory', JSON.stringify(history));
-    }
-  } else {
-    console.warn("Route changed but couldn't find active tab:", activeTabId.value, "New path:", newPath);
   }
 }, { immediate: false });
 
@@ -499,8 +625,14 @@ function handleTabNavigation(inputUrl: string, tabId: string) {
     }
 
     // Update tab properties
+    const oldPath = tab.path;
     tab.path = path;
     tab.reloadCount++; // Force re-render
+
+    // Update history for this specific tab
+    if (path !== oldPath) {
+      updateHistory(tabId, path);
+    }
 
     // Update title and type based on path
     if (path.startsWith('/collection/')) {
@@ -528,10 +660,16 @@ function handleTabNavigation(inputUrl: string, tabId: string) {
     const cleanPath = inputUrl.replace(/^app\/?/, '');
     if (isValidPath('/' + cleanPath)) {
       const path = '/' + cleanPath;
+      const oldPath = tab.path;
       
       // Update tab properties
       tab.path = path;
       tab.reloadCount++; // Force re-render
+
+      // Update history for this specific tab
+      if (path !== oldPath) {
+        updateHistory(tabId, path);
+      }
 
       // Update title and type based on path
       if (path.startsWith('/collection/')) {
@@ -577,13 +715,6 @@ function handleTabReload(tabId: string) {
   }
 }
 
-function handleBack() {
-  router.back();
-}
-
-function handleForward() {
-  router.forward();
-}
 
 // MongoDB connection logic
 async function autoConnectMongoDB() {
@@ -731,7 +862,7 @@ const handleConnectionSettings = () => {
 }
 
 // this handler for saving connection settings
-const handleSaveConnectionSettings = (ipAddress: string) => {
+const handleSaveConnectionSettings = (_ipAddress: string) => {
   // Close the modal
   showConnectionSettingsModal.value = false
   
@@ -780,6 +911,8 @@ const handleCloseConnectionSettings = () => {
     <BrowserNavbar 
       v-if="!isSplit"
       :current-url="currentUrl" 
+      :can-go-back="canGoBack"
+      :can-go-forward="canGoForward"
       @navigate="handleNavigation"
       @reload="handleReload"
       @back="handleBack"
@@ -831,10 +964,12 @@ const handleCloseConnectionSettings = () => {
                 />
                 <BrowserNavbar 
                   :current-url="`app${tabs[0].path}`"
+                  :can-go-back="canTabGoBack(tabs[0].id)"
+                  :can-go-forward="canTabGoForward(tabs[0].id)"
                   @navigate="(url) => handleTabNavigation(url, tabs[0].id)"
                   @reload="() => handleTabReload(tabs[0].id)"
-                  @back="handleBack"
-                  @forward="handleForward"
+                  @back="() => handleSplitTabBack(tabs[0].id)"
+                  @forward="() => handleSplitTabForward(tabs[0].id)"
                   @logout="handleLogout"
                 />
                 <div class="h-full">
@@ -867,10 +1002,12 @@ const handleCloseConnectionSettings = () => {
                 />
                 <BrowserNavbar 
                   :current-url="`app${tabs[1].path}`"
+                  :can-go-back="canTabGoBack(tabs[1].id)"
+                  :can-go-forward="canTabGoForward(tabs[1].id)"
                   @navigate="(url) => handleTabNavigation(url, tabs[1].id)"
                   @reload="() => handleTabReload(tabs[1].id)"
-                  @back="handleBack"
-                  @forward="handleForward"
+                  @back="() => handleSplitTabBack(tabs[1].id)"
+                  @forward="() => handleSplitTabForward(tabs[1].id)"
                   @logout="handleLogout"
                 />
                 <div class="h-full">

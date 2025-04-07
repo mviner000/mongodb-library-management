@@ -3,17 +3,17 @@
 import { useRouter, useRoute } from 'vue-router';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { inject, ref, watch } from 'vue'; // Add watch
+import { ref, watch } from 'vue'; // Add watch
 
 // Define the Tab interface
-interface Tab {
-  id: string;
-  title: string;
-  type: 'home' | 'collection' | 'hello';
-  path: string;
-  collectionName?: string;
-  reloadCount: number;
-}
+// interface Tab {
+//   id: string;
+//   title: string;
+//   type: 'home' | 'collection' | 'hello';
+//   path: string;
+//   collectionName?: string;
+//   reloadCount: number;
+// }
 
 // Accept both direct prop and route param
 const props = defineProps<{
@@ -24,19 +24,17 @@ const props = defineProps<{
 }>();
 
 // Define the TabManager interface
-interface TabManager {
-  openNewTab: (tab: Tab) => void;
-  addNewTab: () => void;
-  closeTab: (tabId: string) => void;
-  getActiveTabId: () => string;
-  getTab: (tabId: string) => Tab | undefined;
-}
+// interface TabManager {
+//   openNewTab: (tab: Tab) => void;
+//   addNewTab: () => void;
+//   closeTab: (tabId: string) => void;
+//   getActiveTabId: () => string;
+//   getTab: (tabId: string) => Tab | undefined;
+// }
 
 const router = useRouter();
 const route = useRoute(); // Add this to access route params
 
-// Get the tab manager from the parent component with proper typing
-const tabManager = inject<TabManager>('tabManager');
 
 // Use route param or direct prop, with fallback to 'users'
 const collectionName = ref(props.name || props.selectedCollection || 'users');
@@ -56,36 +54,7 @@ watch(() => props.selectedCollection, (newVal) => {
 });
 
 const navigateToHome = () => {
-  if (tabManager) {
-    const currentTabId = tabManager.getActiveTabId();
-    const currentTab = tabManager.getTab(currentTabId);
-    
-    // If the current tab is already a home tab, just open a new home tab
-    if (currentTab?.type === 'home') {
-      const newTabId = `tab-${Date.now()}`;
-      tabManager.openNewTab({
-        id: newTabId,
-        title: 'Home',
-        type: 'home',
-        path: '/home',
-        reloadCount: 0
-      });
-      return; // Do not close the current tab
-    }
-    
-    // Proceed to open a new home tab and close the current one
-    const newTabId = `tab-${Date.now()}`;
-    tabManager.openNewTab({
-      id: newTabId,
-      title: 'Home',
-      type: 'home',
-      path: '/home',
-      reloadCount: 0
-    });
-    tabManager.closeTab(currentTabId);
-  } else {
-    router.replace('/home');
-  }
+  router.replace('/home');
 };
 
 const menuItems = [

@@ -1,4 +1,5 @@
 <!-- src/components/TabBar.vue -->
+<!-- src/components/TabBar.vue -->
 <template>
   <div class="flex border-b">
     <div class="flex-1 flex overflow-x-auto">
@@ -9,7 +10,7 @@
         :class="{ 'bg-blue-50': tab.id === activeTabId }"
         @click="$emit('tab-click', tab.id)"
       >
-        {{ tab.title }}
+        <span class="text-xs text-gray-500 mr-1">[{{ tab.id }}]</span> {{ tab.title }}
         <button
           v-if="tabs.length > 1"
           class="ml-2 text-gray-500 hover:text-gray-700"

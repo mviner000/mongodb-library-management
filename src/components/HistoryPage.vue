@@ -47,11 +47,6 @@ function sortHistory() {
   }
 }
 
-function toggleSortOrder() {
-  sortNewestFirst.value = !sortNewestFirst.value;
-  sortHistory();
-  groupHistoryByDate();
-}
 
 function formatTimestamp(isoString: string) {
   const date = new Date(isoString);
@@ -141,12 +136,14 @@ function cancelDeleteBrowsingData() {
           </svg>
           <span>Chrome history</span>
         </div>
+        <!-- hides for now
         <div class="sidebar-item">
           <svg class="sidebar-icon" viewBox="0 0 24 24" fill="currentColor">
             <path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM8 15h8v2H8z"></path>
           </svg>
           <span>Tabs from other devices</span>
         </div>
+        hides for now -->
         <div class="sidebar-item" @click="showDeleteConfirmation">
           <svg class="sidebar-icon" viewBox="0 0 24 24" fill="currentColor">
             <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"></path>

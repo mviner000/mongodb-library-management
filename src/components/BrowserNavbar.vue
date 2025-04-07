@@ -2,11 +2,14 @@
 <script setup lang="ts">
 import { inject, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useZoom } from '@/composables/useZoom'
-import { ShieldIcon, PasswordIcon, UserIcon, EditIcon, SyncIcon, SettingsIcon, LogoutIcon, MinusIcon, PlusIcon, BookmarkIcon, DotsIcon, BackIcon, ForwardIcon, ReloadIcon } from '@/components/Icons';
+import { ShieldIcon, PasswordIcon, UserIcon, EditIcon, SyncIcon, SettingsIcon, LogoutIcon, MinusIcon, PlusIcon, BookmarkIcon, DotsIcon, BackIcon, ForwardIcon, ReloadIcon, HistoryIcon } from '@/components/Icons';
+import BrowserHistoryModal from '@/components/BrowserHistoryModal.vue';
 
 // Props for the component
 const props = defineProps<{
-  currentUrl?: string
+  currentUrl?: string,
+  canGoBack?: boolean,
+  canGoForward?: boolean
 }>()
 
 const emit = defineEmits(['navigate', 'reload', 'back', 'forward', 'logout']);
@@ -19,6 +22,9 @@ const { zoomLevel, zoomIn, zoomOut, resetZoom } = inject('zoom')! as ReturnType<
 
 // Track profile dropdown state
 const showProfileDropdown = ref(false)
+
+// Track history modal state
+const showHistoryModal = ref(false)
 
 // Update input when currentUrl prop changes
 watch(() => props.currentUrl, (newUrl) => {
@@ -34,7 +40,7 @@ function handleSubmit() {
   emit('navigate', `app/${cleanUrl}`);
 }
 
-// Handle navigation actions
+// Handle navigation actions with proper history management
 function handleBack() {
   emit('back')
 }
@@ -54,6 +60,10 @@ function handleBookmark() {
 
 function toggleProfileDropdown() {
   showProfileDropdown.value = !showProfileDropdown.value
+}
+
+function toggleHistoryModal() {
+  showHistoryModal.value = !showHistoryModal.value
 }
 
 // Close dropdown when clicking outside
@@ -82,6 +92,12 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleGlobalClick);
 })
+
+// Handle navigation from history modal
+function handleHistoryNavigation(url: string) {
+  emit('navigate', url);
+  showHistoryModal.value = false; // Close modal after navigation
+}
 </script>
 
 <template>
@@ -91,21 +107,28 @@ onBeforeUnmount(() => {
       <!-- Back Button -->
       <button 
         @click="handleBack"
-        class="w-8 h-8 rounded flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]">
+        :disabled="!canGoBack"
+        class="w-8 h-8 rounded flex items-center justify-center hover:bg-[#4A4A4A]"
+        :class="canGoBack ? 'text-gray-300' : 'text-gray-600 cursor-not-allowed'"
+      >
         <BackIcon />
       </button>
       
       <!-- Forward Button -->
       <button 
         @click="handleForward"
-        class="w-8 h-8 rounded flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]">
+        :disabled="!canGoForward"
+        class="w-8 h-8 rounded flex items-center justify-center hover:bg-[#4A4A4A]"
+        :class="canGoForward ? 'text-gray-300' : 'text-gray-600 cursor-not-allowed'"
+      >
         <ForwardIcon />
       </button>
       
       <!-- Reload Button -->
       <button 
         @click="handleReload"
-        class="w-8 h-8 rounded flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]">
+        class="w-8 h-8 rounded flex items-center justify-center text-gray-300 hover:bg-[#4A4A4A]"
+      >
         <ReloadIcon />
       </button>
     </div>
@@ -137,7 +160,8 @@ onBeforeUnmount(() => {
         <button 
           @click="zoomOut"
           :disabled="zoomLevel <= 50"
-          class="mt-0.5 w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]"
+          class="mt-0.5 w-7 h-7 rounded-full flex items-center justify-center text-gray-300 hover:bg-[#4A4A4A]"
+          :class="{ 'text-gray-600 cursor-not-allowed': zoomLevel <= 50 }"
           title="Zoom Out (Ctrl+-)"
         >
           <MinusIcon />
@@ -145,7 +169,7 @@ onBeforeUnmount(() => {
 
         <button 
           @click="resetZoom"
-          class="mx-1 w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]"
+          class="mx-1 w-8 h-8 rounded-full flex items-center justify-center text-gray-300 hover:bg-[#4A4A4A]"
           title="Reset Zoom (Ctrl+0)"
         >
           <span class="text-xs">{{ zoomLevel }}%</span>
@@ -154,22 +178,32 @@ onBeforeUnmount(() => {
         <button 
           @click="zoomIn"
           :disabled="zoomLevel >= 200"
-          class="mt-0.5 w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]"
+          class="mt-0.5 w-7 h-7 rounded-full flex items-center justify-center text-gray-300 hover:bg-[#4A4A4A]"
+          :class="{ 'text-gray-600 cursor-not-allowed': zoomLevel >= 200 }"
           title="Zoom In (Ctrl+=)"
         >
           <PlusIcon />
         </button>
       </div>
 
+      <!-- History Button -->
+      <button 
+        @click="toggleHistoryModal"
+        class="w-8 h-8 rounded flex items-center justify-center text-gray-300 hover:bg-[#4A4A4A]"
+        title="History"
+      >
+        <HistoryIcon />
+      </button>
+
       <!-- Bookmark Button -->
       <button 
         @click="handleBookmark"
-        class="w-8 h-8 rounded flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]">
+        class="w-8 h-8 rounded flex items-center justify-center text-gray-300 hover:bg-[#4A4A4A]">
         <BookmarkIcon />
       </button>
       
       <!-- Extensions Button (placeholder for your browser-like UI) -->
-      <button class="w-8 h-8 rounded flex items-center justify-center text-gray-400 hover:bg-[#4A4A4A]">
+      <button class="w-8 h-8 rounded flex items-center justify-center text-gray-300 hover:bg-[#4A4A4A]">
         <DotsIcon />
       </button>
 
@@ -251,5 +285,12 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+    
+    <!-- History Modal -->
+    <BrowserHistoryModal 
+      :is-open="showHistoryModal" 
+      @close="showHistoryModal = false"
+      @navigate="handleHistoryNavigation"
+    />
   </div>
 </template>
