@@ -332,56 +332,104 @@ async fn get_collection_schema_handler(
     
     match get_database(mongodb_state).await {
         Ok(db) => {
-            let command = doc! {
-                "listCollections": 1,
-                "filter": { "name": &collection_name }
-            };
-            
-            match db.run_command(command, None).await {
-                Ok(response) => {
-                    match extract_schema_from_response(response) {
-                        Ok(schema) => {
-                            (StatusCode::OK, Json(ApiResponse {
-                                success: true,
-                                data: Some(schema),
-                                error: None,
-                            }))
+            match get_collection_schema_internal(&db, &collection_name).await {
+                Ok(schema) => {
+                    // Fetch UI metadata from ui_metadata collection
+                    let ui_metadata_collection = db.collection::<Document>("ui_metadata");
+                    let filter = doc! {
+                        "collection": &collection_name,
+                        "user_id": { "$exists": false } // Global settings
+                    };
+                    
+                    // Handle errors without using ? operator
+                    match ui_metadata_collection.find_one(filter, None).await {
+                        Ok(ui_metadata) => {
+                            let mut merged_schema = schema.clone();
+                            if let Some(ui_metadata_doc) = ui_metadata {
+                                if let Ok(ui) = ui_metadata_doc.get_document("ui") {
+                                    merged_schema.insert("ui", ui.clone());
+                                }
+                            }
+
+                            // Convert merged schema to JSON
+                            match bson::from_bson(bson::Bson::Document(merged_schema)) {
+                                Ok(merged_schema_json) => {
+                                    (StatusCode::OK, Json(ApiResponse {
+                                        success: true,
+                                        data: Some(merged_schema_json),
+                                        error: None,
+                                    }))
+                                },
+                                Err(e) => error_response::<serde_json::Value>(
+                                    StatusCode::INTERNAL_SERVER_ERROR, 
+                                    format!("Failed to convert merged schema to JSON: {}", e)
+                                ),
+                            }
                         },
-                        Err(e) => error_response::<serde_json::Value>(StatusCode::INTERNAL_SERVER_ERROR, e),
+                        Err(e) => error_response::<serde_json::Value>(
+                            StatusCode::INTERNAL_SERVER_ERROR, 
+                            format!("Failed to fetch UI metadata: {}", e)
+                        ),
                     }
                 },
-                Err(e) => error_response::<serde_json::Value>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+                Err(e) => error_response::<serde_json::Value>(StatusCode::INTERNAL_SERVER_ERROR, e),
             }
         },
         Err((status, e)) => error_response::<serde_json::Value>(status, e),
     }
 }
 
-fn extract_schema_from_response(response: Document) -> Result<serde_json::Value, String> {
-    let cursor = response.get_document("cursor")
-        .map_err(|e| format!("Invalid response format: {}", e))?;
-    
-    let batches = cursor.get_array("firstBatch")
-        .map_err(|_| "No collections found".to_string())?;
-    
-    if batches.is_empty() {
-        return Err("Collection not found".into());
+async fn update_ui_metadata_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Json(payload): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    let db = match get_database(mongodb_state).await {
+        Ok(db) => db,
+        Err((status, e)) => return error_response::<()>(status, e),
+    };
+
+    // Replace ? operator with match
+    let column_widths = match payload.get("columnWidths")
+        .and_then(|v| v.as_object()) {
+        Some(widths) => widths,
+        None => return error_response::<()>(StatusCode::BAD_REQUEST, "Invalid columnWidths format".into()),
+    };
+
+    // Replace ? operator with match
+    let bson_column_widths = match bson::to_bson(column_widths) {
+        Ok(bson) => bson,
+        Err(e) => return error_response::<()>(StatusCode::BAD_REQUEST, e.to_string()),
+    };
+
+    let update_doc = doc! {
+        "$set": {
+            "ui.columnWidths": bson_column_widths,
+            "updated_at": bson::DateTime::now()
+        }
+    };
+
+    let filter = doc! {
+        "collection": &collection_name,
+        "user_id": { "$exists": false } // Global settings
+    };
+
+    let options = mongodb::options::UpdateOptions::builder()
+        .upsert(true)
+        .build();
+
+    match db.collection::<Document>("ui_metadata")
+        .update_one(filter, update_doc, options)
+        .await
+    {
+        Ok(_) => (StatusCode::OK, Json(ApiResponse {
+            success: true,
+            data: None,
+            error: None,
+        })),
+        Err(e) => error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
-    
-    let coll_info = batches[0].as_document()
-        .ok_or_else(|| "Invalid collection info".to_string())?;
-    
-    let options = coll_info.get_document("options")
-        .map_err(|_| "No options found".to_string())?;
-    
-    let validator = options.get_document("validator")
-        .map_err(|_| "No validator found".to_string())?;
-    
-    let json_schema = validator.get_document("$jsonSchema")
-        .map_err(|_| "No JSON schema found".to_string())?;
-    
-    mongodb::bson::from_bson(json_schema.clone().into())
-        .map_err(|e| format!("BSON to JSON conversion failed: {}", e))
 }
 
 async fn find_documents_handler(
@@ -779,6 +827,7 @@ fn create_api_router() -> Router<Arc<Mutex<ApiServerState>>> {
         .route("/api/auth/register", post(auth_register_handler))
         .route("/api/auth/check-session", post(auth_check_session_handler))
         .route("/api/health", get(health_check_handler))
+        .route("/collections/:collection_name/ui-metadata", put(update_ui_metadata_handler))
         .layer(cors)
 }
 

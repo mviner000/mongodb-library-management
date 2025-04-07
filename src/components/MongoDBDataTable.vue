@@ -58,12 +58,139 @@ const newDocument = ref<Record<string, any>>({});
 const isAdding = ref(false);
 
 import { getApiBaseUrl } from '@/utils/api';
+import { useDebounceFn } from '@vueuse/core';
 const API_BASE = getApiBaseUrl();
 
 // Reference handling
 const referenceOptions = ref<Record<string, Array<{ id: string; label: string }>>>({});
 const searchQuery = ref<Record<string, string>>({});
 const loadingReferences = ref<Record<string, boolean>>({});
+
+const resizingState = ref({
+  isResizing: false,
+  header: '',
+  startX: 0,
+  startWidth: 0,
+  currentWidth: 0 // Added for visual feedback during resize
+});
+
+// Add resize handlers
+const startResize = (header: string, event: MouseEvent) => {
+  console.log(`Starting resize for column: ${header}`);
+  
+  // Get current width from columnWidths or default
+  const currentWidth = columnWidths.value[header] || 200;
+  
+  resizingState.value = {
+    isResizing: true,
+    header,
+    startX: event.clientX,
+    startWidth: currentWidth,
+    currentWidth: currentWidth
+  };
+  
+  // Add global event listeners
+  document.addEventListener('mousemove', handleMouseMove);
+  document.addEventListener('mouseup', stopResize);
+  
+  // Prevent text selection during resize
+  event.preventDefault();
+};
+
+const handleMouseMove = (event: MouseEvent) => {
+  if (!resizingState.value.isResizing) return;
+  
+  const delta = event.clientX - resizingState.value.startX;
+  const newWidth = Math.max(50, resizingState.value.startWidth + delta);
+  
+  // Update the current width for visual feedback
+  resizingState.value.currentWidth = newWidth;
+  
+  // Update local schema
+  const updatedWidths = {
+    ...columnWidths.value,
+    [resizingState.value.header]: newWidth
+  };
+  
+  // Update the UI schema with new widths
+  collectionSchema.value = {
+    ...collectionSchema.value,
+    ui: {
+      ...collectionSchema.value.ui || {},
+      columnWidths: updatedWidths
+    }
+  };
+  
+  console.log(`Resizing column '${resizingState.value.header}' to ${newWidth}px`);
+};
+
+const stopResize = async () => {
+  if (!resizingState.value.isResizing) return;
+  
+  console.log(`Finish resize: Column '${resizingState.value.header}' set to ${resizingState.value.currentWidth}px`);
+  
+  // Save final width to database
+  resizingState.value.isResizing = false;
+  document.removeEventListener('mousemove', handleMouseMove);
+  document.removeEventListener('mouseup', stopResize);
+  
+  // Save to backend
+  await saveColumnWidths();
+};
+
+// Debounced save function
+const saveColumnWidths = useDebounceFn(async () => {
+  try {
+    console.log(`Saving column widths to backend for ${collectionName.value}`);
+    console.log('Widths to save:', collectionSchema.value.ui?.columnWidths);
+    
+    const response = await fetch(`${API_BASE}/collections/${collectionName.value}/ui-metadata`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        columnWidths: collectionSchema.value.ui?.columnWidths
+      })
+    });
+    
+    const result = await response.json();
+    console.log('Column width save result:', result);
+    
+    if (result.success) {
+      console.log('Column widths saved successfully');
+    } else {
+      console.error('Failed to save column widths:', result.error);
+      toast({ 
+        title: 'Failed to save column widths',
+        description: result.error || 'Unknown error',
+        variant: 'destructive' 
+      });
+    }
+  } catch (error) {
+    console.error('Error saving column widths:', error);
+    toast({ 
+      title: 'Failed to save column widths', 
+      description: String(error),
+      variant: 'destructive' 
+    });
+  }
+}, 500);
+
+const resetColumnWidth = async (header: string) => {
+  console.log(`Resetting column width for: ${header}`);
+  
+  const newWidths = { ...columnWidths.value };
+  delete newWidths[header];
+  
+  collectionSchema.value = {
+    ...collectionSchema.value,
+    ui: {
+      ...collectionSchema.value.ui || {},
+      columnWidths: newWidths
+    }
+  };
+  
+  await saveColumnWidths();
+};
 
 const isReferenceField = (field: string) => {
   return getSchemaInfo(field).description?.includes('REF:');
@@ -74,6 +201,10 @@ const getReferencedCollection = (field: string) => {
   const match = desc.match(/REF:(\w+)/);
   return match ? match[1] : null;
 };
+
+const columnWidths = computed(() => {
+  return collectionSchema.value?.ui?.columnWidths || {};
+});
 
 async function fetchReferenceOptions(collectionName: string) {
   loadingReferences.value[collectionName] = true;
@@ -159,6 +290,8 @@ watch(collectionName, async (newVal) => {
     const { success, data, error } = await response.json();
     
     if (success) {
+      console.log(`Loaded schema for ${newVal}:`, data);
+      console.log(`Column widths:`, data.ui?.columnWidths);
       collectionSchema.value = data;
       newDocument.value = initializeNewDocument();
       await fetchDocuments();
@@ -254,7 +387,7 @@ const isFieldRequired = (field: string) => {
 
 // Move formatSchemaValue into the setup scope
 const formatSchemaValue = (value: any, bsonType: string | string[]) => {
-  if (!value) return '';
+  if (value === undefined || value === null) return '';
   const type = Array.isArray(bsonType) ? bsonType[0] : bsonType;
   
   if (type === 'date' && value instanceof Date) {
@@ -266,6 +399,19 @@ const formatSchemaValue = (value: any, bsonType: string | string[]) => {
   return String(value);
 };
 
+// Function to render a table header cell with resize functionality
+const renderTableHeader = (header: string) => {
+  const width = resizingState.value.isResizing && resizingState.value.header === header 
+    ? resizingState.value.currentWidth 
+    : columnWidths.value[header] || 200;
+
+  return {
+    key: header,
+    width: `${width}px`,
+    content: header,
+    isRequired: isFieldRequired(header)
+  };
+};
 
 watch(collectionName, async (newVal) => {
   try {
@@ -535,23 +681,47 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
       <ReloadIcon class="h-8 w-8 animate-spin text-gray-500" />
     </div>
 
-    <!-- Add New Document Form - Matches Image 2 -->
-    <div v-else-if="isAdding && documents.length === 0" class="w-full">
-      <Table class="w-full">
+    <div v-else class="w-full overflow-auto">
+      <!-- Use a single consistent table header rendering for all states -->
+      <Table>
         <TableHeader>
           <TableRow>
-            <TableHead v-for="header in tableHeaders" :key="header" class="border px-4 py-2 bg-gray-100 font-medium">
-              {{ header }}
-              <span v-if="isFieldRequired(header)" class="text-red-500">*</span>
+            <TableHead 
+              v-for="header in tableHeaders" 
+              :key="header" 
+              class="border px-4 py-2 bg-gray-100 font-medium relative"
+              :style="{ 
+                width: resizingState.isResizing && resizingState.header === header 
+                  ? `${resizingState.currentWidth}px` 
+                  : `${columnWidths[header] || 200}px` 
+              }"
+            >
+              <div class="flex items-center justify-between select-none">
+                <span>
+                  {{ header }}
+                  <span v-if="isFieldRequired(header)" class="text-red-500">*</span>
+                </span>
+                <div 
+                  class="w-1 h-full hover:bg-blue-500 absolute right-0 top-0 cursor-w-resize"
+                  :class="[
+                    resizingState.isResizing && resizingState.header === header 
+                      ? 'bg-blue-500' 
+                      : 'bg-gray-200'
+                  ]"
+                  @mousedown="startResize(header, $event)"
+                  @dblclick="resetColumnWidth(header)"
+                ></div>
+              </div>
             </TableHead>
-            <TableHead class="border px-4 py-2 bg-gray-100 font-medium">
+            <TableHead class="bg-gray-100 font-medium border text-right w-24">
               Actions
             </TableHead>
           </TableRow>
         </TableHeader>
+        
         <TableBody>
-          <!-- Add document form row -->
-          <TableRow>
+          <!-- When adding a new document to an empty collection -->
+          <TableRow v-if="isAdding && documents.length === 0">
             <TableCell v-for="header in tableHeaders" :key="header" class="border p-2">
               <!-- Timestamp fields - not editable -->
               <span v-if="['created_at', 'updated_at'].includes(header)" class="text-gray-500">
@@ -625,28 +795,9 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
               </div>
             </TableCell>
           </TableRow>
-        </TableBody>
-      </Table>
-    </div>
-    
-    <!-- Empty Collection View - Matches Image 1 -->
-    <div v-else-if="documents.length === 0" class="w-full">
-      <!-- Table header row -->
-      <Table class="w-full">
-        <TableHeader>
-          <TableRow>
-            <TableHead v-for="header in tableHeaders" :key="header" class="border px-4 py-2 bg-gray-100 font-medium">
-              {{ header }}
-              <span v-if="isFieldRequired(header)" class="text-red-500">*</span>
-            </TableHead>
-            <TableHead class="border px-4 py-2 bg-gray-100 font-medium">
-              Actions
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
+          
           <!-- Empty state with add document button -->
-          <TableRow class="h-12">
+          <TableRow v-else-if="documents.length === 0" class="h-12">
             <TableCell :colspan="tableHeaders.length + 1" class="text-center p-6 border">
               <div class="flex justify-center items-center">
                 <Button @click="startAdding" class="flex items-center gap-2">
@@ -655,129 +806,112 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
               </div>
             </TableCell>
           </TableRow>
-        </TableBody>
-      </Table>
-    </div>
-    
-    <!-- Regular data table -->
-    <div v-else class="w-full overflow-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead v-for="header in tableHeaders" :key="header" 
-              class="bg-gray-100 font-medium border">
-              {{ header }}
-              <span v-if="isFieldRequired(header)" class="text-red-500 ml-1">*</span>
-            </TableHead>
-            <TableHead class="bg-gray-100 font-medium border text-right">
-              Actions
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
+
           <!-- Regular Data Rows -->
-          <TableRow v-for="(doc, rowIndex) in paginatedDocuments" :key="rowIndex">
-            <TableCell v-for="header in tableHeaders" :key="`${rowIndex}-${header}`" 
-              class="border p-0">
-              <div class="h-full">
-                <div v-if="editingCell?.rowIndex === rowIndex && editingCell?.header === header" 
-                    class="h-full">
-                  <!-- Boolean field editing -->
-                  <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" 
-                    class="flex items-center justify-center h-full p-2">
-                    <input 
-                      type="checkbox" 
-                      v-model="editValue" 
-                      @change="saveEdit"
-                      class="h-4 w-4"
+          <template v-else>
+            <TableRow v-for="(doc, rowIndex) in paginatedDocuments" :key="rowIndex">
+              <TableCell v-for="header in tableHeaders" :key="`${rowIndex}-${header}`" 
+                class="border p-0">
+                <div class="h-full">
+                  <div v-if="editingCell?.rowIndex === rowIndex && editingCell?.header === header" 
+                      class="h-full">
+                    <!-- Boolean field editing -->
+                    <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" 
+                      class="flex items-center justify-center h-full p-2">
+                      <input 
+                        type="checkbox" 
+                        v-model="editValue" 
+                        @change="saveEdit"
+                        class="h-4 w-4"
+                      />
+                    </div>
+                    <!-- Reference field editing -->
+                    <div v-else-if="isReferenceField(header)" class="p-1">
+                      <Select v-model="editValue" @update:modelValue="saveEdit">
+                        <SelectTrigger>
+                          <SelectValue :placeholder="`Select ${getReferencedCollection(header)}`" :model-value="editValue" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <ScrollArea class="h-48">
+                            <div class="p-1">
+                              <Input 
+                                v-model="searchQuery[header]"
+                                placeholder="Search..."
+                                class="mb-2"
+                              />
+                              <div v-if="filteredOptions(header).length">
+                                <SelectItem 
+                                  v-for="option in filteredOptions(header)"
+                                  :key="option.id"
+                                  :value="option.id"
+                                >
+                                  {{ option.label }}
+                                </SelectItem>
+                              </div>
+                              <div v-else class="text-sm text-gray-500 px-2 py-1">
+                                No options found
+                              </div>
+                            </div>
+                          </ScrollArea>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <!-- Date input for date fields -->
+                    <Input v-else-if="collectionSchema.properties[header]?.bsonType === 'date'"
+                      type="datetime-local"
+                      v-model="editValue"
+                      @blur="saveEdit"
+                      class="h-full rounded-none border-none focus-visible:ring-2"
                     />
+                    <!-- Default textarea for other fields -->
+                    <textarea v-else
+                      v-model="editValue"
+                      @blur="saveEdit"
+                      @keyup.ctrl.enter="saveEdit"
+                      class="w-full h-full p-2 font-mono text-sm border-none focus:ring-2 focus:ring-blue-500"
+                      rows="3"
+                    ></textarea>
                   </div>
-                  <!-- Reference field editing -->
-                  <div v-else-if="isReferenceField(header)" class="p-1">
-                    <Select v-model="editValue" @update:modelValue="saveEdit">
-                      <SelectTrigger>
-                        <SelectValue :placeholder="`Select ${getReferencedCollection(header)}`" :model-value="editValue" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <ScrollArea class="h-48">
-                          <div class="p-1">
-                            <Input 
-                              v-model="searchQuery[header]"
-                              placeholder="Search..."
-                              class="mb-2"
-                            />
-                            <div v-if="filteredOptions(header).length">
-                              <SelectItem 
-                                v-for="option in filteredOptions(header)"
-                                :key="option.id"
-                                :value="option.id"
-                              >
-                                {{ option.label }}
-                              </SelectItem>
-                            </div>
-                            <div v-else class="text-sm text-gray-500 px-2 py-1">
-                              No options found
-                            </div>
-                          </div>
-                        </ScrollArea>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <!-- Date input for date fields -->
-                  <Input v-else-if="collectionSchema.properties[header]?.bsonType === 'date'"
-                    type="datetime-local"
-                    v-model="editValue"
-                    @blur="saveEdit"
-                    class="h-full rounded-none border-none focus-visible:ring-2"
-                  />
-                  <!-- Default textarea for other fields -->
-                  <textarea v-else
-                    v-model="editValue"
-                    @blur="saveEdit"
-                    @keyup.ctrl.enter="saveEdit"
-                    class="w-full h-full p-2 font-mono text-sm border-none focus:ring-2 focus:ring-blue-500"
-                    rows="3"
-                  />
-                </div>
-                <div v-else
-                  class="p-2 min-h-[40px]"
-                  :class="{
-                    'cursor-pointer hover:bg-blue-50': !['created_at', 'updated_at'].includes(header),
-                    'cursor-not-allowed': ['created_at', 'updated_at'].includes(header)
-                  }"
-                  @click="!['created_at', 'updated_at', '_id'].includes(header) && handleCellClick(rowIndex, header, doc[header])"
-                >
-                  <!-- Show boolean values with checkboxes in read-only mode -->
-                  <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" class="flex justify-center">
-                    <input type="checkbox" :checked="doc[header]" disabled class="h-4 w-4" />
-                  </div>
-                  <!-- Show reference field labels in read-only mode -->
-                  <div v-else-if="isReferenceField(header)" class="text-blue-600">
-                    {{ getReferenceLabel(header, doc[header]) || doc[header] }}
-                  </div>
-                  <!-- Add disabled display for timestamp fields -->
-                  <template v-else-if="['created_at', 'updated_at'].includes(header)">
-                    <span class="text-gray-500">
+                  <div v-else
+                    class="p-2 min-h-[40px]"
+                    :class="{
+                      'cursor-pointer hover:bg-blue-50': !['created_at', 'updated_at'].includes(header),
+                      'cursor-not-allowed': ['created_at', 'updated_at'].includes(header)
+                    }"
+                    @click="!['created_at', 'updated_at', '_id'].includes(header) && handleCellClick(rowIndex, header, doc[header])"
+                  >
+                    <!-- Show boolean values with checkboxes in read-only mode -->
+                    <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" class="flex justify-center">
+                      <input type="checkbox" :checked="doc[header]" disabled class="h-4 w-4" />
+                    </div>
+                    <!-- Show reference field labels in read-only mode -->
+                    <div v-else-if="isReferenceField(header)" class="text-blue-600">
+                      {{ getReferenceLabel(header, doc[header]) || doc[header] }}
+                    </div>
+                    <!-- Add disabled display for timestamp fields -->
+                    <template v-else-if="['created_at', 'updated_at'].includes(header)">
+                      <span class="text-gray-500">
+                        {{ formatSchemaValue(doc[header], collectionSchema.properties[header]?.bsonType) }}
+                      </span>
+                    </template>
+                    <template v-else>
                       {{ formatSchemaValue(doc[header], collectionSchema.properties[header]?.bsonType) }}
-                    </span>
-                  </template>
-                  <template v-else>
-                    {{ formatSchemaValue(doc[header], collectionSchema.properties[header]?.bsonType) }}
-                  </template>
+                    </template>
+                  </div>
                 </div>
-              </div>
-            </TableCell>
-            <TableCell class="border text-right p-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                class="text-red-600 hover:text-red-800"
-                @click="deleteDocument(doc._id.$oid)"
-              >
-                <TrashIcon class="h-4 w-4" />
-              </Button>
-            </TableCell>
-          </TableRow>
+              </TableCell>
+              <TableCell class="border text-right p-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="text-red-600 hover:text-red-800"
+                  @click="deleteDocument(doc._id.$oid)"
+                >
+                  <TrashIcon class="h-4 w-4" />
+                </Button>
+              </TableCell>
+            </TableRow>
+          </template>
 
           <TableRow v-if="isAdding" class="bg-blue-50">
             <TableCell v-for="header in tableHeaders" :key="header" class="p-1">
@@ -954,5 +1088,10 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
 .cursor-not-allowed {
   cursor: not-allowed;
   opacity: 0.8;
+}
+
+.cursor-col-resize {
+  cursor: col-resize;
+  user-select: none;
 }
 </style>

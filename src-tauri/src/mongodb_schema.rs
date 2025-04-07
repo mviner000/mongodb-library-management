@@ -16,6 +16,10 @@ pub async fn initialize_database(db: &Database) -> Result<()> {
     create_semesters_collection(db).await?;
     create_settings_styles_collection(db).await?;
     create_sessions_collection(db).await?;
+
+    // note: always update the metadata ui to 20 if there's changes in collections
+    // this will serve as default column width used by table at frontend
+    create_ui_metadata_collection(db).await?;
     Ok(())
 }
 
@@ -364,3 +368,240 @@ pub async fn create_settings_styles_collection(db: &Database) -> Result<()> {
     
     Ok(())
 }
+
+// metadata for collections start here
+// Add a constant for default column width
+const DEFAULT_COLUMN_WIDTH: i32 = 20;
+
+async fn create_ui_metadata_collection(db: &Database) -> Result<()> {
+    let collection = db.collection::<Document>("ui_metadata");
+    
+    // Create indexes for faster lookups
+    let indexes = vec![
+        IndexModel::builder()
+            .keys(doc! { "collection": 1, "user_id": 1 })
+            .options(Some(IndexOptions::builder()
+                .unique(true)
+                .build()))
+            .build(),
+    ];
+
+    collection.create_indexes(indexes, None).await?;
+    
+    // Apply validator schema using collMod
+    db.run_command(
+        doc! {
+            "collMod": "ui_metadata",
+            "validator": {
+                "$jsonSchema": {
+                    "bsonType": "object",
+                    "required": ["collection", "ui", "created_at", "updated_at"],
+                    "properties": {
+                        "collection": { "bsonType": "string", "description": "Collection name" },
+                        "ui": { 
+                            "bsonType": "object", 
+                            "properties": {
+                                "columnWidths": { "bsonType": "object", "description": "Width for each column" },
+                                "columnOrder": { "bsonType": "array", "description": "Order of columns in the view" },
+                                "hiddenColumns": { "bsonType": "array", "description": "List of hidden columns" },
+                                "sortSettings": { 
+                                    "bsonType": "object", 
+                                    "properties": {
+                                        "field": { "bsonType": "string" },
+                                        "direction": { "bsonType": "string", "enum": ["asc", "desc"] }
+                                    }
+                                },
+                                "filterSettings": { "bsonType": "object", "description": "Filter configurations" },
+                            }
+                        },
+                        "created_at": { "bsonType": "date", "description": "Creation timestamp" },
+                        "updated_at": { "bsonType": "date", "description": "Last update timestamp" }
+                    }
+                }
+            },
+            "validationLevel": "moderate",
+            "validationAction": "error"
+        },
+        None
+    ).await?;
+
+    // Insert default global settings for each collection
+    let default_settings = create_default_ui_settings();
+    
+    for setting in default_settings {
+        // Use upsert to avoid duplicate errors while allowing updates
+        let filter = doc! {
+            "collection": setting.get("collection").unwrap(),
+            "user_id": { "$exists": false }  // Global defaults have no user_id
+        };
+        
+        collection.update_one(
+            filter,
+            doc! { "$set": setting },
+            mongodb::options::UpdateOptions::builder()
+                .upsert(true)
+                .build(),
+        ).await?;
+    }
+
+    Ok(())
+}
+
+// Helper function to create default UI settings for all collections
+fn create_default_ui_settings() -> Vec<Document> {
+    let collections = vec![
+        "school_accounts",
+        "attendance",
+        "users",
+        "purposes",
+        "semesters",
+        "settings_styles",
+        "sessions",
+    ];
+    
+    let now = mongodb::bson::DateTime::now();
+    
+    collections.iter().map(|&collection_name| {
+        // Get field names for this collection to create column width settings
+        let column_widths = get_default_column_widths(collection_name);
+        
+        // Create column order based on fields (same order as in schema)
+        let column_order = mongodb::bson::to_bson(&column_widths.keys().collect::<Vec<_>>())
+            .unwrap_or(mongodb::bson::Bson::Array(Vec::new()));
+        
+        doc! {
+            "collection": collection_name,
+            "ui": {
+                "columnWidths": column_widths,
+                "columnOrder": column_order,
+                "hiddenColumns": [],
+                "sortSettings": {
+                    "field": get_default_sort_field(collection_name),
+                    "direction": "asc"
+                },
+                "filterSettings": {},
+            },
+            "created_at": now,
+            "updated_at": now
+        }
+    }).collect()
+}
+
+fn get_default_column_widths(collection_name: &str) -> Document {
+    match collection_name {
+        "school_accounts" => doc! {
+            "school_id": DEFAULT_COLUMN_WIDTH, 
+            "first_name": DEFAULT_COLUMN_WIDTH, 
+            "middle_name": DEFAULT_COLUMN_WIDTH, 
+            "last_name": DEFAULT_COLUMN_WIDTH,
+            "gender": DEFAULT_COLUMN_WIDTH, 
+            "course": DEFAULT_COLUMN_WIDTH, 
+            "department": DEFAULT_COLUMN_WIDTH, 
+            "position": DEFAULT_COLUMN_WIDTH, 
+            "major": DEFAULT_COLUMN_WIDTH,
+            "year_level": DEFAULT_COLUMN_WIDTH, 
+            "is_active": DEFAULT_COLUMN_WIDTH, 
+            "last_updated_semester_id": DEFAULT_COLUMN_WIDTH,
+            "created_at": DEFAULT_COLUMN_WIDTH, 
+            "updated_at": DEFAULT_COLUMN_WIDTH
+        },
+        "attendance" => doc! {
+            "school_id": DEFAULT_COLUMN_WIDTH, 
+            "full_name": DEFAULT_COLUMN_WIDTH, 
+            "time_in_date": DEFAULT_COLUMN_WIDTH, 
+            "classification": DEFAULT_COLUMN_WIDTH,
+            "purpose_label": DEFAULT_COLUMN_WIDTH, 
+            "created_at": DEFAULT_COLUMN_WIDTH, 
+            "updated_at": DEFAULT_COLUMN_WIDTH
+        },
+        "users" => doc! {
+            "username": DEFAULT_COLUMN_WIDTH, 
+            "email": DEFAULT_COLUMN_WIDTH, 
+            "password": DEFAULT_COLUMN_WIDTH,
+            "created_at": DEFAULT_COLUMN_WIDTH, 
+            "updated_at": DEFAULT_COLUMN_WIDTH
+        },
+        "purposes" => doc! {
+            "label": DEFAULT_COLUMN_WIDTH, 
+            "icon_name": DEFAULT_COLUMN_WIDTH, 
+            "is_deleted": DEFAULT_COLUMN_WIDTH,
+            "created_at": DEFAULT_COLUMN_WIDTH, 
+            "updated_at": DEFAULT_COLUMN_WIDTH
+        },
+        "semesters" => doc! {
+            "label": DEFAULT_COLUMN_WIDTH, 
+            "is_active": DEFAULT_COLUMN_WIDTH,
+            "created_at": DEFAULT_COLUMN_WIDTH, 
+            "updated_at": DEFAULT_COLUMN_WIDTH
+        },
+        "settings_styles" => doc! {
+            "component_name": DEFAULT_COLUMN_WIDTH, 
+            "tailwind_classes": DEFAULT_COLUMN_WIDTH, 
+            "label": DEFAULT_COLUMN_WIDTH,
+            "created_at": DEFAULT_COLUMN_WIDTH, 
+            "updated_at": DEFAULT_COLUMN_WIDTH
+        },
+        "sessions" => doc! {
+            "session_token": DEFAULT_COLUMN_WIDTH, 
+            "user_id": DEFAULT_COLUMN_WIDTH, 
+            "expires_at": DEFAULT_COLUMN_WIDTH,
+            "is_valid": DEFAULT_COLUMN_WIDTH, 
+            "created_at": DEFAULT_COLUMN_WIDTH, 
+            "label": DEFAULT_COLUMN_WIDTH
+        },
+        _ => {
+            let field_names = get_field_names_for_collection(collection_name);
+            let mut widths = Document::new();
+            for field in field_names {
+                widths.insert(field, DEFAULT_COLUMN_WIDTH);
+            }
+            widths
+        }
+    }
+}
+
+fn get_default_sort_field(collection_name: &str) -> &str {
+    match collection_name {
+        "school_accounts" => "school_id",
+        "attendance" => "time_in_date",
+        "users" => "username",
+        "purposes" => "label",
+        "semesters" => "label",
+        "settings_styles" => "component_name",
+        "sessions" => "created_at",
+        _ => "created_at",
+    }
+}
+
+// Helper function to get field names for a collection
+// This is a simplified version - in a real app, you might want to extract this from schema
+fn get_field_names_for_collection(collection_name: &str) -> Vec<&str> {
+    match collection_name {
+        "school_accounts" => vec![
+            "school_id", "first_name", "middle_name", "last_name", "gender", "course", 
+            "department", "position", "major", "year_level", "is_active", 
+            "last_updated_semester_id", "created_at", "updated_at"
+        ],
+        "attendance" => vec![
+            "school_id", "full_name", "time_in_date", "classification",
+            "purpose_label", "created_at", "updated_at"
+        ],
+        "users" => vec![
+            "username", "email", "password", "created_at", "updated_at"
+        ],
+        "purposes" => vec![
+            "label", "icon_name", "is_deleted", "created_at", "updated_at"
+        ],
+        "semesters" => vec![
+            "label", "is_active", "created_at", "updated_at"
+        ],
+        "settings_styles" => vec![
+            "component_name", "tailwind_classes", "label", "created_at", "updated_at"
+        ],
+        "sessions" => vec![
+            "session_token", "user_id", "expires_at", "is_valid", "created_at", "label"
+        ],
+        _ => vec!["created_at", "updated_at"] // Fallback for unknown collections
+    }
+}
+// metadata for collections end here
