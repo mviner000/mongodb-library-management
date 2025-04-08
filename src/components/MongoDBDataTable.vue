@@ -3,7 +3,7 @@
 import { ref, computed, watch, onMounted, Ref, inject } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
-import { ReloadIcon, TrashIcon } from '@radix-icons/vue';
+import { Cross2Icon, ReloadIcon, TrashIcon } from '@radix-icons/vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -56,6 +56,8 @@ const filterQuery = ref('{}');
 const collectionSchema = ref<any>({});
 const newDocument = ref<Record<string, any>>({});
 const isAdding = ref(false);
+const timeoutId = ref<number | null>(null);
+  const addingRowError = ref(false);
 
 import { getApiBaseUrl } from '@/utils/api';
 import { useDebounceFn } from '@vueuse/core';
@@ -397,6 +399,30 @@ const filteredOptions = (field: string) => {
   return options.filter(opt => opt.label.toLowerCase().includes(query));
 };
 
+// Watch for errorMessage changes
+watch(errorMessage, (newVal) => {
+  if (newVal) {
+    // Clear any existing timeout
+    if (timeoutId.value) {
+      clearTimeout(timeoutId.value);
+    }
+    // Set new timeout
+    timeoutId.value = setTimeout(() => {
+      errorMessage.value = '';
+      timeoutId.value = null;
+    }, 2500) as unknown as number;
+  }
+});
+
+// Manual close handler
+const closeError = () => {
+  if (timeoutId.value) {
+    clearTimeout(timeoutId.value);
+    timeoutId.value = null;
+  }
+  errorMessage.value = '';
+};
+
 // Watch for collection name changes with immediate execution
 watch(collectionName, async (newVal) => {
   try {
@@ -589,6 +615,9 @@ const cancelAdding = () => {
   newDocument.value = {};
 };
 
+const errorColumn = ref<string | null>(null);
+  const errorTimeout = ref<ReturnType<typeof setTimeout> | null>(null);
+
 const saveNewDocument = async () => {
   try {
     const response = await fetch(`${API_BASE}/collections/${collectionName.value}/documents`, {
@@ -604,9 +633,35 @@ const saveNewDocument = async () => {
       await fetchDocuments();
     } else {
       errorMessage.value = error || 'Create failed';
+      
+      // Check if the error is a duplicate key error
+      if (error && error.includes('E11000')) {
+        // Extract the field name from the error message
+        const match = error.match(/dup key: { (.+?):/);
+        if (match && match[1]) {
+          const fieldName = match[1];
+          console.error(`Error adding new document: Duplicate key error on field '${fieldName}':`, error);
+          // Set error column and clear after 5 seconds
+          errorColumn.value = fieldName;
+          if (errorTimeout.value) clearTimeout(errorTimeout.value);
+          errorTimeout.value = setTimeout(() => {
+            errorColumn.value = null;
+          }, 2500);
+        }
+      }
+      
+      addingRowError.value = true;
+      setTimeout(() => {
+        addingRowError.value = false;
+      }, 2500);
     }
   } catch (error) {
     errorMessage.value = `Create failed: ${error}`;
+    console.error('Exception while adding new document:', error);
+    addingRowError.value = true;
+    setTimeout(() => {
+      addingRowError.value = false;
+    }, 2500);
   }
 };
 
@@ -811,8 +866,16 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
   />
   <div class="excel-container w-full">
     
-    <div v-if="errorMessage" class="my-2 p-2 bg-red-100 text-red-700 rounded">
+    <div v-if="errorMessage" class="my-2 p-2 bg-red-100 text-red-700 rounded relative pr-8">
       {{ errorMessage }}
+      <Button
+        @click="closeError"
+        variant="ghost"
+        size="sm"
+        class="absolute right-1 top-1 p-1 h-6 w-6 text-red-700 hover:bg-red-200"
+      >
+        <Cross2Icon class="h-3 w-3" />
+      </Button>
     </div>
     
     <div v-if="isLoading" class="flex justify-center my-8">
@@ -820,6 +883,7 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
     </div>
 
     <div v-else class="w-full overflow-auto">
+      
       <!-- Excel-like table with consistent styling -->
       <ExcelCellReference :selected-cell="selectedCell" />
       <Table class="excel-table" :style="{ width: `${totalTableWidth}px` }">
@@ -887,6 +951,7 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
               v-for="header in tableHeaders" 
               :key="header" 
               class="excel-column-header relative"
+              :class="{ 'error-column-header': header === errorColumn }"
               :style="{ 
                 width: resizingState.isResizing && resizingState.header === header 
                   ? `${resizingState.currentWidth}px` 
@@ -943,7 +1008,10 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
                 v-for="header in tableHeaders" 
                 :key="`${rowIndex}-${header}`" 
                 class="excel-cell"
-                :class="{'excel-cell-selected': editingCell?.rowIndex === rowIndex && editingCell?.header === header}"
+                :class="{
+                  'error-column-cell': header === errorColumn,
+                  'excel-cell-selected': editingCell?.rowIndex === rowIndex && editingCell?.header === header
+                  }"
               >
                 <div class="h-full">
                   <div v-if="editingCell?.rowIndex === rowIndex && editingCell?.header === header" 
@@ -1002,7 +1070,7 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
                       @blur="saveEdit"
                       @keyup.ctrl.enter="saveEdit"
                       class="excel-textarea"
-                      rows="3"
+                      rows="1"
                     ></textarea>
                   </div>
                   <div v-else
@@ -1047,7 +1115,10 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
           </template>
 
           <!-- Add new document form row -->
-          <TableRow v-if="isAdding" class="excel-new-row">
+          <TableRow v-if="isAdding" 
+            class="excel-new-row"
+            :class="['excel-new-row', { 'excel-new-row-error': addingRowError }]"
+          >
             <!-- Row number for new row -->
             <TableCell class="excel-row-number">
               {{ documents.length + 1 }}
@@ -1102,10 +1173,7 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
               />
               <span v-else class="excel-auto-id">(auto)</span>
             </TableCell>
-            <TableCell class="excel-actions-cell">
-              <Button size="sm" class="excel-save-button" @click="saveNewDocument">Save</Button>
-              <Button size="sm" variant="ghost" class="excel-cancel-button" @click="cancelAdding">Cancel</Button>
-            </TableCell>
+            <!-- the last table cell intentionally blanked -->
           </TableRow>
 
           <!-- Add new document button row -->
@@ -1125,6 +1193,21 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
           </TableRow>
         </TableBody>
       </Table>
+
+  <!-- Floating Add Widget -->
+  <div
+    v-if="isAdding"
+    class="sticky top-2 left-2 z-20 p-3 shadow-lg flex items-center space-x-2 w-auto rounded-md bg-green-50"
+  >
+    <Button @click="saveNewDocument" size="sm" class="bg-green-600 hover:bg-green-700 text-white">
+      <PlusCircledIcon class="w-4 h-4" />
+      Save
+    </Button>
+    <Button @click="cancelAdding" variant="outline" size="sm" class="border-green-600 text-green-700 hover:bg-green-100">
+      <Cross2Icon class="w-4 h-4" />
+      Cancel
+    </Button>
+  </div>
       
       <div v-if="totalPages > 1" class="excel-pagination">
         <Pagination :page="currentPage" :itemsPerPage="pageSize" :total="documents.length"
@@ -1149,7 +1232,7 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
         </Pagination>
       </div>
       
-      <div class="excel-footer">
+      <div v-if="!isAdding" class="excel-footer">
         <span class="excel-page-size-label">Rows per page:</span>
         <Select v-model="pageSize" class="excel-page-size-select">
           <SelectTrigger class="w-16">
@@ -1517,5 +1600,26 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
   color: #666666;
 }
 
+.error-column-header {
+  background-color: #fee2e2 !important;
+  border: 2px solid #ef4444 !important;
+}
 
+.error-column-cell {
+  background-color: #fef2f2 !important;
+  border-right: 2px solid #ef4444 !important;
+  border-left: 2px solid #ef4444 !important;
+  animation: error-flash 5s;
+}
+
+.excel-new-row-error {
+  background-color: #fee2e2 !important;
+  animation: error-flash 5s;
+}
+
+@keyframes error-flash {
+  0% { background-color: #fee2e2; }
+  90% { background-color: #fef2f2; }
+  100% { background-color: inherit; }
+}
 </style>
