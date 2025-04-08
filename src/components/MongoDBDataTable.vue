@@ -59,6 +59,7 @@ const isAdding = ref(false);
 
 import { getApiBaseUrl } from '@/utils/api';
 import { useDebounceFn } from '@vueuse/core';
+import ExcelCellReference from './ExcelCellReference.vue';
 const API_BASE = getApiBaseUrl();
 
 // Reference handling
@@ -73,6 +74,125 @@ const resizingState = ref({
   startWidth: 0,
   currentWidth: 0 // Added for visual feedback during resize
 });
+
+// Add column letter headers (Excel-like)
+const getColumnLabel = (index: number): string => {
+  // Convert 0-based index to Excel-like column label (A, B, C, ..., Z, AA, AB, ...)
+  let label = '';
+  let i = index;
+  
+  do {
+    // Get remainder when divided by 26 (number of letters in alphabet)
+    const remainder = i % 26;
+    // Convert to corresponding letter (0->A, 1->B, etc.)
+    label = String.fromCharCode(65 + remainder) + label;
+    // Integer division by 26, minus 1 to account for the previous calculation
+    i = Math.floor(i / 26) - 1;
+  } while (i >= 0);
+  
+  return label;
+};
+
+// Column letter headers for Excel-like feel
+const columnLetters = computed(() => {
+  return tableHeaders.value.map((_, index) => getColumnLabel(index));
+});
+
+// State for alphabetical header resizing
+const alphaResizingState = ref({
+  isResizing: false,
+  columnIndex: -1,
+  startX: 0,
+  startWidth: 0,
+  currentWidth: 0
+});
+
+// Start resize for alphabetical header
+const startAlphaResize = (columnIndex: number, event: MouseEvent) => {
+  const header = tableHeaders.value[columnIndex];
+  console.log(`Starting alpha resize for column ${columnIndex}: ${header}`);
+  
+  // Get current width from columnWidths or default
+  const currentWidth = columnWidths.value[header] || 200;
+  
+  alphaResizingState.value = {
+    isResizing: true,
+    columnIndex,
+    startX: event.clientX,
+    startWidth: currentWidth,
+    currentWidth: currentWidth
+  };
+  
+  // Add global event listeners
+  document.addEventListener('mousemove', handleAlphaMouseMove);
+  document.addEventListener('mouseup', stopAlphaResize);
+  
+  // Prevent text selection during resize
+  event.preventDefault();
+};
+
+const handleAlphaMouseMove = (event: MouseEvent) => {
+  if (!alphaResizingState.value.isResizing) return;
+  
+  const delta = event.clientX - alphaResizingState.value.startX;
+  const newWidth = Math.max(50, alphaResizingState.value.startWidth + delta);
+  
+  // Update the current width for visual feedback
+  alphaResizingState.value.currentWidth = newWidth;
+  
+  const header = tableHeaders.value[alphaResizingState.value.columnIndex];
+  
+  // Update local schema
+  const updatedWidths = {
+    ...columnWidths.value,
+    [header]: newWidth
+  };
+  
+  // Update the UI schema with new widths
+  collectionSchema.value = {
+    ...collectionSchema.value,
+    ui: {
+      ...collectionSchema.value.ui || {},
+      columnWidths: updatedWidths
+    }
+  };
+  
+  console.log(`Alpha resizing column '${header}' to ${newWidth}px`);
+};
+
+const stopAlphaResize = async () => {
+  if (!alphaResizingState.value.isResizing) return;
+  
+  const header = tableHeaders.value[alphaResizingState.value.columnIndex];
+  console.log(`Finish alpha resize: Column '${header}' set to ${alphaResizingState.value.currentWidth}px`);
+  
+  // Save final width to database
+  alphaResizingState.value.isResizing = false;
+  document.removeEventListener('mousemove', handleAlphaMouseMove);
+  document.removeEventListener('mouseup', stopAlphaResize);
+  
+  // Save to backend
+  await saveColumnWidths();
+};
+
+// Reset width for alphabetical header
+const resetAlphaColumnWidth = async (columnIndex: number) => {
+  const header = tableHeaders.value[columnIndex];
+  console.log(`Resetting alpha column width for: ${header}`);
+  
+  const newWidths = { ...columnWidths.value };
+  delete newWidths[header];
+  
+  collectionSchema.value = {
+    ...collectionSchema.value,
+    ui: {
+      ...collectionSchema.value.ui || {},
+      columnWidths: newWidths
+    }
+  };
+  
+  await saveColumnWidths();
+};
 
 // Add resize handlers
 const startResize = (header: string, event: MouseEvent) => {
@@ -535,10 +655,16 @@ const fetchDocuments = async () => {
   }
 };
 
+const selectedCell = ref<{ colIndex: number; rowNumber: number } | null>(null);
 const handleCellClick = (rowIndex: number, header: string, value: any) => {
   if (['_id', 'created_at', 'updated_at'].includes(header)) return;
   editingCell.value = { rowIndex, header };
   editValue.value = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
+  
+  // Calculate actual row number and column index
+  const actualRowNumber = (currentPage.value - 1) * pageSize.value + rowIndex + 1;
+  const colIndex = tableHeaders.value.indexOf(header);
+  selectedCell.value = { colIndex, rowNumber: actualRowNumber };
 };
 
 const saveEdit = async () => {
@@ -662,6 +788,18 @@ const onPageChange = (page: number) => {
   currentPage.value = page;
 };
 
+const numberColumnWidth = computed(() => {
+  // Calculate based on max digits needed (3 digits for up to 999 rows)
+  return `${Math.max(3, Math.floor(Math.log10(documents.value.length) + 2))}ch`;
+});
+
+const totalTableWidth = computed(() => {
+  const dataColumnsWidth = Object.values(columnWidths.value)
+    .reduce((acc: number, width: unknown) => acc + Number(width), 0);
+  return dataColumnsWidth + 1 + 30 + 60 + 1; // 30px for numbering column, 60px for numbering column, 1px for each border px
+});
+
+
 const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
 
 // We already have a watch on collectionName that calls fetchDocuments
@@ -671,7 +809,7 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
     :isSplitActive="isSplit" 
     class="sticky top-0 z-50" 
   />
-  <div class="border rounded-md w-full">
+  <div class="excel-container w-full">
     
     <div v-if="errorMessage" class="my-2 p-2 bg-red-100 text-red-700 rounded">
       {{ errorMessage }}
@@ -682,136 +820,131 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
     </div>
 
     <div v-else class="w-full overflow-auto">
-      <!-- Use a single consistent table header rendering for all states -->
-      <Table>
+      <!-- Excel-like table with consistent styling -->
+      <ExcelCellReference :selected-cell="selectedCell" />
+      <Table class="excel-table" :style="{ width: `${totalTableWidth}px` }">
+        
+        <!-- Excel-like column headers (A, B, C, ...) -->
+        <TableHeader>
+         
+          <TableRow class="excel-header-row">
+            <!-- Row number header -->
+            <TableHead 
+              class="excel-row-number-header"
+              :style="{ 
+                width: '30px',
+                minWidth: '30px',
+                maxWidth: '30px' 
+              }"
+            >
+              <!-- hidden -->
+            </TableHead>
+            <TableHead 
+              v-for="(letter, index) in columnLetters" 
+              :key="`letter-${index}`"
+              class="excel-column-letter relative"
+              :style="{ 
+                width: alphaResizingState.isResizing && alphaResizingState.columnIndex === index 
+                  ? `${alphaResizingState.currentWidth}px` 
+                  : `${columnWidths[tableHeaders[index]] || 200}px` 
+              }"
+            >
+              <div class="flex items-center justify-center">
+                <span class="excel-letter">{{ letter }}</span>
+                <div 
+                  class="excel-resizer absolute right-0 top-0"
+                  :class="[
+                    alphaResizingState.isResizing && alphaResizingState.columnIndex === index 
+                      ? 'excel-resizer-active' 
+                      : ''
+                  ]"
+                  @mousedown="startAlphaResize(index, $event)"
+                  @dblclick="resetAlphaColumnWidth(index)"
+                ></div>
+              </div>
+            </TableHead>
+            <!-- Actions column in alpha header row -->
+            <TableHead class="excel-column-letter excel-actions-header w-24">
+              <!-- Empty for alignment -->
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        
         <TableHeader>
           <TableRow>
+            <!-- Row number column header -->
+            <TableHead 
+              class="excel-row-number-header"
+              :style="{ 
+                width: numberColumnWidth,
+                minWidth: numberColumnWidth,
+                maxWidth: numberColumnWidth 
+              }"
+            >
+              <!-- hidden -->
+            </TableHead>
             <TableHead 
               v-for="header in tableHeaders" 
               :key="header" 
-              class="border px-4 py-2 bg-gray-100 font-medium relative"
+              class="excel-column-header relative"
               :style="{ 
                 width: resizingState.isResizing && resizingState.header === header 
                   ? `${resizingState.currentWidth}px` 
                   : `${columnWidths[header] || 200}px` 
               }"
             >
-              <div class="flex items-center justify-between select-none">
+              <div class="flex items-center justify-between">
                 <span>
                   {{ header }}
                   <span v-if="isFieldRequired(header)" class="text-red-500">*</span>
                 </span>
                 <div 
-                  class="w-1 h-full hover:bg-blue-500 absolute right-0 top-0 cursor-w-resize"
+                  class="excel-resizer absolute right-0 top-0"
                   :class="[
                     resizingState.isResizing && resizingState.header === header 
-                      ? 'bg-blue-500' 
-                      : 'bg-gray-200'
+                      ? 'excel-resizer-active' 
+                      : ''
                   ]"
                   @mousedown="startResize(header, $event)"
                   @dblclick="resetColumnWidth(header)"
                 ></div>
               </div>
             </TableHead>
-            <TableHead class="bg-gray-100 font-medium border text-right w-24">
+            <TableHead 
+              class="excel-column-header excel-actions-header" 
+              :style="{ width: '30px' }"
+            >
               Actions
             </TableHead>
           </TableRow>
         </TableHeader>
         
         <TableBody>
-          <!-- When adding a new document to an empty collection -->
-          <TableRow v-if="isAdding && documents.length === 0">
-            <TableCell v-for="header in tableHeaders" :key="header" class="border p-2">
-              <!-- Timestamp fields - not editable -->
-              <span v-if="['created_at', 'updated_at'].includes(header)" class="text-gray-500">
-                (auto-generated)
-              </span>
-              
-              <!-- Date field -->
-              <Input 
-                v-else-if="header !== '_id' && getSchemaInfo(header).bsonType === 'date'"
-                v-model="newDocument[header]" 
-                type="datetime-local"
-                class="w-full h-10"
-              />
-              
-              <!-- Boolean field -->
-              <div v-else-if="header !== '_id' && getSchemaInfo(header).bsonType === 'bool'" class="flex items-center">
-                <input 
-                  type="checkbox" 
-                  v-model="newDocument[header]"
-                  class="h-4 w-4"
-                />
-              </div>
-              
-              <!-- Reference field -->
-              <Select 
-                v-else-if="header !== '_id' && isReferenceField(header)" 
-                v-model="newDocument[header]"
-                class="w-full"
-              >
-                <SelectTrigger>
-                  <SelectValue :placeholder="`Select ${getReferencedCollection(header)}`" />
-                </SelectTrigger>
-                <SelectContent>
-                  <ScrollArea class="h-48">
-                    <div class="p-1">
-                      <Input 
-                        v-model="searchQuery[header]"
-                        placeholder="Search..."
-                        class="mb-2"
-                      />
-                      <SelectItem 
-                        v-for="option in filteredOptions(header)"
-                        :key="option.id"
-                        :value="option.id"
-                      >
-                        {{ option.label }}
-                      </SelectItem>
-                    </div>
-                  </ScrollArea>
-                </SelectContent>
-              </Select>
-              
-              <!-- Regular field -->
-              <Input 
-                v-else-if="header !== '_id'" 
-                v-model="newDocument[header]" 
-                class="w-full h-10"
-              />
-              
-              <!-- ID field (auto) -->
-              <span v-else class="text-gray-500">
-                (auto)
-              </span>
-            </TableCell>
-            
-            <!-- Action buttons -->
-            <TableCell class="border p-2">
-              <div class="flex space-x-2">
-                <Button @click="saveNewDocument" class="bg-black text-white">Save</Button>
-                <Button @click="cancelAdding" variant="outline">Cancel</Button>
-              </div>
-            </TableCell>
-          </TableRow>
-          
-          <!-- Empty state with add document button -->
-          <TableRow v-else-if="documents.length === 0" class="h-12">
-            <TableCell :colspan="tableHeaders.length + 1" class="text-center p-6 border">
-              <div class="flex justify-center items-center">
-                <Button @click="startAdding" class="flex items-center gap-2">
-                  <span>Add new document</span>
-                </Button>
-              </div>
-            </TableCell>
-          </TableRow>
-
           <!-- Regular Data Rows -->
-          <template v-else>
-            <TableRow v-for="(doc, rowIndex) in paginatedDocuments" :key="rowIndex">
-              <TableCell v-for="header in tableHeaders" :key="`${rowIndex}-${header}`" 
-                class="border p-0">
+          <template v-if="documents.length > 0">
+            <TableRow 
+              v-for="(doc, rowIndex) in paginatedDocuments" 
+              :key="rowIndex"
+              class="excel-data-row"
+              :class="{'excel-row-even': rowIndex % 2 === 0}"
+            >
+              <!-- Row number -->
+              <TableCell 
+                class="excel-row-number"
+                :style="{ 
+                  width: numberColumnWidth,
+                  minWidth: numberColumnWidth,
+                  maxWidth: numberColumnWidth 
+                }"
+              >
+                {{ (currentPage - 1) * pageSize + rowIndex + 1 }}
+              </TableCell>
+              <TableCell 
+                v-for="header in tableHeaders" 
+                :key="`${rowIndex}-${header}`" 
+                class="excel-cell"
+                :class="{'excel-cell-selected': editingCell?.rowIndex === rowIndex && editingCell?.header === header}"
+              >
                 <div class="h-full">
                   <div v-if="editingCell?.rowIndex === rowIndex && editingCell?.header === header" 
                       class="h-full">
@@ -822,12 +955,12 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
                         type="checkbox" 
                         v-model="editValue" 
                         @change="saveEdit"
-                        class="h-4 w-4"
+                        class="excel-checkbox"
                       />
                     </div>
                     <!-- Reference field editing -->
                     <div v-else-if="isReferenceField(header)" class="p-1">
-                      <Select v-model="editValue" @update:modelValue="saveEdit">
+                      <Select v-model="editValue" @update:modelValue="saveEdit" class="excel-select">
                         <SelectTrigger>
                           <SelectValue :placeholder="`Select ${getReferencedCollection(header)}`" :model-value="editValue" />
                         </SelectTrigger>
@@ -837,7 +970,7 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
                               <Input 
                                 v-model="searchQuery[header]"
                                 placeholder="Search..."
-                                class="mb-2"
+                                class="mb-2 excel-input"
                               />
                               <div v-if="filteredOptions(header).length">
                                 <SelectItem 
@@ -861,36 +994,36 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
                       type="datetime-local"
                       v-model="editValue"
                       @blur="saveEdit"
-                      class="h-full rounded-none border-none focus-visible:ring-2"
+                      class="excel-input excel-date-input"
                     />
                     <!-- Default textarea for other fields -->
                     <textarea v-else
                       v-model="editValue"
                       @blur="saveEdit"
                       @keyup.ctrl.enter="saveEdit"
-                      class="w-full h-full p-2 font-mono text-sm border-none focus:ring-2 focus:ring-blue-500"
+                      class="excel-textarea"
                       rows="3"
                     ></textarea>
                   </div>
                   <div v-else
-                    class="p-2 min-h-[40px]"
+                    class="excel-cell-content"
                     :class="{
-                      'cursor-pointer hover:bg-blue-50': !['created_at', 'updated_at'].includes(header),
-                      'cursor-not-allowed': ['created_at', 'updated_at'].includes(header)
+                      'excel-cell-editable': !['created_at', 'updated_at'].includes(header),
+                      'excel-cell-readonly': ['created_at', 'updated_at'].includes(header)
                     }"
                     @click="!['created_at', 'updated_at', '_id'].includes(header) && handleCellClick(rowIndex, header, doc[header])"
                   >
                     <!-- Show boolean values with checkboxes in read-only mode -->
                     <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" class="flex justify-center">
-                      <input type="checkbox" :checked="doc[header]" disabled class="h-4 w-4" />
+                      <input type="checkbox" :checked="doc[header]" disabled class="excel-checkbox" />
                     </div>
                     <!-- Show reference field labels in read-only mode -->
-                    <div v-else-if="isReferenceField(header)" class="text-blue-600">
+                    <div v-else-if="isReferenceField(header)" class="excel-reference-value">
                       {{ getReferenceLabel(header, doc[header]) || doc[header] }}
                     </div>
                     <!-- Add disabled display for timestamp fields -->
                     <template v-else-if="['created_at', 'updated_at'].includes(header)">
-                      <span class="text-gray-500">
+                      <span class="excel-timestamp">
                         {{ formatSchemaValue(doc[header], collectionSchema.properties[header]?.bsonType) }}
                       </span>
                     </template>
@@ -900,11 +1033,11 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
                   </div>
                 </div>
               </TableCell>
-              <TableCell class="border text-right p-1">
+              <TableCell class="excel-cell excel-actions-cell">
                 <Button
                   variant="ghost"
                   size="sm"
-                  class="text-red-600 hover:text-red-800"
+                  class="excel-delete-button"
                   @click="deleteDocument(doc._id.$oid)"
                 >
                   <TrashIcon class="h-4 w-4" />
@@ -913,10 +1046,15 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
             </TableRow>
           </template>
 
-          <TableRow v-if="isAdding" class="bg-blue-50">
-            <TableCell v-for="header in tableHeaders" :key="header" class="p-1">
+          <!-- Add new document form row -->
+          <TableRow v-if="isAdding" class="excel-new-row">
+            <!-- Row number for new row -->
+            <TableCell class="excel-row-number">
+              {{ documents.length + 1 }}
+            </TableCell>
+            <TableCell v-for="header in tableHeaders" :key="header" class="excel-cell">
               <!-- Timestamp fields - not editable -->
-              <span v-if="['created_at', 'updated_at'].includes(header)" class="text-gray-500">
+              <span v-if="['created_at', 'updated_at'].includes(header)" class="excel-timestamp">
                 (auto-generated)
               </span>
               
@@ -926,12 +1064,12 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
                 <input 
                   type="checkbox" 
                   v-model="newDocument[header]"
-                  class="h-4 w-4"
+                  class="excel-checkbox"
                 />
               </div>
               <!-- Reference field in inline add mode -->
               <div v-else-if="header !== '_id' && isReferenceField(header)" class="h-8">
-                <Select v-model="newDocument[header]" class="h-8">
+                <Select v-model="newDocument[header]" class="excel-select">
                   <SelectTrigger class="h-8">
                     <SelectValue :placeholder="`Select`" />
                   </SelectTrigger>
@@ -943,7 +1081,7 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
                       <Input 
                         v-model="searchQuery[header]"
                         placeholder="Search..."
-                        class="mb-1 mx-1"
+                        class="mb-1 mx-1 excel-input"
                       />
                       <SelectItem 
                         v-for="option in filteredOptions(header)"
@@ -960,54 +1098,60 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
               <Input v-else-if="header !== '_id'"
                 v-model="newDocument[header]"
                 :type="collectionSchema.properties[header]?.bsonType === 'date' ? 'datetime-local' : 'text'"
-                class="h-8"
+                class="excel-input"
               />
-              <span v-else class="px-2 text-gray-400">(auto)</span>
+              <span v-else class="excel-auto-id">(auto)</span>
             </TableCell>
-            <TableCell class="space-x-1">
-              <Button size="sm" @click="saveNewDocument">Save</Button>
-              <Button size="sm" variant="ghost" @click="cancelAdding">Cancel</Button>
+            <TableCell class="excel-actions-cell">
+              <Button size="sm" class="excel-save-button" @click="saveNewDocument">Save</Button>
+              <Button size="sm" variant="ghost" class="excel-cancel-button" @click="cancelAdding">Cancel</Button>
             </TableCell>
           </TableRow>
 
-          <TableRow v-if="!isAdding" class="hover:bg-gray-50 cursor-pointer" 
-            @click="startAdding">
-            <TableCell :colspan="tableHeaders.length + 1" class="text-center py-2">
-              <div class="inline-flex items-center gap-2 text-blue-600">
+          <!-- Add new document button row -->
+          <TableRow 
+            v-if="!isAdding" 
+            class="excel-add-row" 
+            @click="startAdding"
+          >
+            <TableCell :colspan="tableHeaders.length + 2" class="excel-add-cell">
+              <div class="inline-flex items-center gap-2 excel-add-button">
                 <PlusCircledIcon class="h-4 w-4" />
-                <span class="text-sm">Add new document</span>
+                <span class="text-sm">
+                  {{ documents.length === 0 ? 'Add first document' : 'Add new document' }}
+                </span>
               </div>
             </TableCell>
           </TableRow>
         </TableBody>
       </Table>
       
-      <div v-if="totalPages > 1" class="mt-4 p-4">
+      <div v-if="totalPages > 1" class="excel-pagination">
         <Pagination :page="currentPage" :itemsPerPage="pageSize" :total="documents.length"
           @update:page="onPageChange" :siblingCount="1">
           <PaginationList>
             <PaginationListItem :value="1">
-              <PaginationFirst :disabled="currentPage === 1" @click="currentPage = 1" />
+              <PaginationFirst :disabled="currentPage === 1" @click="currentPage = 1" class="excel-pagination-button" />
             </PaginationListItem>
             <PaginationListItem :value="Math.max(1, currentPage - 1)">
               <PaginationPrev :disabled="currentPage === 1" 
-                @click="currentPage = Math.max(1, currentPage - 1)" />
+                @click="currentPage = Math.max(1, currentPage - 1)" class="excel-pagination-button" />
             </PaginationListItem>
             <PaginationListItem :value="Math.min(totalPages, currentPage + 1)">
               <PaginationNext :disabled="currentPage === totalPages" 
-                @click="currentPage = Math.min(totalPages, currentPage + 1)" />
+                @click="currentPage = Math.min(totalPages, currentPage + 1)" class="excel-pagination-button" />
             </PaginationListItem>
             <PaginationListItem :value="totalPages">
               <PaginationLast :disabled="currentPage === totalPages" 
-                @click="currentPage = totalPages" />
+                @click="currentPage = totalPages" class="excel-pagination-button" />
             </PaginationListItem>
           </PaginationList>
         </Pagination>
       </div>
       
-      <div class="flex items-center gap-2 p-4">
-        <span class="text-sm text-gray-500">Rows per page:</span>
-        <Select v-model="pageSize">
+      <div class="excel-footer">
+        <span class="excel-page-size-label">Rows per page:</span>
+        <Select v-model="pageSize" class="excel-page-size-select">
           <SelectTrigger class="w-16">
             <SelectValue />
           </SelectTrigger>
@@ -1020,7 +1164,7 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
           </SelectContent>
         </Select>
         
-        <span class="ml-4 text-sm text-gray-500">
+        <span class="excel-status-info">
           Showing {{ (currentPage - 1) * pageSize + 1 }} to 
           {{ Math.min(currentPage * pageSize, documents.length) }} of 
           {{ documents.length }} entries
@@ -1030,68 +1174,348 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
   </div>
 </template>
 
-
 <style>
-.checkbox-cell {
-  vertical-align: middle;
+/* Excel-inspired container */
+.excel-container {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  border: 1px solid #d4d4d8;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+  border-radius: 2px;
+  background-color: #ffffff;
+}
+
+/* Excel table styling */
+.excel-table {
+  table-layout: fixed;
+  min-width: fit-content;
+}
+
+/* Excel header row */
+.excel-header-row {
+  background-color: #f3f3f3;
+}
+
+/* Excel column headers */
+.excel-column-header {
+  background-color: #f3f3f3;
+  border: 1px solid #d0d0d0;
+  padding: 6px 8px;
+  font-weight: 600;
+  font-size: 14px;
+  color: #212121;
+  position: relative;
+  text-align: left;
+}
+
+/* Excel column letter headers (A, B, C) */
+.excel-column-letter {
+  background-color: #e6e6e6;
+  border: 1px solid #d0d0d0;
+  padding: 4px 8px;
+  font-weight: 600;
+  font-size: 14px;
+  color: #616161;
   text-align: center;
 }
 
-.excel-style-table {
-  border-collapse: collapse;
-  border-spacing: 0;
+.excel-letter {
+  font-weight: 700;
 }
 
-.excel-style-table th,
-.excel-style-table td {
-  @apply border-gray-300;
-  border-style: solid;
-  border-width: 0 1px 1px 0;
+/* Excel row number header */
+.excel-row-number-header {
+  background-color: #e6e6e6;
+  border: 1px solid #d0d0d0;
+  padding: 6px 4px;
+  font-weight: 600;
+  font-size: 14px;
+  color: #616161;
+  text-align: center;
 }
 
-.excel-style-table th {
-  @apply bg-gray-100;
+/* Excel row number cells */
+.excel-row-number {
+  background-color: #f3f3f3;
+  border: 1px solid #d0d0d0;
+  padding: 4px;
+  font-weight: 500;
+  font-size: 14px;
+  color: #616161;
+  text-align: center;
 }
 
-.excel-style-table td {
-  @apply bg-white;
+/* Excel actions header */
+.excel-actions-header {
+  background-color: #f3f3f3;
+  border: 1px solid #d0d0d0;
+  text-align: center;
 }
 
-.excel-style-table tr:hover td {
-  @apply bg-gray-50;
+/* Excel data rows */
+.excel-data-row:hover {
+  background-color: #edf5fd;
 }
 
-.excel-style-table input {
-  @apply h-full min-h-[40px] rounded-none border-none shadow-none focus-visible:ring-2;
+/* Excel data cell */
+.excel-cell {
+  border: 1px solid #d0d0d0;
+  padding: 0;
+  font-size: 14px;
+  color: #212121;
+  position: relative;
 }
 
-.excel-style-table textarea {
-  @apply min-h-[80px] resize-y;
+/* Excel cell content */
+.excel-cell-content {
+  padding: 6px 8px;
+  min-height: 40px;
 }
 
-.schema-table {
-  @apply w-full border-collapse;
+/* Excel cell editable */
+.excel-cell-editable {
+  cursor: pointer;
 }
 
-.schema-table th {
-  @apply bg-gray-100 text-left p-2 border border-gray-300;
+.excel-cell-editable:hover {
+  background-color: #e8f3fd;
 }
 
-.schema-table td {
-  @apply p-2 border border-gray-300;
-}
-
-.schema-table tr:hover td {
-  @apply bg-gray-50;
-}
-
-.cursor-not-allowed {
+/* Excel cell readonly */
+.excel-cell-readonly {
   cursor: not-allowed;
   opacity: 0.8;
+  background-color: #f9f9f9;
 }
 
-.cursor-col-resize {
-  cursor: col-resize;
-  user-select: none;
+/* Excel cell selected - active cell styling */
+.excel-cell-selected {
+  outline: 2px solid #217346;
+  outline-offset: -2px;
+  position: relative;
+  z-index: 1;
 }
+
+/* Excel textarea */
+.excel-textarea {
+  width: 100%;
+  height: 100%;
+  padding: 6px 8px;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  font-size: 14px;
+  border: none;
+  resize: none; /* Change from vertical to none */
+  min-height: 40px; /* Reduce from 80px to 40px to match other row heights */
+  outline: none;
+  box-shadow: none;
+  overflow: hidden; /* Hide overflow */
+}
+
+.excel-new-row .excel-cell {
+  overflow: visible; /* Ensure content is visible */
+  height: 40px; /* Set a consistent height */
+}
+
+/* Ensure inputs in the new row don't cause scrolling */
+.excel-new-row .excel-input {
+  overflow: hidden;
+}
+
+.excel-textarea:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Excel input */
+.excel-input {
+  height: 100%;
+  min-height: 32px;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  font-size: 14px;
+  padding: 4px 6px;
+}
+
+.excel-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+  border: none;
+  ring: none;
+}
+
+/* Excel date input */
+.excel-date-input {
+  padding: 2px 4px;
+  font-size: 14px;
+}
+
+/* Excel checkbox */
+.excel-checkbox {
+  height: 16px;
+  width: 16px;
+  cursor: pointer;
+  accent-color: #217346;
+}
+
+/* Excel reference value */
+.excel-reference-value {
+  color: #0066cc;
+  cursor: pointer;
+}
+
+/* Excel timestamp value */
+.excel-timestamp {
+  color: #666666;
+  font-style: italic;
+  font-size: 14px;
+}
+
+/* Excel auto ID */
+.excel-auto-id {
+  color: #888888;
+  font-style: italic;
+  padding: 0 8px;
+  font-size: 14px;
+}
+
+/* Excel actions cell */
+.excel-row-number-header,
+.excel-row-number {
+  width: 30px !important;
+  min-width: 30px !important;
+  max-width: 30px !important;
+  border-left: 1px solid #d0d0d0;
+}
+
+.excel-actions-header,
+.excel-actions-cell {
+  width: 60px !important;
+  min-width: 60px !important;
+  max-width: 60px !important;
+  border-right: 1px solid #d0d0d0;
+}
+
+/* Excel delete button */
+.excel-delete-button {
+  color: #d32f2f;
+}
+
+.excel-delete-button:hover {
+  color: #b71c1c;
+  background-color: #ffebee;
+}
+
+/* Excel new row */
+.excel-new-row {
+  background-color: #e8f5e9;
+}
+
+/* Excel save button */
+.excel-save-button {
+  background-color: #217346;
+  color: white;
+  font-size: 14px;
+  height: 28px;
+}
+
+.excel-save-button:hover {
+  background-color: #1e6b41;
+}
+
+/* Excel cancel button */
+.excel-cancel-button {
+  color: #666666;
+  font-size: 14px;
+  height: 28px;
+}
+
+/* Excel add row */
+.excel-add-row {
+  cursor: pointer;
+}
+
+.excel-add-row:hover {
+  background-color: #f0f8ff;
+}
+
+/* Excel add cell */
+.excel-add-cell {
+  text-align: center;
+  padding: 8px 0;
+}
+
+/* Excel add button */
+.excel-add-button {
+  color: #217346;
+  font-weight: 500;
+}
+
+/* Excel column resizer */
+.excel-resizer {
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+  position: absolute;
+  right: 0;
+  top: 0;
+  background-color: transparent;
+}
+
+.excel-resizer:hover {
+  background-color: #217346;
+}
+
+.excel-resizer-active {
+  background-color: #217346;
+}
+
+/* Excel select */
+.excel-select {
+  font-size: 14px;
+}
+
+/* Excel row alternate colors */
+.excel-row-even {
+  background-color: #f9f9f9;
+}
+
+/* Excel pagination */
+.excel-pagination {
+  margin-top: 16px;
+  padding: 8px;
+  border-top: 1px solid #e0e0e0;
+  display: flex;
+  justify-content: center;
+}
+
+.excel-pagination-button {
+  color: #217346;
+}
+
+/* Excel footer */
+.excel-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-top: 1px solid #e0e0e0;
+  background-color: #f9f9f9;
+}
+
+.excel-page-size-label {
+  font-size: 14px;
+  color: #666666;
+}
+
+.excel-page-size-select {
+  font-size: 14px;
+}
+
+.excel-status-info {
+  margin-left: 16px;
+  font-size: 14px;
+  color: #666666;
+}
+
+
 </style>

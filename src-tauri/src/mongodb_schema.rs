@@ -371,7 +371,7 @@ pub async fn create_settings_styles_collection(db: &Database) -> Result<()> {
 
 // metadata for collections start here
 // Add a constant for default column width
-const DEFAULT_COLUMN_WIDTH: i32 = 20;
+const DEFAULT_COLUMN_WIDTH: i32 = 200;
 
 async fn create_ui_metadata_collection(db: &Database) -> Result<()> {
     let collection = db.collection::<Document>("ui_metadata");
@@ -429,7 +429,7 @@ async fn create_ui_metadata_collection(db: &Database) -> Result<()> {
     let default_settings = create_default_ui_settings();
     
     for setting in default_settings {
-        // Use upsert to avoid duplicate errors while allowing updates
+        // Use upsert with $setOnInsert to create only if not exists
         let filter = doc! {
             "collection": setting.get("collection").unwrap(),
             "user_id": { "$exists": false }  // Global defaults have no user_id
@@ -437,7 +437,7 @@ async fn create_ui_metadata_collection(db: &Database) -> Result<()> {
         
         collection.update_one(
             filter,
-            doc! { "$set": setting },
+            doc! { "$setOnInsert": setting },  // Only apply settings when inserting a new document
             mongodb::options::UpdateOptions::builder()
                 .upsert(true)
                 .build(),
@@ -464,7 +464,15 @@ fn create_default_ui_settings() -> Vec<Document> {
     collections.iter().map(|&collection_name| {
         // Get field names for this collection to create column width settings
         let column_widths = get_default_column_widths(collection_name);
-        
+
+        // Ensure the backend only stores data column widths (excluding the _actions and _row_number columns)
+        let mut filtered_column_widths = Document::new();
+        for (key, value) in column_widths.iter() {
+            if !["_row_number", "_actions"].contains(&key.as_str()) {
+                filtered_column_widths.insert(key.clone(), value.clone());
+            }
+        }
+
         // Create column order based on fields (same order as in schema)
         let column_order = mongodb::bson::to_bson(&column_widths.keys().collect::<Vec<_>>())
             .unwrap_or(mongodb::bson::Bson::Array(Vec::new()));
