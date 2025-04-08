@@ -4,8 +4,7 @@
       <!-- Cell reference box (e.g., A1) -->
       <div class="flex items-center px-2 border-r border-gray-200">
         <div class="flex items-center cursor-pointer">
-          <span class="text-sm text-gray-700">{{ cellReference }}</span>
-          <ChevronDownIcon class="h-4 w-4 ml-0.5 text-gray-500" />
+          <span class="text-sm font-bold text-gray-700">{{ cellReference }}</span>
         </div>
       </div>
       
@@ -19,10 +18,9 @@
     </div>
   </template>
   
-  <script setup lang="ts">
+<script setup lang="ts">
   import { computed } from 'vue';
-  import { ChevronDownIcon } from 'lucide-vue-next';
-  
+
   const props = defineProps<{
     selectedCell: { colIndex: number; rowNumber: number } | null;
   }>();
@@ -43,4 +41,4 @@
     const { colIndex, rowNumber } = props.selectedCell;
     return `${getColumnLabel(colIndex)}${rowNumber}`;
   });
-  </script>
+</script>

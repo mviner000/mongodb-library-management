@@ -62,7 +62,7 @@ const timeoutId = ref<number | null>(null);
 import { getApiBaseUrl } from '@/utils/api';
 import { useDebounceFn } from '@vueuse/core';
 import ExcelCellReference from './ExcelCellReference.vue';
-import { SaveIcon } from 'lucide-vue-next';
+import HorizontalScrollIndicator from './HorizontalScrollIndicator.vue';
 const API_BASE = getApiBaseUrl();
 
 // Reference handling
@@ -160,7 +160,7 @@ const handleAlphaMouseMove = (event: MouseEvent) => {
     }
   };
   
-  console.log(`Alpha resizing column '${header}' to ${newWidth}px`);
+  // console.log(`Alpha resizing column '${header}' to ${newWidth}px`);
 };
 
 const stopAlphaResize = async () => {
@@ -882,6 +882,13 @@ const totalTableWidth = computed(() => {
 
 const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
 
+const totalColumnWidths = computed(() => {
+  const dataWidth = Object.values(columnWidths.value).reduce((acc: number, width) => acc + Number(width), 0);
+  return dataWidth + 30 + 60; // 30px for numbering, 60px for actions
+});
+
+const tableContainer = ref<HTMLElement | null>(null);
+  const scrollContainer = ref<HTMLElement | null>(null);
 // We already have a watch on collectionName that calls fetchDocuments
 </script>
 <template>
@@ -907,7 +914,7 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
       <ReloadIcon class="h-8 w-8 animate-spin text-gray-500" />
     </div>
 
-    <div v-else class="w-full overflow-auto">
+    <div ref="scrollContainer" class="w-full overflow-auto">
       
       <!-- Excel-like table with consistent styling -->
       <ExcelCellReference :selected-cell="selectedCell" />
@@ -1199,14 +1206,6 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
               <span v-else class="excel-auto-id">(auto)</span>
             </TableCell>
             <TableCell class="excel-cell text-center">
-              <!-- <Button
-                  variant="ghost"
-                  size="sm"
-                  class="excel-delete-button"
-                  @click="saveNewDocument"
-                >
-                  <TrashIcon class="h-4 w-4" />
-                </Button> -->
               <Button variant="ghost" @click="saveNewDocument" size="sm" class="px-0 -ml-1">
                 💾
                 </Button>
@@ -1290,6 +1289,10 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
           {{ documents.length }} entries
         </span>
       </div>
+      <!-- Total column width section -->
+      <p class="total-width-info">Total column widths: {{ totalColumnWidths }}px</p>
+
+      <HorizontalScrollIndicator :targetRef="scrollContainer" />
     </div>
   </div>
 </template>
@@ -1383,7 +1386,10 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
   font-size: 14px;
   color: #212121;
   position: relative;
+  height: 10px;
+  line-height: 10px; /* Optional: vertically center text */
 }
+
 
 /* Excel cell content */
 .excel-cell-content {

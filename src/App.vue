@@ -23,6 +23,7 @@ import { apiFetch } from './utils/api'
 import ConnectionSettingsButton from './components/ConnectionSettingsButton.vue'
 import ConnectionSettingsModal from './components/ConnectionSettingsModal.vue';
 import ConnectionTester from './components/ConnectionTester.vue'
+import ScreenWidth from './components/ScreenWidth.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -881,6 +882,7 @@ const handleCloseConnectionSettings = () => {
 <template>
   <Toaster />
   <ConnectionTester />
+  <ScreenWidth />
   <ConnectionSettingsModal
       :is-open="showConnectionSettingsModal"
       @close="handleCloseConnectionSettings"
@@ -906,6 +908,7 @@ const handleCloseConnectionSettings = () => {
       @tab-click="handleTabClick"
       @add-tab="handleAddTab"
     />
+
 
     <!-- Main BrowserNavbar (only when not in split view) -->
     <BrowserNavbar 
