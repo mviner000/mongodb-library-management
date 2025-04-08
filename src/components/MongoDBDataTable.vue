@@ -62,6 +62,7 @@ const timeoutId = ref<number | null>(null);
 import { getApiBaseUrl } from '@/utils/api';
 import { useDebounceFn } from '@vueuse/core';
 import ExcelCellReference from './ExcelCellReference.vue';
+import { SaveIcon } from 'lucide-vue-next';
 const API_BASE = getApiBaseUrl();
 
 // Reference handling
@@ -618,7 +619,7 @@ const cancelAdding = () => {
 const errorColumn = ref<string | null>(null);
   const errorTimeout = ref<ReturnType<typeof setTimeout> | null>(null);
 
-const saveNewDocument = async () => {
+    const saveNewDocument = async () => {
   try {
     const response = await fetch(`${API_BASE}/collections/${collectionName.value}/documents`, {
       method: 'POST',
@@ -632,22 +633,46 @@ const saveNewDocument = async () => {
       isAdding.value = false;
       await fetchDocuments();
     } else {
-      errorMessage.value = error || 'Create failed';
-      
-      // Check if the error is a duplicate key error
+      // Handle duplicate key errors with a user-friendly message
       if (error && error.includes('E11000')) {
-        // Extract the field name from the error message
-        const match = error.match(/dup key: { (.+?):/);
-        if (match && match[1]) {
-          const fieldName = match[1];
-          console.error(`Error adding new document: Duplicate key error on field '${fieldName}':`, error);
-          // Set error column and clear after 5 seconds
-          errorColumn.value = fieldName;
-          if (errorTimeout.value) clearTimeout(errorTimeout.value);
-          errorTimeout.value = setTimeout(() => {
-            errorColumn.value = null;
-          }, 2500);
+        // Try different patterns to extract field name and value
+        let fieldName = "";
+        let fieldValue = "";
+        
+        // Pattern 1: Standard MongoDB error format
+        const keyValueMatch = error.match(/dup key: { (\w+): "(.+?)" }/);
+        if (keyValueMatch && keyValueMatch[1] && keyValueMatch[2]) {
+          fieldName = keyValueMatch[1];
+          fieldValue = keyValueMatch[2];
+        } 
+        // Pattern 2: Look for the format in the logs portion
+        else {
+          const logPattern = /{ (\w+): \\"(.+?)\\" }/;
+          const logMatch = error.match(logPattern);
+          if (logMatch && logMatch[1] && logMatch[2]) {
+            fieldName = logMatch[1];
+            fieldValue = logMatch[2];
+          }
         }
+        
+        if (fieldName && fieldValue) {
+          // Create user-friendly message with extracted information
+          errorMessage.value = `"${fieldValue}" already exists in column "${fieldName}". Please check for duplicates. Choose another value for your ${fieldName}.`;
+          
+          // Highlight the problematic field
+          errorColumn.value = fieldName;
+        } else {
+          // Last resort fallback message
+          errorMessage.value = 'A duplicate value exists. Please check your entries and try again.';
+        }
+        
+        if (errorTimeout.value) clearTimeout(errorTimeout.value);
+        errorTimeout.value = setTimeout(() => {
+          errorColumn.value = null;
+        }, 2500);
+      } else {
+        // For other errors
+        errorMessage.value = error || 'Failed to create record';
       }
       
       addingRowError.value = true;
@@ -866,17 +891,17 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
   />
   <div class="excel-container w-full">
     
-    <div v-if="errorMessage" class="my-2 p-2 bg-red-100 text-red-700 rounded relative pr-8">
-      {{ errorMessage }}
-      <Button
-        @click="closeError"
-        variant="ghost"
-        size="sm"
-        class="absolute right-1 top-1 p-1 h-6 w-6 text-red-700 hover:bg-red-200"
-      >
-        <Cross2Icon class="h-3 w-3" />
-      </Button>
-    </div>
+    <div v-if="errorMessage" class="fixed top-4 left-4 right-4 z-[9999] mx-4 my-4 p-4 bg-red-100 text-red-700 rounded-lg shadow-xl border-2 border-red-300 break-words">
+  {{ errorMessage }}
+  <Button
+    @click="closeError"
+    variant="ghost"
+    size="sm"
+    class="absolute right-3 top-3 p-1 h-6 w-6 text-red-700 hover:bg-red-200"
+  >
+    <Cross2Icon class="h-3 w-3" />
+  </Button>
+</div>
     
     <div v-if="isLoading" class="flex justify-center my-8">
       <ReloadIcon class="h-8 w-8 animate-spin text-gray-500" />
@@ -1173,7 +1198,19 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
               />
               <span v-else class="excel-auto-id">(auto)</span>
             </TableCell>
-            <!-- the last table cell intentionally blanked -->
+            <TableCell class="excel-cell text-center">
+              <!-- <Button
+                  variant="ghost"
+                  size="sm"
+                  class="excel-delete-button"
+                  @click="saveNewDocument"
+                >
+                  <TrashIcon class="h-4 w-4" />
+                </Button> -->
+              <Button variant="ghost" @click="saveNewDocument" size="sm" class="px-0 -ml-1">
+                💾
+                </Button>
+            </TableCell>
           </TableRow>
 
           <!-- Add new document button row -->
@@ -1491,18 +1528,6 @@ const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
 /* Excel new row */
 .excel-new-row {
   background-color: #e8f5e9;
-}
-
-/* Excel save button */
-.excel-save-button {
-  background-color: #217346;
-  color: white;
-  font-size: 14px;
-  height: 28px;
-}
-
-.excel-save-button:hover {
-  background-color: #1e6b41;
 }
 
 /* Excel cancel button */
