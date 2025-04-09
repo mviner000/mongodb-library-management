@@ -6,6 +6,8 @@ const props = defineProps<{
   targetRef?: HTMLElement | null;
 }>();
 
+const emit = defineEmits(['sidebarClick']);
+
 const scrollPercentage = ref(0);
 const visibleStart = ref(0);
 const visibleEnd = ref(0);
@@ -41,7 +43,13 @@ function updateScroll() {
   totalWidth.value = Math.round(scrollWidth);
   
   // Check if Action column is visible
-  showBoom.value = visibleEnd.value >= actionColumnStart.value;
+  showBoom.value = visibleEnd.value < actionColumnStart.value;
+}
+
+function handleSidebarClick(event: MouseEvent) {
+  // Stop propagation to prevent the click from reaching elements underneath
+  event.stopPropagation();
+  emit('sidebarClick', event);
 }
 
 function setupScrollListener() {
@@ -102,35 +110,55 @@ watch(() => props.targetRef, (newTargetRef) => {
 </script>
 
 <template>
-  <div class="fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white px-3 py-1 rounded shadow">
-    {{ visibleStart }}px - {{ visibleEnd }}px of {{ totalWidth }}px ({{ scrollPercentage }}%)
-    <span v-if="showBoom" class="boom-text ml-2">Boom!</span>
+  <div>
+    <!-- Main indicator at the bottom -->
+    <div class="fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white px-3 py-1 rounded shadow">
+      {{ visibleStart }}px - {{ visibleEnd }}px of {{ totalWidth }}px ({{ scrollPercentage }}%)
+    </div>
+    
+    <!-- Floating right sidebar "Boom" indicator with click capability -->
+    <div 
+      v-if="showBoom" 
+      class="fixed right-0 top-1/2 transform -translate-y-1/2 bg-red-500 text-white w-12 h-auto py-4 px-1 rounded-l shadow boom-sidebar"
+      @click="handleSidebarClick"
+    >
+      <div class="vertical-text">Boom!</div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-div {
-  transition: opacity 0.3s ease;
+/* Base styles for the main info box */
+div.fixed.bottom-4 {
   pointer-events: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
+  z-index: 9998;
+ }
 
-.boom-text {
+/* Boom sidebar styles */
+.boom-sidebar {
+  width: 50px;
+  text-align: center;
+  /* Ensure it's always on top */
+  z-index: 9999;
   font-weight: bold;
   color: yellow;
-  animation: pulse 0.5s infinite alternate;
+  cursor: pointer;
+  pointer-events: auto; /* Enable mouse interactions */
+  /* Make it appear in front of all other components */
+  position: fixed;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
 }
 
-@keyframes pulse {
-  from {
-    opacity: 0.7;
-    transform: scale(1);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1.1);
-  }
+.vertical-text {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 </style>

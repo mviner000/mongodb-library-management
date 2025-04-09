@@ -61,8 +61,8 @@ const timeoutId = ref<number | null>(null);
 import { getApiBaseUrl } from '@/utils/api';
 import { useDebounceFn } from '@vueuse/core';
 import ExcelCellReference from './ExcelCellReference.vue';
-import HorizontalScrollIndicator from './HorizontalScrollIndicator.vue';
 import TableActions from './mongodbtable/TableActions.vue';
+import StickyTableActions from './mongodbtable/StickyTableActions.vue';
 const API_BASE = getApiBaseUrl();
 
 // Reference handling
@@ -1110,6 +1110,15 @@ const scrollContainer = ref<HTMLElement | null>(null);
                 @delete-start="(id) => pendingDeleteId = id"
                 @delete-end="pendingDeleteId = null"
               />
+              <StickyTableActions
+                :collection-name="collectionName"
+                :document-id="doc._id.$oid"
+                :row-number="(currentPage - 1) * pageSize + rowIndex + 1"
+                :target-ref="scrollContainer"
+                @deleted="fetchDocuments"
+                @delete-start="(id) => pendingDeleteId = id"
+                @delete-end="pendingDeleteId = null"
+              />
             </TableRow>
           </template>
 
@@ -1259,7 +1268,7 @@ const scrollContainer = ref<HTMLElement | null>(null);
       <!-- Total column width section -->
       <p class="total-width-info">Total column widths: {{ totalColumnWidths }}px</p>
 
-      <HorizontalScrollIndicator :targetRef="scrollContainer" />
+      <!-- <HorizontalScrollIndicator :targetRef="scrollContainer" /> -->
     </div>
   </div>
 </template>
@@ -1353,8 +1362,8 @@ const scrollContainer = ref<HTMLElement | null>(null);
   font-size: 14px;
   color: #212121;
   position: relative;
-  height: 10px;
-  line-height: 10px; /* Optional: vertically center text */
+  height: 8px;
+  line-height: 8px; /* Optional: vertically center text */
 }
 
 
