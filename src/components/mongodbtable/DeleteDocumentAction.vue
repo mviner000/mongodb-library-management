@@ -1,3 +1,5 @@
+<!-- src/components/mongodbtable/DeleteDocumentAction.vue -->
+
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { Button } from '@/components/ui/button';
@@ -7,7 +9,7 @@ import {
   DialogContent,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast/use-toast';
-import { getApiBaseUrl } from '@/utils/api';
+import { documentService } from '@/services/documentService';
 
 // --- Props ---
 const props = defineProps<{
@@ -25,7 +27,6 @@ const emit = defineEmits<{
 
 // --- State ---
 const { toast } = useToast();
-const API_BASE = getApiBaseUrl();
 const isDeleting = ref(false);
 const showDialog = ref(false);
 const confirmationText = ref('');
@@ -58,12 +59,10 @@ const confirmDelete = async () => {
 
   isDeleting.value = true; // Set deleting state immediately
   try {
-    const response = await fetch(
-      `${API_BASE}/collections/${props.collectionName}/documents/${props.documentId}`,
-      { method: 'DELETE' }
+    const { success, data, error } = await documentService.deleteDocument(
+      props.collectionName,
+      props.documentId
     );
-
-    const { success, data, error } = await response.json();
 
     if (success && data?.deleted_count > 0) {
       toast({

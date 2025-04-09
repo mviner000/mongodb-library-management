@@ -14,11 +14,22 @@
     </div>
 
     <!-- Empty space -->
-    <div class="flex-1 h-full  "></div>
+    <div class="flex-1 h-full"></div>
+    
+    <!-- Delete button (right-aligned, smaller size) -->
+    <div class="mr-4">
+      <button class="flex items-center justify-center px-3 py-1 text-xs rounded-md bg-red-100 text-red-500 border border-red-300 hover:bg-red-200">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+          <path d="M3 6h18"></path>
+          <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+          <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+        </svg>
+        Delete
+      </button>
+    </div>
   </div>
 </template>
 
-  
 <script setup lang="ts">
   import { computed } from 'vue';
 

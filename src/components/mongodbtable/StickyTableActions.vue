@@ -1,3 +1,5 @@
+<!-- src/components/mongodbtable/StickyTableActions.vue -->
+
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, onUnmounted } from 'vue';
 import { TableCell } from '@/components/ui/table';

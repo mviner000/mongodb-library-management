@@ -1,3 +1,5 @@
+<!-- src/components/mongodbtable/TableActions.vue -->
+
 <script setup lang="ts">
 import { ref } from 'vue'; // Keep ref
 // REMOVE: onMounted, onBeforeUnmount
