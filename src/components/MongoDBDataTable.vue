@@ -844,18 +844,43 @@ const numberColumnWidth = computed(() => {
 const totalTableWidth = computed(() => {
   const dataColumnsWidth = Object.values(columnWidths.value)
     .reduce((acc: number, width: unknown) => acc + Number(width), 0);
-  return dataColumnsWidth + 1 + 30 + 60 + 1; // 30px for numbering column, 60px for numbering column, 1px for each border px
+  return dataColumnsWidth + 40 + 30 + 60 + 1; // Added 40px for selector
 });
 
 
 const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
 
-const totalColumnWidths = computed(() => {
-  const dataWidth = Object.values(columnWidths.value).reduce((acc: number, width) => acc + Number(width), 0);
-  return dataWidth + 30 + 60; // 30px for numbering, 60px for actions
-});
 
 const scrollContainer = ref<HTMLElement | null>(null);
+
+// selected rows state
+const selectedRows = ref(new Set<string>());
+const allSelected = computed({
+  get: () => documents.value.length > 0 && 
+    documents.value.every(doc => selectedRows.value.has(doc._id.$oid)),
+  set: (val: boolean) => {
+    // Replace the Set instead of mutating it
+    selectedRows.value = val 
+      ? new Set(documents.value.map(doc => doc._id.$oid))
+      : new Set();
+  }
+});
+
+const toggleRow = (id: string) => {
+  const newSet = new Set(selectedRows.value);
+  newSet.has(id) ? newSet.delete(id) : newSet.add(id);
+  selectedRows.value = newSet; // Assign new Set to trigger reactivity
+};
+
+// Add toast on selection change
+watch(selectedRows, (newVal) => {
+  toast({
+    title: 'Selection Updated',
+    description: `You have selected ${newVal.size} rows`,
+    duration: 2000
+  });
+}, { deep: true });
+
 // We already have a watch on collectionName that calls fetchDocuments
 </script>
 
@@ -887,12 +912,28 @@ const scrollContainer = ref<HTMLElement | null>(null);
       <!-- Excel-like table with consistent styling -->
       <ExcelCellReference :selected-cell="selectedCell" />
       <!-- just use native table, dont ever change to use Table from shadcn -->
-      <table class="excel-table" :style="{ width: `${totalTableWidth}px` }">
+      <table class="mt-10 excel-table" :style="{ width: `${totalTableWidth}px` }">
         
         <!-- Excel-like column headers (A, B, C, ...) -->
         <TableHeader>
          
           <TableRow class="excel-header-row">
+            <!-- New Selector Column -->
+            <TableHead 
+              class="excel-column-checkbox-selector"
+              :style="{ 
+                width: '40px',
+                minWidth: '40px',
+                maxWidth: '40px' 
+              }"
+            >
+            <input 
+              type="checkbox" 
+              v-model="allSelected"
+              class="excel-checkbox"
+            />
+            </TableHead>
+            
             <!-- Row number header -->
             <TableHead 
               class="excel-column-checkbox"
@@ -938,6 +979,17 @@ const scrollContainer = ref<HTMLElement | null>(null);
         <TableHeader>
           <TableRow>
             <!-- Row number column header -->
+            <TableHead 
+              class="excel-column-checkbox-selector"
+              :style="{ 
+                width: '40px',
+                minWidth: '40px',
+                maxWidth: '40px' 
+              }"
+            >
+            ***
+            </TableHead>
+            
             <TableHead 
               class="excel-row-number-header"
               :style="{ 
@@ -994,6 +1046,22 @@ const scrollContainer = ref<HTMLElement | null>(null);
                 class="excel-data-row"
                 :class="{ 'bg-red-100 border-2 border-red-500 text-red-800': doc._id.$oid === pendingDeleteId }"
               >
+              <!-- Selector Checkbox -->
+              <TableCell 
+                class="excel-column-checkbox-selector"
+                :style="{ 
+                  width: '40px',
+                  minWidth: '40px',
+                  maxWidth: '40px' 
+                }"
+              >
+                <input
+                  type="checkbox"
+                  :checked="selectedRows.has(doc._id.$oid)"
+                  @change="toggleRow(doc._id.$oid)"
+                  class="excel-checkbox"
+                />
+              </TableCell>
               <!-- Row number -->
               <TableCell 
                 class="excel-row-number"
@@ -1265,10 +1333,6 @@ const scrollContainer = ref<HTMLElement | null>(null);
           {{ documents.length }} entries
         </span>
       </div>
-      <!-- Total column width section -->
-      <p class="total-width-info">Total column widths: {{ totalColumnWidths }}px</p>
-
-      <!-- <HorizontalScrollIndicator :targetRef="scrollContainer" /> -->
     </div>
   </div>
 </template>
@@ -1318,9 +1382,30 @@ const scrollContainer = ref<HTMLElement | null>(null);
   text-align: center;
 }
 
-.excel-column-checkbox {
+/* Update sticky positioning for new column */
+.excel-column-checkbox-selector {
   position: sticky;
   left: 0;
+  z-index: 5;
+  background-color: #f3f3f3;
+  outline: 1px solid #d0d0d0;
+}
+
+/* Adjust row number positioning */
+.excel-row-number-header-selector {
+  left: 40px; /* Account for selector column */
+  z-index: 4;
+}
+
+.excel-row-number-selector {
+  left: 40px; /* Account for selector column */
+  z-index: 3;
+}
+
+
+.excel-column-checkbox {
+  position: sticky;
+  left: 40px;
   z-index: 4; /* Ensure it's above other headers */
   
   background-color: #e6e6e6;
@@ -1341,19 +1426,17 @@ const scrollContainer = ref<HTMLElement | null>(null);
 /* Excel row @ header */
 .excel-row-number-header {
   position: sticky;
-  left: 0;
-  
-  z-index: 4; /* Ensure it's above other headers */
-  
-  background-color: #e6e6e6;
-  border: 1px solid #d0d0d0;
+  left: 40px; /* This should match the width of your selector column */
+  z-index: 4;
+  background-color: #f3f3f3;
+  border: 1px solid rgb(198, 198, 198);
   outline: 1px solid #d0d0d0;
 }
 
 /* Excel row & header */
 .excel-row-number-header {
   position: sticky;
-  left: 0;
+  left: 40px;
   
   z-index: 4; /* Ensure it's above other headers */
   background-color: #f3f3f3; /* Match header background */
@@ -1365,12 +1448,12 @@ const scrollContainer = ref<HTMLElement | null>(null);
 
 /* Excel row number cells */
 .excel-row-number {
-  border: 1px solid #d0d0d0;
   position: sticky;
-  left: 0;
+  left: 40px; /* This should match the width of your selector column */
   z-index: 2;
+  background-color: #f3f3f3;
+  border: 1px solid #d0d0d0;
   outline: 1px solid #d0d0d0;
-  background-color: #f3f3f3; /* Match row background */
 }
 
 /* Excel actions header */
