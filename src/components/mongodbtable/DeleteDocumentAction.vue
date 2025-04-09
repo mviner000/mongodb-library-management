@@ -3,10 +3,11 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogContent,
+  DialogTitle,
+  DialogDescription
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast/use-toast';
 import { documentService } from '@/services/documentService';
@@ -138,6 +139,11 @@ defineExpose({
       class="custom-delete-dialog p-0 overflow-hidden border-rose-200"
       @keydown.enter.prevent="confirmationText === confirmationRequired && !isDeleting && confirmDelete()"
     >
+      <DialogTitle class="sr-only">Delete Document Confirmation</DialogTitle>
+      <DialogDescription class="sr-only">
+        Please confirm your intention to delete document from row {{ props.rowNumber }} by typing the confirmation text.
+      </DialogDescription>
+      
       <div class="bg-rose-100 text-rose-700 p-4 border-b border-rose-200 flex items-center">
         <div class="flex-1">
           You are about to delete row number: {{ props.rowNumber }}
@@ -148,10 +154,12 @@ defineExpose({
         <p class="text-sm text-gray-700 mb-3">
           To confirm, type <span class="font-medium text-rose-600">{{ confirmationRequired }}</span> in the box below
         </p>
-        <Input
+        <input
           v-model="confirmationText"
           placeholder="Type confirmation text"
           ref="inputRef"
+          class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-rose-500"
+          aria-label="Confirmation text"
         />
         <p class="text-xs text-gray-500 mt-2">
           Press Enter to confirm when text is correct

@@ -874,13 +874,21 @@ const toggleRow = (id: string) => {
 
 // Add toast on selection change
 watch(selectedRows, (newVal) => {
-  toast({
-    title: 'Selection Updated',
-    description: `You have selected ${newVal.size} rows`,
-    duration: 2000
-  });
+  // Only show toast if there are selected rows
+  if (newVal.size > 0) {
+    toast({
+      title: 'Selection Updated',
+      description: `You have selected ${newVal.size} rows`,
+      duration: 2000
+    });
+  }
 }, { deep: true });
 
+const resetSelection = () => {
+  console.log('Resetting selected rows');
+  selectedRows.value = new Set(); // Clear the selection
+  selectedCell.value = null; // Clear the selected cell
+};
 // We already have a watch on collectionName that calls fetchDocuments
 </script>
 
@@ -910,7 +918,16 @@ watch(selectedRows, (newVal) => {
     <div ref="scrollContainer" class="w-full overflow-auto table-scroll-container">
       
       <!-- Excel-like table with consistent styling -->
-      <ExcelCellReference :selected-cell="selectedCell" />
+      <ExcelCellReference 
+        :selected-cell="selectedCell" 
+        :selected-rows="selectedRows"
+        :collection-name="collectionName"
+        :documents="documents"
+        :current-page="currentPage"
+        :page-size="pageSize"
+        @document-deleted="fetchDocuments"
+        @reset-selection="resetSelection"
+      />
       <!-- just use native table, dont ever change to use Table from shadcn -->
       <table class="mt-10 excel-table" :style="{ width: `${totalTableWidth}px` }">
         
