@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { TableCell } from '@/components/ui/table';
-import { TrashIcon, Cross2Icon } from '@radix-icons/vue';
+import { TrashIcon } from '@radix-icons/vue';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast/use-toast';
 import { getApiBaseUrl } from '@/utils/api';
@@ -106,7 +106,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <TableCell class="excel-cell excel-actions-cell">
+  <TableCell class="excel-cell excel-actions-cell select-none">
     <Button
       variant="ghost"
       size="sm"

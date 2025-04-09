@@ -1,79 +1,76 @@
+<!-- src/components/HorizontalScrollIndicator.vue -->
 <script setup lang="ts">
-// Import necessary functions from Vue 3 Composition API
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 
-// --- Props ---
-// Define component props using defineProps with TypeScript for type safety.
 const props = defineProps<{
-  // targetRef: An optional prop. If provided, it should be an HTMLElement.
-  // The component will track the horizontal scroll percentage of this specific element.
-  // If omitted or null, the component defaults to tracking the window's horizontal scroll.
   targetRef?: HTMLElement | null;
 }>();
 
-// --- State ---
-// Reactive variable to store the calculated horizontal scroll percentage.
-// 'ref' makes it reactive, so the template updates when its value changes.
 const scrollPercentage = ref(0);
+const visibleStart = ref(0);
+const visibleEnd = ref(0);
+const totalWidth = ref(0);
+const showBoom = ref(false);
 
-// Variable to hold the element whose scroll event we are listening to.
-// It can be either the window object or a specific HTMLElement passed via props.
-// Defaults to the global window object.
 let scrollElement: HTMLElement | Window = window;
 
-// --- Methods ---
-/**
- * Calculates the horizontal scroll percentage of the 'scrollElement'.
- * Updates the 'scrollPercentage' ref with the calculated value.
- */
-function updateScroll() {
-  let scrollLeft: number; // Stores the current horizontal scroll position (pixels from the left).
-  let scrollWidth: number; // Stores the total scrollable width minus the visible width.
+// Action column start position is at totalWidth - 30
+const actionColumnStart = computed(() => {
+  return totalWidth.value - 30;
+});
 
-  // Check if the scroll element is a specific HTMLElement or the window.
+function updateScroll() {
+  let scrollLeft: number;
+  let scrollWidth: number;
+  let clientWidth: number;
+
   if (scrollElement instanceof HTMLElement) {
-    // If it's an HTMLElement, use its specific properties.
     scrollLeft = scrollElement.scrollLeft;
-    // scrollWidth is the total width of the content.
-    // clientWidth is the visible width of the element.
-    // The difference is the maximum amount you can scroll horizontally.
-    scrollWidth = scrollElement.scrollWidth - scrollElement.clientWidth;
+    scrollWidth = scrollElement.scrollWidth;
+    clientWidth = scrollElement.clientWidth;
   } else {
-    // If it's the window, use window/document properties.
-    // window.scrollX is the horizontal scroll position of the window.
     scrollLeft = window.scrollX;
-    // document.documentElement.scrollWidth is the total width of the document.
-    // window.innerWidth is the visible width of the viewport.
-    scrollWidth = document.documentElement.scrollWidth - window.innerWidth;
+    scrollWidth = document.documentElement.scrollWidth;
+    clientWidth = window.innerWidth;
   }
 
-  // Calculate the percentage.
-  // Check if scrollWidth > 0 to avoid division by zero if the element is not horizontally scrollable.
-  scrollPercentage.value = scrollWidth > 0
-    ? Math.round((scrollLeft / scrollWidth) * 100) // Calculate percentage if scrollable
-    : 0; // Default to 0% if not scrollable
+  const maxScroll = scrollWidth - clientWidth;
+  scrollPercentage.value = maxScroll > 0 ? Math.round((scrollLeft / maxScroll) * 100) : 0;
+  visibleStart.value = Math.round(scrollLeft);
+  visibleEnd.value = Math.round(scrollLeft + clientWidth);
+  totalWidth.value = Math.round(scrollWidth);
+  
+  // Check if Action column is visible
+  showBoom.value = visibleEnd.value >= actionColumnStart.value;
 }
 
-/**
- * Adds the scroll event listener to the current 'scrollElement'.
- * It correctly adds the listener to either an HTMLElement or the window object.
- * Also calls updateScroll once immediately to set the initial percentage.
- */
 function setupScrollListener() {
   if (scrollElement instanceof HTMLElement) {
-    scrollElement.addEventListener('scroll', updateScroll, { passive: true }); // Use passive for potential performance improvement
+    scrollElement.addEventListener('scroll', updateScroll, { passive: true });
   } else {
     window.addEventListener('scroll', updateScroll, { passive: true });
   }
-  // Update scroll percentage immediately after setup
-  updateScroll();
+  
+  // Initial update without showing Boom
+  let initialUpdate = true;
+  if (initialUpdate) {
+    // Just get the dimensions without setting showBoom
+    if (scrollElement instanceof HTMLElement) {
+      totalWidth.value = Math.round(scrollElement.scrollWidth);
+      visibleStart.value = Math.round(scrollElement.scrollLeft);
+      visibleEnd.value = Math.round(scrollElement.scrollLeft + scrollElement.clientWidth);
+    } else {
+      totalWidth.value = Math.round(document.documentElement.scrollWidth);
+      visibleStart.value = Math.round(window.scrollX);
+      visibleEnd.value = Math.round(window.scrollX + window.innerWidth);
+    }
+    
+    // Force Boom to be hidden initially
+    showBoom.value = false;
+    initialUpdate = false;
+  }
 }
 
-/**
- * Removes the scroll event listener from the current 'scrollElement'.
- * This is crucial for cleanup to prevent memory leaks when the component
- * is unmounted or when the target element changes.
- */
 function removeScrollListener() {
   if (scrollElement instanceof HTMLElement) {
     scrollElement.removeEventListener('scroll', updateScroll);
@@ -82,60 +79,58 @@ function removeScrollListener() {
   }
 }
 
-// --- Lifecycle Hooks ---
-/**
- * Lifecycle hook: Runs when the component is first mounted to the DOM.
- */
 onMounted(() => {
-  // If a targetRef prop was provided during component initialization,
-  // set it as the element to track. Otherwise, scrollElement remains 'window'.
   if (props.targetRef) {
     scrollElement = props.targetRef;
   }
-  // Add the scroll event listener to the determined scrollElement.
   setupScrollListener();
+  // Ensure Boom is hidden by default
+  showBoom.value = false;
 });
 
-/**
- * Lifecycle hook: Runs just before the component is unmounted from the DOM.
- */
 onUnmounted(() => {
-  // Clean up: Remove the scroll event listener to prevent memory leaks.
   removeScrollListener();
 });
 
-// --- Watchers ---
-/**
- * Watch for changes in the 'targetRef' prop.
- * This allows the component to react if the target element changes after mounting.
- */
 watch(() => props.targetRef, (newTargetRef) => {
-  // When targetRef changes:
-  // 1. Remove the listener from the *old* scrollElement.
   removeScrollListener();
-  // 2. Update scrollElement: Use the new targetRef if provided, otherwise default back to window.
   scrollElement = newTargetRef || window;
-  // 3. Set up the listener on the *new* scrollElement.
   setupScrollListener();
+  // Ensure Boom is hidden when target changes
+  showBoom.value = false;
 });
 </script>
 
 <template>
   <div class="fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white px-3 py-1 rounded shadow">
-    Horizontal Scroll: {{ scrollPercentage }}%
+    {{ visibleStart }}px - {{ visibleEnd }}px of {{ totalWidth }}px ({{ scrollPercentage }}%)
+    <span v-if="showBoom" class="boom-text ml-2">Boom!</span>
   </div>
 </template>
 
 <style scoped>
-/* Scoped styles: These CSS rules only apply to elements within this component */
 div {
-  /* Add a smooth transition for opacity changes (though opacity isn't changed here currently) */
   transition: opacity 0.3s ease;
-  /* Ensure the element is interactive and doesn't block clicks on elements underneath */
   pointer-events: none;
-  /* Improve text rendering */
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+.boom-text {
+  font-weight: bold;
+  color: yellow;
+  animation: pulse 0.5s infinite alternate;
+}
+
+@keyframes pulse {
+  from {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1.1);
+  }
 }
 </style>

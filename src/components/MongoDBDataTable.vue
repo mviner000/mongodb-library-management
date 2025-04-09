@@ -7,7 +7,6 @@ import { Cross2Icon, ReloadIcon } from '@radix-icons/vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -887,7 +886,8 @@ const scrollContainer = ref<HTMLElement | null>(null);
       
       <!-- Excel-like table with consistent styling -->
       <ExcelCellReference :selected-cell="selectedCell" />
-      <Table class="excel-table" :style="{ width: `${totalTableWidth}px` }">
+      <!-- just use native table, dont ever change to use Table from shadcn -->
+      <table class="excel-table" :style="{ width: `${totalTableWidth}px` }">
         
         <!-- Excel-like column headers (A, B, C, ...) -->
         <TableHeader>
@@ -946,12 +946,12 @@ const scrollContainer = ref<HTMLElement | null>(null);
                 maxWidth: numberColumnWidth 
               }"
             >
-              <!-- hidden -->
+              #<!-- hidden -->
             </TableHead>
             <TableHead 
               v-for="header in tableHeaders" 
               :key="header" 
-              class="excel-column-header relative"
+              class="excel-column-header font-bold text-black relative"
               :class="{ 'error-column-header': header === errorColumn }"
               :style="{ 
                 width: resizingState.isResizing && resizingState.header === header 
@@ -977,7 +977,7 @@ const scrollContainer = ref<HTMLElement | null>(null);
               </div>
             </TableHead>
             <TableHead 
-              class="excel-column-header excel-actions-header" 
+              class="excel-column-header excel-actions-header select-none" 
               :style="{ width: '30px' }"
             >
               Actions
@@ -989,11 +989,11 @@ const scrollContainer = ref<HTMLElement | null>(null);
           <!-- Regular Data Rows -->
           <template v-if="documents.length > 0">
             <TableRow 
-  v-for="(doc, rowIndex) in paginatedDocuments" 
-  :key="rowIndex"
-  class="excel-data-row"
-  :class="{ 'bg-red-100 border-2 border-red-500 text-red-800': doc._id.$oid === pendingDeleteId }"
->
+                v-for="(doc, rowIndex) in paginatedDocuments" 
+                :key="rowIndex"
+                class="excel-data-row"
+                :class="{ 'bg-red-100 border-2 border-red-500 text-red-800': doc._id.$oid === pendingDeleteId }"
+              >
               <!-- Row number -->
               <TableCell 
                 class="excel-row-number"
@@ -1195,7 +1195,7 @@ const scrollContainer = ref<HTMLElement | null>(null);
             </TableCell>
           </TableRow>
         </TableBody>
-      </Table>
+      </table>
 
   <!-- Floating Add Widget -->
   <div
@@ -1292,7 +1292,7 @@ const scrollContainer = ref<HTMLElement | null>(null);
   padding: 6px 8px;
   font-weight: 600;
   font-size: 14px;
-  color: #212121;
+  color: #000000;
   position: relative;
   text-align: left;
 }
