@@ -1195,6 +1195,22 @@ watch(selectedRows, (newVal) => {
             class="excel-new-row"
             :class="['excel-new-row', { 'excel-new-row-error': addingRowError }]"
           >
+
+          <!-- Placeholder for Selector Column Cell -->
+          <TableCell 
+            class="excel-column-checkbox-selector"
+            :style="{ 
+              width: '40px',
+              minWidth: '40px',
+              maxWidth: '40px' 
+            }"
+          >
+            <input 
+              type="checkbox" 
+              disabled 
+              class="excel-checkbox"
+            />
+          </TableCell>
             <!-- Row number for new row -->
             <TableCell class="excel-row-number">
               {{ documents.length + 1 }}
