@@ -203,8 +203,8 @@ onUnmounted(() => {
 
 /* Boom sidebar styles */
 .boom-sidebar {
-  width: 60px;
-  box-shadow: 0 0 3px rgba(0, 0, 0, 0.5);
+  width: 57px;
+  box-shadow: 0 0 1px rgba(0, 0, 0, 0.5);
   height: 100%;
 }
 </style>

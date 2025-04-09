@@ -882,7 +882,7 @@ const scrollContainer = ref<HTMLElement | null>(null);
       <ReloadIcon class="h-8 w-8 animate-spin text-gray-500" />
     </div>
 
-    <div ref="scrollContainer" class="w-full overflow-auto">
+    <div ref="scrollContainer" class="w-full overflow-auto table-scroll-container">
       
       <!-- Excel-like table with consistent styling -->
       <ExcelCellReference :selected-cell="selectedCell" />
@@ -895,19 +895,19 @@ const scrollContainer = ref<HTMLElement | null>(null);
           <TableRow class="excel-header-row">
             <!-- Row number header -->
             <TableHead 
-              class="excel-row-number-header"
+              class="excel-column-checkbox"
               :style="{ 
                 width: '30px',
                 minWidth: '30px',
                 maxWidth: '30px' 
               }"
             >
-              <!-- hidden -->
+              <!-- hidden -->@
             </TableHead>
             <TableHead 
               v-for="(letter, index) in columnLetters" 
               :key="`letter-${index}`"
-              class="excel-column-letter relative"
+              class="excel-column-letter relative "
               :style="{ 
                 width: alphaResizingState.isResizing && alphaResizingState.columnIndex === index 
                   ? `${alphaResizingState.currentWidth}px` 
@@ -946,7 +946,7 @@ const scrollContainer = ref<HTMLElement | null>(null);
                 maxWidth: numberColumnWidth 
               }"
             >
-              #<!-- hidden -->
+              <!-- hidden -->&
             </TableHead>
             <TableHead 
               v-for="header in tableHeaders" 
@@ -1003,7 +1003,7 @@ const scrollContainer = ref<HTMLElement | null>(null);
                   maxWidth: numberColumnWidth 
                 }"
               >
-                {{ (currentPage - 1) * pageSize + rowIndex + 1 }}
+               {{ (currentPage - 1) * pageSize + rowIndex + 1 }}
               </TableCell>
               <TableCell 
                 v-for="header in tableHeaders" 
@@ -1274,6 +1274,7 @@ const scrollContainer = ref<HTMLElement | null>(null);
 </template>
 
 <style>
+
 /* Excel-inspired container */
 .excel-container {
   font-family: 'Segoe UI', Arial, sans-serif;
@@ -1317,30 +1318,59 @@ const scrollContainer = ref<HTMLElement | null>(null);
   text-align: center;
 }
 
-.excel-letter {
-  font-weight: 700;
-}
-
-/* Excel row number header */
-.excel-row-number-header {
+.excel-column-checkbox {
+  position: sticky;
+  left: 0;
+  z-index: 4; /* Ensure it's above other headers */
+  
   background-color: #e6e6e6;
   border: 1px solid #d0d0d0;
-  padding: 6px 4px;
+  padding: 4px 8px;
   font-weight: 600;
   font-size: 14px;
   color: #616161;
   text-align: center;
+
+  outline: 1px solid #d0d0d0; /* Added outline */
 }
+
+.excel-letter {
+  font-weight: 700;
+}
+
+/* Excel row @ header */
+.excel-row-number-header {
+  position: sticky;
+  left: 0;
+  
+  z-index: 4; /* Ensure it's above other headers */
+  
+  background-color: #e6e6e6;
+  border: 1px solid #d0d0d0;
+  outline: 1px solid #d0d0d0;
+}
+
+/* Excel row & header */
+.excel-row-number-header {
+  position: sticky;
+  left: 0;
+  
+  z-index: 4; /* Ensure it's above other headers */
+  background-color: #f3f3f3; /* Match header background */
+  border: 1px solid rgb(198, 198, 198); /* Add black border on all sides */
+  outline: 1px solid #d0d0d0;
+}
+
+
 
 /* Excel row number cells */
 .excel-row-number {
-  background-color: #f3f3f3;
   border: 1px solid #d0d0d0;
-  padding: 4px;
-  font-weight: 500;
-  font-size: 14px;
-  color: #616161;
-  text-align: center;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  outline: 1px solid #d0d0d0;
+  background-color: #f3f3f3; /* Match row background */
 }
 
 /* Excel actions header */
@@ -1486,7 +1516,6 @@ const scrollContainer = ref<HTMLElement | null>(null);
   width: 30px !important;
   min-width: 30px !important;
   max-width: 30px !important;
-  border-left: 1px solid #d0d0d0;
 }
 
 .excel-actions-header,
@@ -1612,6 +1641,23 @@ const scrollContainer = ref<HTMLElement | null>(null);
 .excel-new-row-error {
   background-color: #fee2e2 !important;
   animation: error-flash 5s;
+}
+
+/* Ensure data headers stay below the numbering column header */
+.excel-column-header {
+  position: sticky;
+  top: 0;
+  z-index: 3; /* Lower than numbering's z-index */
+}
+
+/* Adjust z-index for the column letters header */
+.excel-header-row .excel-row-number-header {
+  z-index: 5; /* Higher than data headers */
+}
+
+/* Hover state for row numbers */
+.excel-data-row:hover .excel-row-number {
+  background-color: #edf5fd; /* Match row hover color */
 }
 
 @keyframes error-flash {
