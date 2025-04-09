@@ -3,7 +3,7 @@
 import { ref, computed, watch, onMounted, Ref, inject } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
-import { Cross2Icon, ReloadIcon, TrashIcon } from '@radix-icons/vue';
+import { Cross2Icon, ReloadIcon } from '@radix-icons/vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -63,6 +63,7 @@ import { getApiBaseUrl } from '@/utils/api';
 import { useDebounceFn } from '@vueuse/core';
 import ExcelCellReference from './ExcelCellReference.vue';
 import HorizontalScrollIndicator from './HorizontalScrollIndicator.vue';
+import TableActions from './mongodbtable/TableActions.vue';
 const API_BASE = getApiBaseUrl();
 
 // Reference handling
@@ -546,20 +547,6 @@ const formatSchemaValue = (value: any, bsonType: string | string[]) => {
   return String(value);
 };
 
-// Function to render a table header cell with resize functionality
-const renderTableHeader = (header: string) => {
-  const width = resizingState.value.isResizing && resizingState.value.header === header 
-    ? resizingState.value.currentWidth 
-    : columnWidths.value[header] || 200;
-
-  return {
-    key: header,
-    width: `${width}px`,
-    content: header,
-    isRequired: isFieldRequired(header)
-  };
-};
-
 watch(collectionName, async (newVal) => {
   try {
     console.log(`Fetching schema for collection: ${newVal}`);
@@ -617,9 +604,10 @@ const cancelAdding = () => {
 };
 
 const errorColumn = ref<string | null>(null);
-  const errorTimeout = ref<ReturnType<typeof setTimeout> | null>(null);
+const pendingDeleteId = ref<string | null>(null);
+const errorTimeout = ref<ReturnType<typeof setTimeout> | null>(null);
 
-    const saveNewDocument = async () => {
+const saveNewDocument = async () => {
   try {
     const response = await fetch(`${API_BASE}/collections/${collectionName.value}/documents`, {
       method: 'POST',
@@ -811,25 +799,6 @@ const saveEdit = async () => {
   }
 };
 
-const deleteDocument = async (id: string) => {
-  if (!confirm('Are you sure you want to delete this document?')) return;
-  try {
-    const response = await fetch(
-      `${API_BASE}/collections/${collectionName.value}/documents/${id}`,
-      { method: 'DELETE' }
-    );
-
-    const { success, data, error } = await response.json();
-    
-    if (success && data.deleted_count > 0) {
-      await fetchDocuments();
-    } else {
-      errorMessage.value = error || 'Delete failed';
-    }
-  } catch (error) {
-    errorMessage.value = `Error deleting document: ${error}`;
-  }
-};
 
 const collectionsList = ref<string[]>([]);
 const fetchCollections = async () => {
@@ -887,10 +856,10 @@ const totalColumnWidths = computed(() => {
   return dataWidth + 30 + 60; // 30px for numbering, 60px for actions
 });
 
-const tableContainer = ref<HTMLElement | null>(null);
-  const scrollContainer = ref<HTMLElement | null>(null);
+const scrollContainer = ref<HTMLElement | null>(null);
 // We already have a watch on collectionName that calls fetchDocuments
 </script>
+
 <template>
   <MongoDBTableNavbar 
     :isSplitActive="isSplit" 
@@ -1020,11 +989,11 @@ const tableContainer = ref<HTMLElement | null>(null);
           <!-- Regular Data Rows -->
           <template v-if="documents.length > 0">
             <TableRow 
-              v-for="(doc, rowIndex) in paginatedDocuments" 
-              :key="rowIndex"
-              class="excel-data-row"
-              :class="{'excel-row-even': rowIndex % 2 === 0}"
-            >
+  v-for="(doc, rowIndex) in paginatedDocuments" 
+  :key="rowIndex"
+  class="excel-data-row"
+  :class="{ 'bg-red-100 border-2 border-red-500 text-red-800': doc._id.$oid === pendingDeleteId }"
+>
               <!-- Row number -->
               <TableCell 
                 class="excel-row-number"
@@ -1133,16 +1102,14 @@ const tableContainer = ref<HTMLElement | null>(null);
                   </div>
                 </div>
               </TableCell>
-              <TableCell class="excel-cell excel-actions-cell">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="excel-delete-button"
-                  @click="deleteDocument(doc._id.$oid)"
-                >
-                  <TrashIcon class="h-4 w-4" />
-                </Button>
-              </TableCell>
+              <TableActions
+                :collection-name="collectionName"
+                :document-id="doc._id.$oid"
+                :row-number="(currentPage - 1) * pageSize + rowIndex + 1"
+                @deleted="fetchDocuments"
+                @delete-start="(id) => pendingDeleteId = id"
+                @delete-end="pendingDeleteId = null"
+              />
             </TableRow>
           </template>
 
@@ -1521,16 +1488,6 @@ const tableContainer = ref<HTMLElement | null>(null);
   border-right: 1px solid #d0d0d0;
 }
 
-/* Excel delete button */
-.excel-delete-button {
-  color: #d32f2f;
-}
-
-.excel-delete-button:hover {
-  color: #b71c1c;
-  background-color: #ffebee;
-}
-
 /* Excel new row */
 .excel-new-row {
   background-color: #e8f5e9;
@@ -1588,10 +1545,10 @@ const tableContainer = ref<HTMLElement | null>(null);
   font-size: 14px;
 }
 
-/* Excel row alternate colors */
-.excel-row-even {
+/* Excel row alternate colors used for future styling */
+/* .excel-row-even {
   background-color: #f9f9f9;
-}
+} */
 
 /* Excel pagination */
 .excel-pagination {
