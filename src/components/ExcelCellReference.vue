@@ -53,8 +53,8 @@
       :row-number="documentToDelete.rowNumber"
       ref="deleteDocumentRef"
       @deleted="onDocumentDeleted"
-      @delete-start="onDeleteStart"
-      @delete-end="onDeleteEnd"
+      @delete-start="(id) => $emit('delete-start', id)"
+      @delete-end="$emit('delete-end')"
     />
   </div>
 </template>
@@ -74,7 +74,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'document-deleted'): void;
-  (e: 'reset-selection'): void;
+  (e: 'delete-start', id: string): void;
+  (e: 'delete-end'): void;
 }>();
 
 // Reference to the DeleteDocumentAction component
@@ -87,6 +88,10 @@ const isDeleting = ref(false);
 // Debug watcher for props
 watch(() => props.selectedRows, (newVal) => {
   console.log('Selected rows updated:', [...newVal]);
+}, { immediate: true });
+
+watch(() => props.collectionName, (newVal) => {
+  console.log('Collection name:', newVal);
 }, { immediate: true });
 
 const getColumnLabel = (index: number): string => {
@@ -164,18 +169,9 @@ const handleDeleteClick = () => {
 // Event handlers for delete operations
 const onDocumentDeleted = () => {
   console.log('Document successfully deleted!');
-  
-  // Reset all state after successful deletion
   documentToDelete.value = null;
   isDeleting.value = false;
-  
-  // Emit events to parent component
   emit('document-deleted');
-  
-  // Reset the selection in the parent component
-  emit('reset-selection');
-  
-  console.log('Delete state reset completed');
 };
 
 const onDeleteStart = () => {
@@ -187,4 +183,13 @@ const onDeleteEnd = () => {
   console.log('Delete operation ended');
   isDeleting.value = false;
 };
+
+// Debug log when the component mounts
+console.log('ExcelCellReference component props:', {
+  collectionName: props.collectionName,
+  selectedRows: [...props.selectedRows],
+  documentsCount: props.documents?.length,
+  currentPage: props.currentPage,
+  pageSize: props.pageSize
+});
 </script>

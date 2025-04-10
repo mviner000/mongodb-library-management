@@ -927,6 +927,8 @@ const resetSelection = () => {
         :page-size="pageSize"
         @document-deleted="fetchDocuments"
         @reset-selection="resetSelection"
+        @delete-start="(id) => pendingDeleteId = id"
+        @delete-end="pendingDeleteId = null"
       />
       <!-- just use native table, dont ever change to use Table from shadcn -->
       <table class="mt-10 excel-table" :style="{ width: `${totalTableWidth}px` }">
@@ -1061,7 +1063,10 @@ const resetSelection = () => {
                 v-for="(doc, rowIndex) in paginatedDocuments" 
                 :key="rowIndex"
                 class="excel-data-row"
-                :class="{ 'bg-red-100 border-2 border-red-500 text-red-800': doc._id.$oid === pendingDeleteId }"
+                :class="{ 
+                  'bg-red-100 border-2 border-red-500 text-red-800': doc._id.$oid === pendingDeleteId,
+                  'selected-row bg-blue-100': selectedRows.has(doc._id.$oid) && doc._id.$oid !== pendingDeleteId
+                }"
               >
               <!-- Selector Checkbox -->
               <TableCell 
@@ -1371,6 +1376,16 @@ const resetSelection = () => {
 </template>
 
 <style>
+.selected-row {
+  outline: 2px solid #2196F3;
+  border: 2px solid #2196F3;
+  outline-offset: -1px;
+  position: relative;
+}
+
+.bg-red-100 {
+  outline: none !important;
+}
 
 /* Excel-inspired container */
 .excel-container {

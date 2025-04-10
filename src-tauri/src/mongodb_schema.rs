@@ -23,11 +23,60 @@ pub async fn initialize_database(db: &Database) -> Result<()> {
     Ok(())
 }
 
+// Helper function to get archive properties schema to be reused
+fn get_archive_properties() -> Document {
+    doc! {
+        "is_archive": { 
+            "bsonType": "bool", 
+            "description": "Flag indicating if the document is archived (true) or active (false)" 
+        },
+        "archive_history": {
+            "bsonType": "array",
+            "description": "Log of archive and recovery actions",
+            "items": {
+                "bsonType": "object",
+                "required": ["action", "user_id", "timestamp"],
+                "properties": {
+                    "action": { 
+                        "bsonType": "string", 
+                        "enum": ["archive", "recover"], 
+                        "description": "The action performed" 
+                    },
+                    "user_id": { 
+                        "bsonType": "objectId", 
+                        "description": "REF:users | ID of the user performing the action" 
+                    },
+                    "timestamp": { 
+                        "bsonType": "date", 
+                        "description": "Timestamp of the action" 
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Helper function to create archive index
+fn create_archive_index() -> IndexModel {
+    IndexModel::builder()
+        .keys(doc! { "is_archive": 1 })
+        .build()
+}
+
+// Helper function to merge document properties with archive properties
+fn merge_with_archive_properties(properties: Document) -> Document {
+    let mut merged = properties;
+    for (key, value) in get_archive_properties() {
+        merged.insert(key, value);
+    }
+    merged
+}
+
 async fn create_school_accounts_collection(db: &Database) -> Result<()> {
     let collection = db.collection::<Document>("school_accounts");
     
     // Create indexes
-    let indexes = vec![
+    let mut indexes = vec![
         IndexModel::builder()
             .keys(doc! { "school_id": 1 })
             .options(Some(mongodb::options::IndexOptions::builder()
@@ -41,9 +90,33 @@ async fn create_school_accounts_collection(db: &Database) -> Result<()> {
                 .name("semester_ref_idx".to_string())
                 .build()))
             .build(),
+        
+        // Add archive index
+        create_archive_index(),
     ];
 
     collection.create_indexes(indexes, None).await?;
+    
+    // Define base properties for this collection
+    let base_properties = doc! {
+        "school_id": { "bsonType": "string", "description": "Unique school ID (required)" },
+        "first_name": { "bsonType": "string", "description": "First name" },
+        "middle_name": { "bsonType": "string", "description": "Middle name" },
+        "last_name": { "bsonType": "string", "description": "Last name" },
+        "gender": { "bsonType": "int", "description": "Gender (integer code)" },
+        "course": { "bsonType": "string", "description": "Course" },
+        "department": { "bsonType": "string", "description": "Department" },
+        "position": { "bsonType": "string", "description": "Position" },
+        "major": { "bsonType": "string", "description": "Major" },
+        "year_level": { "bsonType": "string", "description": "Year level" },
+        "is_active": { "bsonType": "bool", "description": "Active status flag (required)" },
+        "last_updated_semester_id": { "bsonType": "string", "description": "REF:semesters | Reference to last updated semester" },
+        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
+        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
+    };
+    
+    // Merge with archive properties
+    let properties = merge_with_archive_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -53,22 +126,7 @@ async fn create_school_accounts_collection(db: &Database) -> Result<()> {
                 "$jsonSchema": {
                     "bsonType": "object",
                     "required": ["school_id", "is_active", "created_at", "updated_at"],
-                    "properties": {
-                        "school_id": { "bsonType": "string", "description": "Unique school ID (required)" },
-                        "first_name": { "bsonType": "string", "description": "First name" },
-                        "middle_name": { "bsonType": "string", "description": "Middle name" },
-                        "last_name": { "bsonType": "string", "description": "Last name" },
-                        "gender": { "bsonType": "int", "description": "Gender (integer code)" },
-                        "course": { "bsonType": "string", "description": "Course" },
-                        "department": { "bsonType": "string", "description": "Department" },
-                        "position": { "bsonType": "string", "description": "Position" },
-                        "major": { "bsonType": "string", "description": "Major" },
-                        "year_level": { "bsonType": "string", "description": "Year level" },
-                        "is_active": { "bsonType": "bool", "description": "Active status flag (required)" },
-                        "last_updated_semester_id": { "bsonType": "string", "description": "REF:semesters | Reference to last updated semester" },
-                        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
-                        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
-                    }
+                    "properties": properties
                 }
             },
             "validationLevel": "moderate",
@@ -83,16 +141,32 @@ async fn create_school_accounts_collection(db: &Database) -> Result<()> {
 async fn create_attendance_collection(db: &Database) -> Result<()> {
     let collection = db.collection::<Document>("attendance");
     
-    let indexes = vec![
+    let mut indexes = vec![
         IndexModel::builder()
             .keys(doc! { "school_id": 1 })
             .build(),
         IndexModel::builder()
             .keys(doc! { "time_in_date": 1 })
             .build(),
+        // Add archive index
+        create_archive_index(),
     ];
 
     collection.create_indexes(indexes, None).await?;
+    
+    // Define base properties for this collection
+    let base_properties = doc! {
+        "school_id": { "bsonType": "string", "description": "School ID (required)" },
+        "full_name": { "bsonType": "string", "description": "Full name of the person (required)" },
+        "time_in_date": { "bsonType": "date", "description": "Date and time of entry (required)" },
+        "classification": { "bsonType": "string", "description": "Classification (required)" },
+        "purpose_label": { "bsonType": "string", "description": "Purpose label" },
+        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
+        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
+    };
+    
+    // Merge with archive properties
+    let properties = merge_with_archive_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -102,15 +176,7 @@ async fn create_attendance_collection(db: &Database) -> Result<()> {
                 "$jsonSchema": {
                     "bsonType": "object",
                     "required": ["school_id", "full_name", "time_in_date", "classification", "created_at", "updated_at"],
-                    "properties": {
-                        "school_id": { "bsonType": "string", "description": "School ID (required)" },
-                        "full_name": { "bsonType": "string", "description": "Full name of the person (required)" },
-                        "time_in_date": { "bsonType": "date", "description": "Date and time of entry (required)" },
-                        "classification": { "bsonType": "string", "description": "Classification (required)" },
-                        "purpose_label": { "bsonType": "string", "description": "Purpose label" },
-                        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
-                        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
-                    }
+                    "properties": properties
                 }
             },
             "validationLevel": "moderate",
@@ -141,8 +207,40 @@ async fn create_users_collection(db: &Database) -> Result<()> {
             .build()))
         .build();
 
+    // Add archive index
+    let archive_index = create_archive_index();
+
     collection.create_index(username_index, None).await?;
     collection.create_index(email_index, None).await?;
+    collection.create_index(archive_index, None).await?;
+
+    // Define base properties for this collection
+    let base_properties = doc! {
+        "username": {
+            "bsonType": "string",
+            "description": "Username (required, unique)"
+        },
+        "email": {
+            "bsonType": "string",
+            "pattern": "^[\\w.-]+@[\\w.-]+\\.[a-zA-Z]{2,}$",
+            "description": "Email (required, unique, must match pattern)"
+        },
+        "password": {
+            "bsonType": "string",
+            "description": "Password (hashed, required)"
+        },
+        "created_at": {
+            "bsonType": "date",
+            "description": "Creation timestamp (required)"
+        },
+        "updated_at": {
+            "bsonType": "date", 
+            "description": "Last update timestamp (required)"
+        }
+    };
+    
+    // Merge with archive properties
+    let properties = merge_with_archive_properties(base_properties);
 
     // Apply validator schema using collMod
     db.run_command(
@@ -152,29 +250,7 @@ async fn create_users_collection(db: &Database) -> Result<()> {
                 "$jsonSchema": {
                     "bsonType": "object",
                     "required": ["username", "email", "password", "created_at", "updated_at"],
-                    "properties": {
-                        "username": {
-                            "bsonType": "string",
-                            "description": "Username (required, unique)"
-                        },
-                        "email": {
-                            "bsonType": "string",
-                            "pattern": "^[\\w.-]+@[\\w.-]+\\.[a-zA-Z]{2,}$",
-                            "description": "Email (required, unique, must match pattern)"
-                        },
-                        "password": {
-                            "bsonType": "string",
-                            "description": "Password (hashed, required)"
-                        },
-                        "created_at": {
-                            "bsonType": "date",
-                            "description": "Creation timestamp (required)"
-                        },
-                        "updated_at": {
-                            "bsonType": "date",
-                            "description": "Last update timestamp (required)"
-                        }
-                    }
+                    "properties": properties
                 }
             },
             "validationLevel": "moderate",
@@ -190,7 +266,7 @@ async fn create_sessions_collection(db: &Database) -> Result<()> {
     let collection = db.collection::<Document>("sessions");
     
     // Create indexes
-    let indexes = vec![
+    let mut indexes = vec![
         IndexModel::builder()
             .keys(doc! { "session_token": 1 })
             .options(Some(IndexOptions::builder()
@@ -206,9 +282,42 @@ async fn create_sessions_collection(db: &Database) -> Result<()> {
                 .expire_after(Some(Duration::from_secs(0))) // TTL index (expire after 0 seconds)
                 .build()))
             .build(),
+        // Add archive index
+        create_archive_index(),
     ];
 
     collection.create_indexes(indexes, None).await?;
+    
+    // Define base properties for this collection
+    let base_properties = doc! {
+        "session_token": { 
+            "bsonType": "string", 
+            "description": "Unique session token (required)" 
+        },
+        "user_id": { 
+            "bsonType": "string", 
+            "description": "REF:users | Reference to user (required)" 
+        },
+        "expires_at": { 
+            "bsonType": "date", 
+            "description": "Expiration timestamp (required)" 
+        },
+        "is_valid": { 
+            "bsonType": "bool", 
+            "description": "Validity status (required)" 
+        },
+        "created_at": { 
+            "bsonType": "date", 
+            "description": "Creation timestamp (required)" 
+        },
+        "label": {
+            "bsonType": "string",
+            "description": "Session label (required)"
+        }
+    };
+    
+    // Merge with archive properties
+    let properties = merge_with_archive_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -218,32 +327,7 @@ async fn create_sessions_collection(db: &Database) -> Result<()> {
                 "$jsonSchema": {
                     "bsonType": "object",
                     "required": ["session_token", "user_id", "expires_at", "is_valid", "created_at", "label"],
-                    "properties": {
-                        "session_token": { 
-                            "bsonType": "string", 
-                            "description": "Unique session token (required)" 
-                        },
-                        "user_id": { 
-                            "bsonType": "string", 
-                            "description": "REF:users | Reference to user (required)" 
-                        },
-                        "expires_at": { 
-                            "bsonType": "date", 
-                            "description": "Expiration timestamp (required)" 
-                        },
-                        "is_valid": { 
-                            "bsonType": "bool", 
-                            "description": "Validity status (required)" 
-                        },
-                        "created_at": { 
-                            "bsonType": "date", 
-                            "description": "Creation timestamp (required)" 
-                        },
-                        "label": {
-                            "bsonType": "string",
-                            "description": "Session label (required)"
-                        }
-                    }
+                    "properties": properties
                 }
             },
             "validationLevel": "moderate",
@@ -255,18 +339,33 @@ async fn create_sessions_collection(db: &Database) -> Result<()> {
     Ok(())
 }
 
-
 async fn create_purposes_collection(db: &Database) -> Result<()> {
     let collection = db.collection::<Document>("purposes");
     
-    let index = IndexModel::builder()
-        .keys(doc! { "label": 1 })
-        .options(Some(mongodb::options::IndexOptions::builder()
-            .unique(true)
-            .build()))
-        .build();
+    let mut indexes = vec![
+        IndexModel::builder()
+            .keys(doc! { "label": 1 })
+            .options(Some(mongodb::options::IndexOptions::builder()
+                .unique(true)
+                .build()))
+            .build(),
+        // Add archive index
+        create_archive_index(),
+    ];
 
-    collection.create_index(index, None).await?;
+    collection.create_indexes(indexes, None).await?;
+    
+    // Define base properties for this collection
+    let base_properties = doc! {
+        "label": { "bsonType": "string", "description": "Purpose label (required, unique)" },
+        "icon_name": { "bsonType": "string", "description": "Icon name (required)" },
+        "is_deleted": { "bsonType": "bool", "description": "Deletion flag (required)" },
+        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
+        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
+    };
+    
+    // Merge with archive properties
+    let properties = merge_with_archive_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -276,13 +375,7 @@ async fn create_purposes_collection(db: &Database) -> Result<()> {
                 "$jsonSchema": {
                     "bsonType": "object",
                     "required": ["label", "icon_name", "is_deleted", "created_at", "updated_at"],
-                    "properties": {
-                        "label": { "bsonType": "string", "description": "Purpose label (required, unique)" },
-                        "icon_name": { "bsonType": "string", "description": "Icon name (required)" },
-                        "is_deleted": { "bsonType": "bool", "description": "Deletion flag (required)" },
-                        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
-                        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
-                    }
+                    "properties": properties
                 }
             },
             "validationLevel": "moderate",
@@ -297,14 +390,30 @@ async fn create_purposes_collection(db: &Database) -> Result<()> {
 async fn create_semesters_collection(db: &Database) -> Result<()> {
     // First create index on the collection (this will create the collection if it doesn't exist)
     let collection = db.collection::<Document>("semesters");
-    let index = IndexModel::builder()
-        .keys(doc! { "label": 1 })
-        .options(Some(IndexOptions::builder()
-            .unique(true)
-            .build()))
-        .build();
+    
+    let mut indexes = vec![
+        IndexModel::builder()
+            .keys(doc! { "label": 1 })
+            .options(Some(IndexOptions::builder()
+                .unique(true)
+                .build()))
+            .build(),
+        // Add archive index
+        create_archive_index(),
+    ];
 
-    collection.create_index(index, None).await?;
+    collection.create_indexes(indexes, None).await?;
+    
+    // Define base properties for this collection
+    let base_properties = doc! {
+        "label": { "bsonType": "string", "description": "Unique label for the semester (required)" },
+        "is_active": { "bsonType": "bool", "description": "Indicates if this is the active semester (required)" },
+        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
+        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
+    };
+    
+    // Merge with archive properties
+    let properties = merge_with_archive_properties(base_properties);
     
     // Then apply or update the validator schema using collMod
     db.run_command(
@@ -314,12 +423,7 @@ async fn create_semesters_collection(db: &Database) -> Result<()> {
                 "$jsonSchema": {
                     "bsonType": "object",
                     "required": ["label", "is_active", "created_at", "updated_at"],
-                    "properties": {
-                        "label": { "bsonType": "string", "description": "Unique label for the semester (required)" },
-                        "is_active": { "bsonType": "bool", "description": "Indicates if this is the active semester (required)" },
-                        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
-                        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
-                    }
+                    "properties": properties
                 }
             },
             "validationLevel": "moderate",
@@ -335,13 +439,28 @@ pub async fn create_settings_styles_collection(db: &Database) -> Result<()> {
     // First create index on the collection (this will create the collection if it doesn't exist)
     let collection = db.collection::<Document>("settings_styles");
     
-    // Create index on component_name field
-    collection.create_index(
+    // Create indexes
+    let mut indexes = vec![
         IndexModel::builder()
             .keys(doc! { "component_name": 1 })
             .build(),
-        None
-    ).await?;
+        // Add archive index
+        create_archive_index(),
+    ];
+
+    collection.create_indexes(indexes, None).await?;
+    
+    // Define base properties for this collection
+    let base_properties = doc! {
+        "component_name": { "bsonType": "string", "description": "Component name (required)" },
+        "tailwind_classes": { "bsonType": "string", "description": "Tailwind CSS classes (required)" },
+        "label": { "bsonType": "string", "description": "Optional label" },
+        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
+        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
+    };
+    
+    // Merge with archive properties
+    let properties = merge_with_archive_properties(base_properties);
     
     // Then apply or update the validator schema using collMod
     db.run_command(
@@ -351,13 +470,7 @@ pub async fn create_settings_styles_collection(db: &Database) -> Result<()> {
                 "$jsonSchema": {
                     "bsonType": "object",
                     "required": ["component_name", "tailwind_classes", "created_at", "updated_at"],
-                    "properties": {
-                        "component_name": { "bsonType": "string", "description": "Component name (required)" },
-                        "tailwind_classes": { "bsonType": "string", "description": "Tailwind CSS classes (required)" },
-                        "label": { "bsonType": "string", "description": "Optional label" },
-                        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
-                        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
-                    }
+                    "properties": properties
                 }
             },
             "validationLevel": "moderate",
@@ -369,10 +482,7 @@ pub async fn create_settings_styles_collection(db: &Database) -> Result<()> {
     Ok(())
 }
 
-// metadata for collections start here
-// Add a constant for default column width
-const DEFAULT_COLUMN_WIDTH: i32 = 200;
-
+// Keep the ui_metadata collection as is - no changes per requirements
 async fn create_ui_metadata_collection(db: &Database) -> Result<()> {
     let collection = db.collection::<Document>("ui_metadata");
     
@@ -447,7 +557,10 @@ async fn create_ui_metadata_collection(db: &Database) -> Result<()> {
     Ok(())
 }
 
-// Helper function to create default UI settings for all collections
+// metadata for collections start here
+// Keep the UI metadata helper functions as is, but update column widths to include is_archive field
+const DEFAULT_COLUMN_WIDTH: i32 = 200;
+
 fn create_default_ui_settings() -> Vec<Document> {
     let collections = vec![
         "school_accounts",
@@ -510,6 +623,7 @@ fn get_default_column_widths(collection_name: &str) -> Document {
             "year_level": DEFAULT_COLUMN_WIDTH, 
             "is_active": DEFAULT_COLUMN_WIDTH, 
             "last_updated_semester_id": DEFAULT_COLUMN_WIDTH,
+            "is_archive": DEFAULT_COLUMN_WIDTH,
             "created_at": DEFAULT_COLUMN_WIDTH, 
             "updated_at": DEFAULT_COLUMN_WIDTH
         },
@@ -518,7 +632,8 @@ fn get_default_column_widths(collection_name: &str) -> Document {
             "full_name": DEFAULT_COLUMN_WIDTH, 
             "time_in_date": DEFAULT_COLUMN_WIDTH, 
             "classification": DEFAULT_COLUMN_WIDTH,
-            "purpose_label": DEFAULT_COLUMN_WIDTH, 
+            "purpose_label": DEFAULT_COLUMN_WIDTH,
+            "is_archive": DEFAULT_COLUMN_WIDTH,
             "created_at": DEFAULT_COLUMN_WIDTH, 
             "updated_at": DEFAULT_COLUMN_WIDTH
         },
@@ -526,6 +641,7 @@ fn get_default_column_widths(collection_name: &str) -> Document {
             "username": DEFAULT_COLUMN_WIDTH, 
             "email": DEFAULT_COLUMN_WIDTH, 
             "password": DEFAULT_COLUMN_WIDTH,
+            "is_archive": DEFAULT_COLUMN_WIDTH,
             "created_at": DEFAULT_COLUMN_WIDTH, 
             "updated_at": DEFAULT_COLUMN_WIDTH
         },
@@ -533,12 +649,14 @@ fn get_default_column_widths(collection_name: &str) -> Document {
             "label": DEFAULT_COLUMN_WIDTH, 
             "icon_name": DEFAULT_COLUMN_WIDTH, 
             "is_deleted": DEFAULT_COLUMN_WIDTH,
+            "is_archive": DEFAULT_COLUMN_WIDTH,
             "created_at": DEFAULT_COLUMN_WIDTH, 
             "updated_at": DEFAULT_COLUMN_WIDTH
         },
         "semesters" => doc! {
             "label": DEFAULT_COLUMN_WIDTH, 
             "is_active": DEFAULT_COLUMN_WIDTH,
+            "is_archive": DEFAULT_COLUMN_WIDTH,
             "created_at": DEFAULT_COLUMN_WIDTH, 
             "updated_at": DEFAULT_COLUMN_WIDTH
         },
@@ -546,6 +664,7 @@ fn get_default_column_widths(collection_name: &str) -> Document {
             "component_name": DEFAULT_COLUMN_WIDTH, 
             "tailwind_classes": DEFAULT_COLUMN_WIDTH, 
             "label": DEFAULT_COLUMN_WIDTH,
+            "is_archive": DEFAULT_COLUMN_WIDTH,
             "created_at": DEFAULT_COLUMN_WIDTH, 
             "updated_at": DEFAULT_COLUMN_WIDTH
         },
@@ -553,7 +672,8 @@ fn get_default_column_widths(collection_name: &str) -> Document {
             "session_token": DEFAULT_COLUMN_WIDTH, 
             "user_id": DEFAULT_COLUMN_WIDTH, 
             "expires_at": DEFAULT_COLUMN_WIDTH,
-            "is_valid": DEFAULT_COLUMN_WIDTH, 
+            "is_valid": DEFAULT_COLUMN_WIDTH,
+            "is_archive": DEFAULT_COLUMN_WIDTH,
             "created_at": DEFAULT_COLUMN_WIDTH, 
             "label": DEFAULT_COLUMN_WIDTH
         },
@@ -584,7 +704,8 @@ fn get_default_sort_field(collection_name: &str) -> &str {
 // Helper function to get field names for a collection
 // This is a simplified version - in a real app, you might want to extract this from schema
 fn get_field_names_for_collection(collection_name: &str) -> Vec<&str> {
-    match collection_name {
+    // Add is_archive to all collection field lists
+    let mut fields = match collection_name {
         "school_accounts" => vec![
             "school_id", "first_name", "middle_name", "last_name", "gender", "course", 
             "department", "position", "major", "year_level", "is_active", 
@@ -610,6 +731,10 @@ fn get_field_names_for_collection(collection_name: &str) -> Vec<&str> {
             "session_token", "user_id", "expires_at", "is_valid", "created_at", "label"
         ],
         _ => vec!["created_at", "updated_at"] // Fallback for unknown collections
-    }
+    };
+    
+    // Add is_archive field to each collection's fields
+    fields.push("is_archive");
+    fields
 }
-// metadata for collections end here
+// metadata for collections ends here
