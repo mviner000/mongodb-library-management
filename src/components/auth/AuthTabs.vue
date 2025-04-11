@@ -1,14 +1,14 @@
 <!-- src/components/auth/AuthTabs.vue -->
+
 <template>
   <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
     <div class="bg-white p-6 rounded-lg w-96 shadow-xl">
-      <!-- Tab Headers -->
       <div class="flex border-b mb-4">
         <button
           @click="activeTab = 'login'"
           class="px-4 py-2 -mb-px font-medium text-sm transition-colors"
-          :class="activeTab === 'login' 
-            ? 'border-b-2 border-blue-500 text-blue-600' 
+          :class="activeTab === 'login'
+            ? 'border-b-2 border-blue-500 text-blue-600'
             : 'text-gray-600 hover:text-blue-500'"
         >
           Login
@@ -16,43 +16,23 @@
         <button
           @click="handleRegisterTabClick"
           class="px-4 py-2 -mb-px font-medium text-sm transition-colors"
-          :class="activeTab === 'register' 
-            ? 'border-b-2 border-blue-500 text-blue-600' 
+          :class="activeTab === 'register'
+            ? 'border-b-2 border-blue-500 text-blue-600'
             : 'text-gray-600 hover:text-blue-500'"
         >
           {{ registerUnlocked ? '🔓 Register' : '🔒 Register' }}
         </button>
       </div>
 
-      <!-- PIN Input Modal -->
-      <div v-if="showPinModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div class="bg-white p-6 rounded-lg w-96 shadow-xl">
-          <h3 class="text-lg font-medium mb-4">Unlock Registration</h3>
-          <div>
-            <PinInput v-model="pinValues" :placeholder="'○'" @complete="handlePinComplete">
-              <PinInputGroup class="flex justify-center gap-2">
-                <PinInputInput :index="0" class="h-10 w-10 rounded-md border border-input text-center text-base" />
-                <PinInputInput :index="1" class="h-10 w-10 rounded-md border border-input text-center text-base" />
-                <PinInputInput :index="2" class="h-10 w-10 rounded-md border border-input text-center text-base" />
-                <PinInputInput :index="3" class="h-10 w-10 rounded-md border border-input text-center text-base" />
-                <PinInputInput :index="4" class="h-10 w-10 rounded-md border border-input text-center text-base" />
-                <PinInputInput :index="5" class="h-10 w-10 rounded-md border border-input text-center text-base" />
-              </PinInputGroup>  
-            </PinInput>
-          </div>
-          <div v-if="pinError" class="mt-2 text-red-500 text-sm">{{ pinError }}</div>
-          <div class="mt-4 flex justify-end gap-2">
-            <button
-              @click="showPinModal = false"
-              class="px-4 py-2 text-gray-600 hover:text-gray-800 rounded-md"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Login Form -->
+      <PinInputDialog
+        v-model:visible="showPinModal"
+        :correct-pin="registrationPin"
+        title="Unlock Registration"
+        :initially-show-pin="showPinDigits"
+        @correct="handlePinSuccess"
+        @cancel="handlePinCancel"
+      />
+
       <div v-if="activeTab === 'login'">
         <form @submit.prevent="handleLoginSubmit">
           <div class="mb-4">
@@ -94,33 +74,32 @@
           </button>
         </form>
       </div>
-      
-      <!-- Register Form -->
+
       <div v-if="activeTab === 'register' && registerUnlocked">
-        <form @submit.prevent="handleRegisterSubmit">
+       <form @submit.prevent="handleRegisterSubmit">
           <div class="mb-4">
             <label class="block text-sm font-medium mb-1">Username</label>
-            <input 
-              v-model="registerForm.username" 
-              type="text" 
+            <input
+              v-model="registerForm.username"
+              type="text"
               required
               class="w-full p-2 border rounded-md"
             >
           </div>
           <div class="mb-4">
             <label class="block text-sm font-medium mb-1">Email</label>
-            <input 
-              v-model="registerForm.email" 
-              type="email" 
+            <input
+              v-model="registerForm.email"
+              type="email"
               required
               class="w-full p-2 border rounded-md"
             >
           </div>
           <div class="mb-4">
             <label class="block text-sm font-medium mb-1">Password</label>
-            <input 
-              v-model="registerForm.password" 
-              type="password" 
+            <input
+              v-model="registerForm.password"
+              type="password"
               required
               minlength="3"
               class="w-full p-2 border rounded-md"
@@ -129,9 +108,9 @@
           </div>
           <div class="mb-4">
             <label class="block text-sm font-medium mb-1">Confirm Password</label>
-            <input 
-              v-model="registerForm.confirmPassword" 
-              type="password" 
+            <input
+              v-model="registerForm.confirmPassword"
+              type="password"
               required
               class="w-full p-2 border rounded-md"
             >
@@ -139,7 +118,7 @@
           <div v-if="registerError" class="mb-4 text-red-500 text-sm">
             {{ registerError }}
           </div>
-          <button 
+          <button
             type="submit"
             class="w-full bg-blue-500 text-white p-2 rounded-md hover:bg-blue-600 transition disabled:opacity-50"
             :disabled="isRegisterLoading"
@@ -154,8 +133,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
-import { PinInput, PinInputInput, PinInputGroup } from '@/components/ui/pin-input'
+import { ref, watch, onMounted, nextTick } from 'vue'
+// Remove unused PinInput imports from ui if they were specific to a library
+// import { PinInput, PinInputInput, PinInputGroup } from '@/components/ui/pin-input'
+import PinInputDialog from '@/components/PinInputDialog.vue'; // Import the new component
 import { apiFetch } from '@/utils/api'
 import { useToast } from '@/components/ui/toast'
 const { toast } = useToast()
@@ -192,9 +173,9 @@ const registerError = ref('')
 const isRegisterLoading = ref(false)
 
 // PIN Input state
-const showPinModal = ref(false)
-const pinValues = ref<string[]>(['', '', '', '', '', ''])
-const pinError = ref('')
+const showPinModal = ref(true)
+const registrationPin = ref('000000');
+const showPinDigits = ref(false);
 
 // Registration lock state
 const registerUnlocked = ref(false)
@@ -214,28 +195,30 @@ const checkRegisterStatus = () => {
 
 // Handle register tab click
 const handleRegisterTabClick = () => {
+  checkRegisterStatus(); // Re-check status just in case
   if (!registerUnlocked.value) {
-    showPinModal.value = true
+    // Only logic needed here is to show the modal
+    showPinModal.value = true;
     return
   }
   activeTab.value = 'register'
 }
 
-// Handle PIN completion
-const handlePinComplete = (values: string[]) => {
-  const enteredPin = values.join('')
-  if (enteredPin === '123456') {
-    const currentTime = Date.now()
-    sessionStorage.setItem('registerUnlocked', currentTime.toString())
-    checkRegisterStatus()
-    showPinModal.value = false
-    activeTab.value = 'register'
-    pinValues.value = ['', '', '', '', '', '']
-    pinError.value = ''
-  } else {
-    pinError.value = 'Invalid PIN code. Please try again.'
-    pinValues.value = ['', '', '', '', '', '']
-  }
+// Handle successful PIN entry (emitted from PinInputDialog)
+const handlePinSuccess = (enteredPin: string) => {
+  console.log('Correct PIN entered:', enteredPin); // Optional logging
+  const currentTime = Date.now()
+  sessionStorage.setItem('registerUnlocked', currentTime.toString())
+  registerUnlocked.value = true; // Update status immediately
+  showPinModal.value = false // Close the modal
+  activeTab.value = 'register' // Switch to register tab
+}
+
+// Handle PIN cancellation (emitted from PinInputDialog)
+const handlePinCancel = () => {
+    console.log('PIN entry cancelled');
+    // The v-model already handles setting showPinModal to false
+    // No extra action needed unless required by specific logic
 }
 
 // Watch for authentication state changes
@@ -253,16 +236,16 @@ const handleLoginSubmit = async () => {
   try {
     // Emit login event to handle API call in parent
     await emit('login', loginForm.value.identifier, loginForm.value.password)
-    
+
     // Update loading text for the delay period
     loginLoadingText.value = 'Success! Redirecting...'
-    
+
     // Add a 2-second delay before closing the modal
     setTimeout(() => {
       isLoginLoading.value = false
       emit('close')
     }, 2000)
-    
+
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Login failed'
     loginError.value = message
@@ -277,12 +260,12 @@ const handleLoginSubmit = async () => {
 
 const handleRegisterSubmit = async () => {
   registerError.value = ''
-  
+
   if (registerForm.value.password !== registerForm.value.confirmPassword) {
     registerError.value = 'Passwords do not match'
     return
   }
-  
+
   isRegisterLoading.value = true
 
   try {
@@ -299,7 +282,7 @@ const handleRegisterSubmit = async () => {
       title: 'Registration successful',
       description: 'You can now log in with your credentials',
     })
-    
+
     activeTab.value = 'login'
     registerForm.value = { username: '', email: '', password: '', confirmPassword: '' }
   } catch (err) {

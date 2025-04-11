@@ -16,9 +16,15 @@ pub async fn create_lib_school_accounts_collection(db: &Database) -> Result<()> 
     // Create indexes
     let indexes = vec![
         IndexModel::builder()
-            .keys(doc! { "school_name": 1 })
-            .options(Some(IndexOptions::builder()
+            .keys(doc! { "school_id": 1 })
+            .options(Some(mongodb::options::IndexOptions::builder()
                 .unique(true)
+                .build()))
+            .build(),
+        IndexModel::builder()
+            .keys(doc! { "last_updated_semester_id": 1 })
+            .options(Some(IndexOptions::builder()
+                .name("semester_ref_idx".to_string())
                 .build()))
             .build(),
         create_archive_index(),
@@ -28,34 +34,20 @@ pub async fn create_lib_school_accounts_collection(db: &Database) -> Result<()> 
     
     // Define base properties for this collection
     let base_properties = doc! {
-        "school_name": { 
-            "bsonType": "string", 
-            "description": "School name (required, unique)" 
-        },
-        "address": { 
-            "bsonType": "string", 
-            "description": "School address (required)" 
-        },
-        "contact_person": { 
-            "bsonType": "string", 
-            "description": "Contact person name (required)" 
-        },
-        "contact_email": { 
-            "bsonType": "string", 
-            "description": "Contact email (required)" 
-        },
-        "contact_phone": { 
-            "bsonType": "string", 
-            "description": "Contact phone number (required)" 
-        },
-        "created_at": { 
-            "bsonType": "date", 
-            "description": "Creation timestamp (required)" 
-        },
-        "updated_at": { 
-            "bsonType": "date", 
-            "description": "Last update timestamp (required)" 
-        }
+        "school_id": { "bsonType": "string", "description": "Unique school ID (required)" },
+        "first_name": { "bsonType": "string", "description": "First name" },
+        "middle_name": { "bsonType": "string", "description": "Middle name" },
+        "last_name": { "bsonType": "string", "description": "Last name" },
+        "gender": { "bsonType": "int", "description": "Gender (integer code)" },
+        "course": { "bsonType": "string", "description": "Course" },
+        "department": { "bsonType": "string", "description": "Department" },
+        "position": { "bsonType": "string", "description": "Position" },
+        "major": { "bsonType": "string", "description": "Major" },
+        "year_level": { "bsonType": "string", "description": "Year level" },
+        "is_active": { "bsonType": "bool", "description": "Active status flag (required)" },
+        "last_updated_semester_id": { "bsonType": "string", "description": "REF:semesters | Reference to last updated semester" },
+        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
+        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
     };
     
     // Merge with archive properties
@@ -68,7 +60,7 @@ pub async fn create_lib_school_accounts_collection(db: &Database) -> Result<()> 
             "validator": {
                 "$jsonSchema": {
                     "bsonType": "object",
-                    "required": ["school_name", "address", "contact_person", "contact_email", "contact_phone", "created_at", "updated_at"],
+                    "required": ["school_id", "is_active", "created_at", "updated_at"],
                     "properties": properties
                 }
             },
@@ -88,13 +80,10 @@ pub async fn create_lib_attendance_collection(db: &Database) -> Result<()> {
     // Create indexes
     let indexes = vec![
         IndexModel::builder()
-            .keys(doc! { "student_id": 1, "date": 1 })
-            .options(Some(IndexOptions::builder()
-                .unique(true)
-                .build()))
+            .keys(doc! { "school_id": 1 })
             .build(),
         IndexModel::builder()
-            .keys(doc! { "school_id": 1 })
+            .keys(doc! { "time_in_date": 1 })
             .build(),
         create_archive_index(),
     ];
@@ -103,35 +92,13 @@ pub async fn create_lib_attendance_collection(db: &Database) -> Result<()> {
     
     // Define base properties for this collection
     let base_properties = doc! {
-        "student_id": { 
-            "bsonType": "objectId", 
-            "description": "Student ID reference (required)" 
-        },
-        "school_id": { 
-            "bsonType": "objectId", 
-            "description": "REF:school_accounts | School ID reference (required)" 
-        },
-        "date": { 
-            "bsonType": "date", 
-            "description": "Attendance date (required)" 
-        },
-        "status": { 
-            "bsonType": "string", 
-            "enum": ["present", "absent", "late", "excused"], 
-            "description": "Attendance status (required)" 
-        },
-        "notes": { 
-            "bsonType": "string", 
-            "description": "Additional notes" 
-        },
-        "created_at": { 
-            "bsonType": "date", 
-            "description": "Creation timestamp (required)" 
-        },
-        "updated_at": { 
-            "bsonType": "date", 
-            "description": "Last update timestamp (required)" 
-        }
+        "school_id": { "bsonType": "string", "description": "School ID (required)" },
+        "full_name": { "bsonType": "string", "description": "Full name of the person (required)" },
+        "time_in_date": { "bsonType": "date", "description": "Date and time of entry (required)" },
+        "classification": { "bsonType": "string", "description": "Classification (required)" },
+        "purpose_label": { "bsonType": "string", "description": "Purpose label" },
+        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
+        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
     };
     
     // Merge with archive properties
@@ -144,7 +111,7 @@ pub async fn create_lib_attendance_collection(db: &Database) -> Result<()> {
             "validator": {
                 "$jsonSchema": {
                     "bsonType": "object",
-                    "required": ["student_id", "school_id", "date", "status", "created_at", "updated_at"],
+                    "required": ["school_id", "full_name", "time_in_date", "classification", "created_at", "updated_at"],
                     "properties": properties
                 }
             },
@@ -164,8 +131,8 @@ pub async fn create_lib_purposes_collection(db: &Database) -> Result<()> {
     // Create indexes
     let indexes = vec![
         IndexModel::builder()
-            .keys(doc! { "name": 1 })
-            .options(Some(IndexOptions::builder()
+            .keys(doc! { "label": 1 })
+            .options(Some(mongodb::options::IndexOptions::builder()
                 .unique(true)
                 .build()))
             .build(),
@@ -176,27 +143,11 @@ pub async fn create_lib_purposes_collection(db: &Database) -> Result<()> {
     
     // Define base properties for this collection
     let base_properties = doc! {
-        "name": { 
-            "bsonType": "string", 
-            "description": "Purpose name (required, unique)" 
-        },
-        "description": { 
-            "bsonType": "string", 
-            "description": "Purpose description (required)" 
-        },
-        "category": { 
-            "bsonType": "string", 
-            "enum": ["academic", "administrative", "extracurricular", "other"], 
-            "description": "Purpose category (required)" 
-        },
-        "created_at": { 
-            "bsonType": "date", 
-            "description": "Creation timestamp (required)" 
-        },
-        "updated_at": { 
-            "bsonType": "date", 
-            "description": "Last update timestamp (required)" 
-        }
+        "label": { "bsonType": "string", "description": "Purpose label (required, unique)" },
+        "icon_name": { "bsonType": "string", "description": "Icon name (required)" },
+        "is_deleted": { "bsonType": "bool", "description": "Deletion flag (required)" },
+        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
+        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
     };
     
     // Merge with archive properties
@@ -209,7 +160,7 @@ pub async fn create_lib_purposes_collection(db: &Database) -> Result<()> {
             "validator": {
                 "$jsonSchema": {
                     "bsonType": "object",
-                    "required": ["name", "description", "category", "created_at", "updated_at"],
+                    "required": ["label", "icon_name", "is_deleted", "created_at", "updated_at"],
                     "properties": properties
                 }
             },
@@ -229,7 +180,7 @@ pub async fn create_lib_semesters_collection(db: &Database) -> Result<()> {
     // Create indexes
     let indexes = vec![
         IndexModel::builder()
-            .keys(doc! { "name": 1, "school_year": 1 })
+            .keys(doc! { "label": 1 })
             .options(Some(IndexOptions::builder()
                 .unique(true)
                 .build()))
@@ -241,34 +192,10 @@ pub async fn create_lib_semesters_collection(db: &Database) -> Result<()> {
     
     // Define base properties for this collection
     let base_properties = doc! {
-        "name": { 
-            "bsonType": "string", 
-            "description": "Semester name (required, unique with school_year)" 
-        },
-        "school_year": { 
-            "bsonType": "string", 
-            "description": "School year (required, unique with name)" 
-        },
-        "start_date": { 
-            "bsonType": "date", 
-            "description": "Start date (required)" 
-        },
-        "end_date": { 
-            "bsonType": "date", 
-            "description": "End date (required)" 
-        },
-        "is_active": { 
-            "bsonType": "bool", 
-            "description": "Whether the semester is currently active (required)" 
-        },
-        "created_at": { 
-            "bsonType": "date", 
-            "description": "Creation timestamp (required)" 
-        },
-        "updated_at": { 
-            "bsonType": "date", 
-            "description": "Last update timestamp (required)" 
-        }
+        "label": { "bsonType": "string", "description": "Unique label for the semester (required)" },
+        "is_active": { "bsonType": "bool", "description": "Indicates if this is the active semester (required)" },
+        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
+        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
     };
     
     // Merge with archive properties
@@ -281,7 +208,7 @@ pub async fn create_lib_semesters_collection(db: &Database) -> Result<()> {
             "validator": {
                 "$jsonSchema": {
                     "bsonType": "object",
-                    "required": ["name", "school_year", "start_date", "end_date", "is_active", "created_at", "updated_at"],
+                    "required": ["label", "is_active", "created_at", "updated_at"],
                     "properties": properties
                 }
             },
@@ -301,10 +228,7 @@ pub async fn create_lib_settings_styles_collection(db: &Database) -> Result<()> 
     // Create indexes
     let indexes = vec![
         IndexModel::builder()
-            .keys(doc! { "name": 1 })
-            .options(Some(IndexOptions::builder()
-                .unique(true)
-                .build()))
+            .keys(doc! { "component_name": 1 })
             .build(),
         create_archive_index(),
     ];
@@ -313,43 +237,11 @@ pub async fn create_lib_settings_styles_collection(db: &Database) -> Result<()> 
     
     // Define base properties for this collection
     let base_properties = doc! {
-        "name": { 
-            "bsonType": "string", 
-            "description": "Style name (required, unique)" 
-        },
-        "description": { 
-            "bsonType": "string", 
-            "description": "Style description" 
-        },
-        "theme": { 
-            "bsonType": "string", 
-            "enum": ["light", "dark", "system", "custom"], 
-            "description": "UI theme setting (required)" 
-        },
-        "primary_color": { 
-            "bsonType": "string", 
-            "description": "Primary color hex code (required)" 
-        },
-        "secondary_color": { 
-            "bsonType": "string", 
-            "description": "Secondary color hex code (required)" 
-        },
-        "font_family": { 
-            "bsonType": "string", 
-            "description": "Font family (required)" 
-        },
-        "is_default": { 
-            "bsonType": "bool", 
-            "description": "Whether this is the default style (required)" 
-        },
-        "created_at": { 
-            "bsonType": "date", 
-            "description": "Creation timestamp (required)" 
-        },
-        "updated_at": { 
-            "bsonType": "date", 
-            "description": "Last update timestamp (required)" 
-        }
+        "component_name": { "bsonType": "string", "description": "Component name (required)" },
+        "tailwind_classes": { "bsonType": "string", "description": "Tailwind CSS classes (required)" },
+        "label": { "bsonType": "string", "description": "Optional label" },
+        "created_at": { "bsonType": "date", "description": "Creation timestamp (required)" },
+        "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
     };
     
     // Merge with archive properties
@@ -362,7 +254,7 @@ pub async fn create_lib_settings_styles_collection(db: &Database) -> Result<()> 
             "validator": {
                 "$jsonSchema": {
                     "bsonType": "object",
-                    "required": ["name", "theme", "primary_color", "secondary_color", "font_family", "is_default", "created_at", "updated_at"],
+                    "required": ["component_name", "tailwind_classes", "created_at", "updated_at"],
                     "properties": properties
                 }
             },
@@ -381,51 +273,51 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
     
     match collection_name {
         "school_accounts" => doc! {
-            "school_name": default_column_width,
-            "address": default_column_width,
-            "contact_person": default_column_width,
-            "contact_email": default_column_width,
-            "contact_phone": default_column_width,
+            "school_id": default_column_width,
+            "first_name": default_column_width,
+            "middle_name": default_column_width,
+            "last_name": default_column_width,
+            "gender": default_column_width,
+            "course": default_column_width,
+            "department": default_column_width,
+            "position": default_column_width,
+            "major": default_column_width,
+            "year_level": default_column_width,
+            "is_active": default_column_width,
+            "last_updated_semester_id": default_column_width,
             "is_archive": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
         "attendance" => doc! {
-            "student_id": default_column_width,
             "school_id": default_column_width,
-            "date": default_column_width,
-            "status": default_column_width,
-            "notes": default_column_width,
+            "full_name": default_column_width,
+            "time_in_date": default_column_width,
+            "classification": default_column_width,
+            "purpose_label": default_column_width,
             "is_archive": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
         "purposes" => doc! {
-            "name": default_column_width,
-            "description": default_column_width,
-            "category": default_column_width,
+            "label": default_column_width,
+            "icon_name": default_column_width,
+            "is_deleted": default_column_width,
             "is_archive": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
         "semesters" => doc! {
-            "name": default_column_width,
-            "school_year": default_column_width,
-            "start_date": default_column_width,
-            "end_date": default_column_width,
+            "label": default_column_width,
             "is_active": default_column_width,
             "is_archive": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
         "settings_styles" => doc! {
-            "name": default_column_width,
-            "description": default_column_width,
-            "theme": default_column_width,
-            "primary_color": default_column_width,
-            "secondary_color": default_column_width,
-            "font_family": default_column_width,
-            "is_default": default_column_width,
+            "component_name": default_column_width,
+            "tailwind_classes": default_column_width,
+            "label": default_column_width,
             "is_archive": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
@@ -437,11 +329,11 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
 // Helper function to get default sort field for library collections
 pub fn get_default_lib_sort_field(collection_name: &str) -> &str {
     match collection_name {
-        "school_accounts" => "school_name",
-        "attendance" => "date",
-        "purposes" => "name",
-        "semesters" => "school_year",
-        "settings_styles" => "name",
+        "school_accounts" => "school_id",
+        "attendance" => "time_in_date",
+        "purposes" => "label",
+        "semesters" => "label",
+        "settings_styles" => "component_name",
         _ => "created_at",
     }
 }

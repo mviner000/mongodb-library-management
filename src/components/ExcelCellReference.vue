@@ -174,16 +174,6 @@ const onDocumentDeleted = () => {
   emit('document-deleted');
 };
 
-const onDeleteStart = () => {
-  console.log('Delete operation started');
-  isDeleting.value = true;
-};
-
-const onDeleteEnd = () => {
-  console.log('Delete operation ended');
-  isDeleting.value = false;
-};
-
 // Debug log when the component mounts
 console.log('ExcelCellReference component props:', {
   collectionName: props.collectionName,
