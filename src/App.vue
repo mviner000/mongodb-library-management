@@ -24,6 +24,7 @@ import ConnectionSettingsButton from './components/ConnectionSettingsButton.vue'
 import ConnectionSettingsModal from './components/ConnectionSettingsModal.vue';
 import ConnectionTester from './components/ConnectionTester.vue'
 import ScreenWidth from './components/ScreenWidth.vue'
+import LibraryInitializer from './mongodb/LibraryInitializer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -882,6 +883,7 @@ const handleCloseConnectionSettings = () => {
 <template>
   <Toaster />
   <ConnectionTester />
+  <LibraryInitializer class="w-full max-w-3xl" />
   <ScreenWidth />
   <ConnectionSettingsModal
       :is-open="showConnectionSettingsModal"
@@ -940,6 +942,7 @@ const handleCloseConnectionSettings = () => {
               <div class="flex flex-col items-center w-full gap-6">
                 <MongoDBStatus class="w-full max-w-3xl" @connection-status-changed="autoConnectMongoDB" />
                 <MongoDBOperations class="w-full max-w-3xl" @document-action="handleDocumentAction" />
+                <!-- <LibraryInitializer class="w-full max-w-3xl" /> -->
               </div>
             </div>
           </div>

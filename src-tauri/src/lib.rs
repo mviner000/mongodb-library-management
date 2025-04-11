@@ -7,6 +7,7 @@ use tokio::sync::Mutex;
 mod mongodb_installer;
 mod mongodb_manager;
 mod mongodb_schema;
+mod lib_mongodb_schema;
 mod api_server;
 mod session; // Add the session module
 mod auth; // Add the auth module
@@ -81,6 +82,7 @@ pub fn run() {
             mongodb_manager::delete_document,
             mongodb_manager::list_collections,
             mongodb_manager::get_collection_schema,
+            mongodb_manager::initialize_library_collections,
             
             // API server commands
             api_server::is_api_server_running,

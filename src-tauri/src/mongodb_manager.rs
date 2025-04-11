@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 use tauri::State;
 use anyhow::Result;
 use futures_util::stream::StreamExt;
+use tracing::{info, error};
 
 // Define MongoDB connection state
 #[derive(Debug)]
@@ -165,6 +166,25 @@ pub async fn get_collection_schema(
     
     println!("DEBUG: Successfully retrieved schema for collection '{}'", collection_name);
     Ok(schema)
+}
+
+#[tauri::command]
+pub async fn initialize_library_collections(
+    state: tauri::State<'_, MongoDbState>,
+) -> Result<(), String> {
+    info!("Initializing library collections via Tauri command");
+    let db = state.get_database().await?;
+    
+    match crate::mongodb_schema::initialize_library_collections(&db).await {
+        Ok(_) => {
+            info!("Successfully initialized library collections via Tauri command");
+            Ok(())
+        },
+        Err(e) => {
+            error!("Failed to initialize library collections: {}", e);
+            Err(e.to_string())  // Convert anyhow::Error to String
+        }
+    }
 }
 
 // Insert document function (not generic)

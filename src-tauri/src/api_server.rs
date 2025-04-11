@@ -19,7 +19,7 @@ use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, warn, error, debug};
 use std::time::SystemTime;
-
+use crate::mongodb_schema;
 use crate::mongodb_manager::MongoDbState;
 
 // API server state
@@ -808,6 +808,38 @@ async fn delete_document_handler(
     }
 }
 
+async fn initialize_library_collections_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+) -> impl IntoResponse {
+    info!("API endpoint called: initialize library collections");
+    let mongodb_state = &state.lock().await.mongodb_state;
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            match mongodb_schema::initialize_library_collections(&db).await {
+                Ok(_) => {
+                    info!("Successfully initialized library collections via API endpoint");
+                    (StatusCode::OK, Json(ApiResponse {
+                        success: true,
+                        data: None,
+                        error: None,
+                    }))
+                },
+                Err(e) => {
+                    error!("API endpoint error: Failed to initialize library collections: {}", e);
+                    error_response::<()>(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Initialization failed: {}", e)
+                    )
+                },
+            }
+        },
+        Err((status, e)) => {
+            error!("API endpoint error: Database connection failed: {}", e);
+            error_response::<()>(status, e)
+        },
+    }
+}
+
 // Create the API router
 fn create_api_router() -> Router<Arc<Mutex<ApiServerState>>> {
     // Setup CORS
@@ -826,6 +858,7 @@ fn create_api_router() -> Router<Arc<Mutex<ApiServerState>>> {
         .route("/api/auth/login", post(auth_login_handler))
         .route("/api/auth/register", post(auth_register_handler))
         .route("/api/auth/check-session", post(auth_check_session_handler))
+        .route("/api/initialize-library-collections", post(initialize_library_collections_handler))
         .route("/api/health", get(health_check_handler))
         .route("/collections/:collection_name/ui-metadata", put(update_ui_metadata_handler))
         .layer(cors)
