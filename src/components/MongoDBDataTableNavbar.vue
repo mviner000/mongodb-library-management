@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { ref, watch } from 'vue'; // Add watch
+import SidebarMenu from './sidebar/SidebarMenu.vue';
 
 // Define the Tab interface
 // interface Tab {
@@ -67,6 +68,17 @@ defineExpose({
     collectionName.value = name;
   }
 });
+
+// Sidebar state
+const isSidebarOpen = ref(false);
+
+const toggleSidebar = () => {
+  isSidebarOpen.value = !isSidebarOpen.value;
+};
+
+const closeSidebar = () => {
+  isSidebarOpen.value = false;
+};
 </script>
 
 <template>
@@ -74,7 +86,8 @@ defineExpose({
     <!-- Left section: Menu and title -->
     <div class="flex items-center gap-2">
         
-      <Button variant="ghost" size="icon" class="text-gray-500">
+      <Button variant="ghost" size="icon" class="text-gray-500" @click="toggleSidebar">
+        <!-- Hamburger Menu Icon -->
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="3" y1="12" x2="21" y2="12"></line>
           <line x1="3" y1="6" x2="21" y2="6"></line>
@@ -132,4 +145,6 @@ defineExpose({
       </div>
     </div>
   </header>
+  <!-- Sidebar component -->
+  <SidebarMenu :isOpen="isSidebarOpen" @close="closeSidebar" />
 </template>

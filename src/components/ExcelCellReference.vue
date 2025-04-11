@@ -1,6 +1,6 @@
 <!-- src/components/ExcelCellReference.vue -->
 <template>
-  <div class="fixed h-[42px] top-14 left-0 z-40 w-full flex items-center bg-white border-b border-b-gray-400">
+  <div class="fixed h-[42px] top-14 left-0 w-full flex items-center bg-white border-b border-b-gray-400">
     <!-- Cell reference box (e.g., A1) -->
     <div class="flex items-center px-2">
       <div class="flex items-center cursor-pointer">

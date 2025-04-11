@@ -1,20 +1,39 @@
-<!-- src/components/TemplateGalleryNavbar.vue -->
+<!-- src/components/HomeNavbar.vue -->
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import UserAvatarNavigation from '@/components/UserAvatarNavigation.vue';
+import { useRouter } from 'vue-router';
+import SidebarMenu from './sidebar/SidebarMenu.vue';
 
 const props = defineProps<{
   showSearch?: boolean;
   title?: string;
 }>();
 
+const router = useRouter()
+
+const goToHome = () => {
+  router.replace('/home')
+}
+
 // Default title with reactive binding to props
 const title = ref(props.title || 'Library Manager');
 
 // Track search visibility
 const showSearch = ref(props.showSearch !== true);
+
+// Sidebar state
+const isSidebarOpen = ref(false);
+
+const toggleSidebar = () => {
+  isSidebarOpen.value = !isSidebarOpen.value;
+};
+
+const closeSidebar = () => {
+  isSidebarOpen.value = false;
+};
 
 // Watch for title prop changes
 watch(() => props.title, (newTitle) => {
@@ -32,10 +51,10 @@ watch(() => props.showSearch, (newValue) => {
 </script>
 
 <template>
-  <header class="fixed top-0 z-50 flex items-center w-full h-14 px-2 border-b bg-white">
+  <header class="fixed top-0 z-40 flex items-center w-full h-14 px-2 border-b bg-white">
     <!-- Left section: Menu, logo and title -->
     <div class="flex items-center gap-2">
-      <Button variant="ghost" size="icon" class="text-gray-500" >
+      <Button variant="ghost" size="icon" class="text-gray-500" @click="toggleSidebar">
         <!-- Hamburger Menu Icon -->
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="3" y1="12" x2="21" y2="12"></line>
@@ -44,7 +63,7 @@ watch(() => props.showSearch, (newValue) => {
         </svg>
       </Button>
       
-      <div class="flex items-center gap-2">
+      <div @click="goToHome" class="cursor-pointer flex items-center gap-2">
         <div class="w-6 h-6">
           <svg viewBox="0 0 24 24" width="24" height="24">
             <rect fill="#0F9D58" x="0" y="0" width="24" height="24" rx="4" />
@@ -80,4 +99,7 @@ watch(() => props.showSearch, (newValue) => {
     <!-- Right section: Using the separated UserAvatarNavigation component -->
     <UserAvatarNavigation />
   </header>
+  
+  <!-- Sidebar component -->
+  <SidebarMenu :isOpen="isSidebarOpen" @close="closeSidebar" />
 </template>

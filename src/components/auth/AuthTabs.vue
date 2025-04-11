@@ -173,7 +173,7 @@ const registerError = ref('')
 const isRegisterLoading = ref(false)
 
 // PIN Input state
-const showPinModal = ref(true)
+const showPinModal = ref(false)
 const registrationPin = ref('000000');
 const showPinDigits = ref(false);
 

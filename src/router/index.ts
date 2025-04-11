@@ -5,6 +5,7 @@ import TemplateGallery from '@/components/TemplateGallery.vue'
 import MongoDBDataTable from '@/components/MongoDBDataTable.vue'
 import HelloWorldTab from '@/components/HelloWorldTab.vue'
 import HistoryPage from '@/components/HistoryPage.vue'
+import MongoDBSettings from '@/mongodb/MongoDBSettings.vue'
 
 const routes = [
   {
@@ -30,7 +31,7 @@ const routes = [
   {
     path: '/settings',
     name: 'Settings',
-    component: () => import('@/components/MongoDBStatus.vue')
+    component: MongoDBSettings
   },
   {
     path: '/history',

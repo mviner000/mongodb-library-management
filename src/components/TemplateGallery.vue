@@ -10,7 +10,7 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import TemplateGalleryNavbar from './TemplateGalleryNavbar.vue';
+import HomeNavbar from './HomeNavbar.vue';
 
 interface Template {
   id: string;
@@ -114,7 +114,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <TemplateGalleryNavbar :title="'Home'" class="sticky top-0 z-50" />
+  <HomeNavbar :title="'Home'" class="sticky top-0 z-50" />
   <div class="bg-gray-50 py-6 px-4">
     <div class="max-w-7xl mx-auto">
       <div class="flex justify-between items-center mb-4">

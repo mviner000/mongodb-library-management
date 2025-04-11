@@ -32,7 +32,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/components/ui/toast/use-toast';
 import { PlusCircledIcon } from '@radix-icons/vue';
-import MongoDBTableNavbar from './MongoDBTableNavbar.vue';
+import MongoDBDataTableNavbar from './MongoDBDataTableNavbar.vue';
 
 const { toast } = useToast();
 const route = useRoute();
@@ -893,23 +893,23 @@ const resetSelection = () => {
 </script>
 
 <template>
-  <MongoDBTableNavbar 
+  <MongoDBDataTableNavbar 
     :isSplitActive="isSplit" 
     class="sticky top-0 z-50" 
   />
   <div class="excel-container w-full">
     
     <div v-if="errorMessage" class="fixed top-4 left-4 right-4 z-[9999] mx-4 my-4 p-4 bg-red-100 text-red-700 rounded-lg shadow-xl border-2 border-red-300 break-words">
-  {{ errorMessage }}
-  <Button
-    @click="closeError"
-    variant="ghost"
-    size="sm"
-    class="absolute right-3 top-3 p-1 h-6 w-6 text-red-700 hover:bg-red-200"
-  >
-    <Cross2Icon class="h-3 w-3" />
-  </Button>
-</div>
+      {{ errorMessage }}
+      <Button
+        @click="closeError"
+        variant="ghost"
+        size="sm"
+        class="absolute right-3 top-3 p-1 h-6 w-6 text-red-700 hover:bg-red-200"
+      >
+        <Cross2Icon class="h-3 w-3" />
+      </Button>
+    </div>
     
     <div v-if="isLoading" class="flex justify-center my-8">
       <ReloadIcon class="h-8 w-8 animate-spin text-gray-500" />

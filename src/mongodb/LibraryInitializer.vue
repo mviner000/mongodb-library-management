@@ -1,8 +1,8 @@
 <!-- src/components/mongodb/LibraryInitializer.vue -->
 <template>
-    <div class="p-4 border rounded-lg bg-white shadow-sm">
-      <h2 class="text-lg font-medium mb-4">Library Collections</h2>
-      
+    <div class="border rounded-md p-4 w-full">
+    <h2 class="text-xl font-bold mb-4">Library Collections</h2>
+    
       <p class="text-sm text-gray-600 mb-4">
         Initialize default library collections with predefined schemas for books, authors, genres, and more.
       </p>

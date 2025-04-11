@@ -1,11 +1,12 @@
 <!-- src/components/MongoDBStatus.vue -->
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, inject, provide } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { ReloadIcon } from '@radix-icons/vue';
 import { listen } from '@tauri-apps/api/event';
 
+// Create MongoDB connection state
 const mongoDBStatus = ref<'checking' | 'installed' | 'not-installed'>('checking');
 const isLoading = ref(true);
 const isInstalling = ref(false);
@@ -14,6 +15,13 @@ const installLogs = ref<string[]>([]);
 const isConnected = ref(false);
 const connectionString = ref('mongodb://localhost:27017');
 const installerPath = ref<string | null>(null);
+
+// Provide MongoDB connection state for child components
+provide('mongodbState', {
+  isConnected,
+  connectionString,
+  mongoDBStatus
+});
 
 // Download progress tracking
 const downloadProgress = ref({
@@ -82,11 +90,20 @@ async function handleInstall() {
     downloadProgress.value.isDownloading = false;
   }
 }
-
 async function connectToMongoDB() {
   try {
     await invoke<void>('connect_mongodb', { connectionString: connectionString.value });
     isConnected.value = true;
+    
+    // Emit custom event for parent components
+    const event = new CustomEvent('connection-changed', {
+      detail: {
+        connected: true,
+        connectionString: connectionString.value
+      },
+      bubbles: true
+    });
+    document.dispatchEvent(event);
   } catch (error) {
     console.error('Connection failed:', error);
     isConnected.value = false;
@@ -98,6 +115,15 @@ async function disconnectFromMongoDB() {
   try {
     await invoke<void>('disconnect_mongodb');
     isConnected.value = false;
+    
+    // Emit custom event for parent components
+    const event = new CustomEvent('connection-changed', {
+      detail: {
+        connected: false
+      },
+      bubbles: true
+    });
+    document.dispatchEvent(event);
   } catch (error) {
     console.error('Disconnect failed:', error);
   }
@@ -167,7 +193,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="border rounded-md p-4 w-full max-w-xl">
+  <div class="border rounded-md p-4 w-full">
     <h2 class="text-xl font-bold mb-4">MongoDB Status</h2>
     
     <!-- Download progress bar (visible only during download) -->
@@ -199,7 +225,7 @@ onMounted(() => {
 
     <!-- Status display -->
     <div class="flex items-center gap-2 mb-4">
-      <Button variant="outline" @click="checkMongoDB" :disabled="isLoading || isInstalling">
+      <Button class="bg-green-400" variant="outline" @click="checkMongoDB" :disabled="isLoading || isInstalling">
         <template v-if="isLoading">
           <ReloadIcon class="mr-2 h-4 w-4 animate-spin" />
           Checking...
@@ -270,7 +296,7 @@ onMounted(() => {
           v-if="!isConnected" 
           variant="default" 
           @click="connectToMongoDB"
-          class="flex-1"
+          class="flex-1 font-bold border-green-500"
         >
           Connect
         </Button>
