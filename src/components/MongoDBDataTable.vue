@@ -1791,6 +1791,27 @@ const resetSelection = () => {
   background-color: #edf5fd; /* Match row hover color */
 }
 
+/* Add green scrollbar to the table container */
+.table-scroll-container::-webkit-scrollbar {
+  height: 12px;
+  background-color: #f0fdf4;
+}
+
+.table-scroll-container::-webkit-scrollbar-track {
+  background: #f0fdf4;
+  border-radius: 6px;
+}
+
+.table-scroll-container::-webkit-scrollbar-thumb {
+  background: #16a34a;
+  border-radius: 6px;
+  border: 2px solid #f0fdf4;
+}
+
+.table-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: #22c55e;
+}
+
 @keyframes error-flash {
   0% { background-color: #fee2e2; }
   90% { background-color: #fef2f2; }

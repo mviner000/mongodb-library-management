@@ -1,6 +1,5 @@
-<!-- src/components/ExcelCellReference.vue -->
 <template>
-  <div class="fixed h-[42px] top-14 left-0 w-full flex items-center bg-white border-b border-b-gray-400">
+  <div class="fixed h-[42px] z-30 top-14 left-0 w-full flex items-center bg-white border-b border-b-gray-400">
     <!-- Cell reference box (e.g., A1) -->
     <div class="flex items-center px-2">
       <div class="flex items-center cursor-pointer">
@@ -34,6 +33,7 @@
     <!-- Batch Delete button for multiple selections -->
     <div v-if="selectedRows.size > 1" class="mr-4">
       <button 
+        @click="openBatchDeleteDialog"
         class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-red-100 text-red-500 border-red-300 hover:bg-red-200"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
@@ -45,7 +45,7 @@
       </button>
     </div>
     
-    <!-- Delete document dialog -->
+    <!-- Single Delete document dialog -->
     <DeleteDocumentAction
       v-if="documentToDelete"
       :collection-name="collectionName"
@@ -56,12 +56,73 @@
       @delete-start="(id) => $emit('delete-start', id)"
       @delete-end="$emit('delete-end')"
     />
+
+    <!-- Batch Delete confirmation dialog -->
+    <Dialog
+      :open="showBatchDeleteDialog"
+      @update:open="(val) => val === false && closeBatchDeleteDialog()"
+    >
+      <DialogContent
+        class="custom-delete-dialog p-0 overflow-hidden border-rose-200"
+        @keydown.enter.prevent="batchConfirmationText === confirmationRequired && !isBatchDeleting && confirmBatchDelete()"
+      >
+        <DialogTitle class="sr-only">Batch Delete Confirmation</DialogTitle>
+        <DialogDescription class="sr-only">
+          Please confirm your intention to delete {{ selectedRows.size }} documents by typing the confirmation text.
+        </DialogDescription>
+        
+        <div class="bg-rose-100 text-rose-700 p-4 border-b border-rose-200 flex items-center">
+          <div class="flex-1">
+            You are about to delete {{ selectedRows.size }} documents
+          </div>
+        </div>
+
+        <div class="p-4 bg-white">
+          <p class="text-sm text-gray-700 mb-3">
+            To confirm, type <span class="font-medium text-rose-600">{{ confirmationRequired }}</span> in the box below
+          </p>
+          <input
+            v-model="batchConfirmationText"
+            placeholder="Type confirmation text"
+            ref="batchInputRef"
+            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-rose-500"
+            aria-label="Confirmation text"
+          />
+          <p class="text-xs text-gray-500 mt-2">
+            Press Enter to confirm when text is correct
+          </p>
+        </div>
+
+        <div class="flex justify-end p-3 pt-0 bg-white">
+          <Button
+            @click="confirmBatchDelete"
+            size="lg"
+            class="w-full bg-rose-600 hover:bg-rose-700 text-white"
+            :disabled="batchConfirmationText !== confirmationRequired || isBatchDeleting"
+          >
+            {{ isBatchDeleting ? 'Deleting...' : `Delete ${selectedRows.size} documents` }}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import DeleteDocumentAction from './mongodbtable/DeleteDocumentAction.vue';
+import { getApiBaseUrl } from '@/utils/api';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast/use-toast';
+
+const API_BASE = getApiBaseUrl();
+const { toast } = useToast();
 
 const props = defineProps<{
   selectedCell: { colIndex: number; rowNumber: number } | null;
@@ -76,10 +137,113 @@ const emit = defineEmits<{
   (e: 'document-deleted'): void;
   (e: 'delete-start', id: string): void;
   (e: 'delete-end'): void;
+  (e: 'reset-selection'): void;
 }>();
 
 // Reference to the DeleteDocumentAction component
 const deleteDocumentRef = ref<InstanceType<typeof DeleteDocumentAction> | null>(null);
+
+// Batch delete dialog state
+const showBatchDeleteDialog = ref(false);
+const isBatchDeleting = ref(false);
+const batchConfirmationText = ref('');
+const confirmationRequired = 'confirm-delete';
+const batchInputRef = ref<HTMLInputElement | null>(null);
+
+// Open batch delete dialog
+const openBatchDeleteDialog = () => {
+  emit('delete-start', 'batch');
+  batchConfirmationText.value = '';
+  showBatchDeleteDialog.value = true;
+  // Focus the input after dialog is open
+  setTimeout(() => {
+    batchInputRef.value?.focus();
+  }, 100);
+};
+
+// Close batch delete dialog
+const closeBatchDeleteDialog = () => {
+  showBatchDeleteDialog.value = false;
+  batchConfirmationText.value = '';
+  // Only emit delete-end if the dialog was closed manually,
+  // not after a successful/failed delete (handled in confirmBatchDelete)
+  if (!isBatchDeleting.value) {
+    emit('delete-end');
+  }
+};
+
+// Add batch delete handler
+const confirmBatchDelete = async () => {
+  if (batchConfirmationText.value !== confirmationRequired || isBatchDeleting.value) return;
+  
+  isBatchDeleting.value = true;
+  try {
+    // Show processing notification
+    const response = await fetch(
+      `${API_BASE}/collections/${props.collectionName}/documents/batch-delete`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [...props.selectedRows] })
+      }
+    );
+
+    const { success, error } = await response.json();
+    
+    if (success) {
+      toast({
+        title: 'Documents deleted',
+        description: `${props.selectedRows.size} documents were successfully removed`,
+      });
+      emit('document-deleted');
+      emit('reset-selection');
+      showBatchDeleteDialog.value = false; // Close dialog on success
+    } else {
+      toast({
+        title: 'Batch delete failed',
+        description: error || 'Failed to delete documents',
+        variant: 'destructive',
+      });
+    }
+  } catch (error) {
+    toast({
+      title: 'Error deleting documents',
+      description: String(error),
+      variant: 'destructive',
+    });
+  } finally {
+    isBatchDeleting.value = false;
+    // If the dialog is still open (e.g., on failure), keep it open until user closes,
+    // but if it was successful, it's already closed above.
+    emit('delete-end');
+    // Ensure confirmation text is cleared if delete fails and dialog stays open
+    if (showBatchDeleteDialog.value) {
+      batchConfirmationText.value = '';
+    }
+  }
+};
+
+// Handle Enter key press for batch dialog
+const handleBatchKeyDown = (event: KeyboardEvent) => {
+  if (
+    event.key === 'Enter' &&
+    showBatchDeleteDialog.value &&
+    batchConfirmationText.value === confirmationRequired &&
+    !isBatchDeleting.value
+  ) {
+    event.preventDefault();
+    confirmBatchDelete();
+  }
+};
+
+// Set up and clean up global event listener for Enter key
+onMounted(() => {
+  document.addEventListener('keydown', handleBatchKeyDown);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleBatchKeyDown);
+});
 
 // Store information about document to delete
 const documentToDelete = ref<{ id: string; rowNumber: number } | null>(null);
@@ -172,6 +336,7 @@ const onDocumentDeleted = () => {
   documentToDelete.value = null;
   isDeleting.value = false;
   emit('document-deleted');
+  emit('reset-selection'); // Also reset selection after single document deletion
 };
 
 // Debug log when the component mounts
@@ -183,3 +348,18 @@ console.log('ExcelCellReference component props:', {
   pageSize: props.pageSize
 });
 </script>
+
+<style scoped>
+.custom-delete-dialog {
+  max-width: 500px;
+  border-radius: 4px;
+}
+
+/* Keep button styles within the dialog consistent */
+.bg-rose-100 { background-color: #ffebee; }
+.text-rose-700 { color: #c6282d; }
+.border-rose-200 { border-color: #ffcdd2; }
+.text-rose-600 { color: #e53935; }
+.bg-rose-600 { background-color: #e53935; }
+.hover\:bg-rose-700:hover { background-color: #d32f2f; }
+</style>

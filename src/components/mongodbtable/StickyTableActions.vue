@@ -82,7 +82,7 @@ onUnmounted(() => {
 <template>
     <div
       v-if="showBoom"
-      class="bg-white fixed right-0 top-1/2 transform -translate-y-1/2 bg-transparent boom-sidebar z-10"
+      class="bg-white fixed right-0 top-1/2 transform -translate-y-1/2 bg-transparent boom-sidebar z-20"
     ></div>
 
     <TableCell

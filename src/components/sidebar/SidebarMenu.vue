@@ -3,7 +3,7 @@
 import { useRouter } from 'vue-router';
 import SettingsNavItem from './SettingsNavItem.vue';
 
-const props = defineProps<{
+defineProps<{
   isOpen: boolean;
 }>();
 

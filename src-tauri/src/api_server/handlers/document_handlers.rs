@@ -220,6 +220,59 @@ pub async fn delete_document_handler(
     }
 }
 
+pub async fn batch_delete_documents_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Json(payload): Json<HashMap<String, Vec<String>>>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    let ids = match payload.get("ids") {
+        Some(ids) => ids,
+        None => return error_response::<DeleteResponse>(
+            StatusCode::BAD_REQUEST, 
+            "Missing 'ids' in payload".into()
+        ),
+    };
+
+    let object_ids: Result<Vec<ObjectId>, _> = ids.iter()
+        .map(|id| ObjectId::parse_str(id))
+        .collect();
+
+    let object_ids = match object_ids {
+        Ok(ids) => ids,
+        Err(e) => return error_response::<DeleteResponse>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid ObjectId: {}", e)
+        ),
+    };
+
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            let filter = doc! { "_id": { "$in": object_ids } };
+            
+            match collection.delete_many(filter, None).await {
+                Ok(result) => {
+                    (StatusCode::OK, Json(ApiResponse {
+                        success: true,
+                        data: Some(DeleteResponse {
+                            success: true,
+                            deleted_count: result.deleted_count,
+                        }),
+                        error: None,
+                    }))
+                },
+                Err(e) => error_response::<DeleteResponse>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            }
+        },
+        Err((status, e)) => error_response::<DeleteResponse>(status, e),
+    }
+}
+
 // Helper functions for document handlers
 pub async fn process_cursor(
     mut cursor: Cursor<Document>

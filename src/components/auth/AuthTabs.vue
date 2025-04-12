@@ -133,7 +133,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 // Remove unused PinInput imports from ui if they were specific to a library
 // import { PinInput, PinInputInput, PinInputGroup } from '@/components/ui/pin-input'
 import PinInputDialog from '@/components/PinInputDialog.vue'; // Import the new component

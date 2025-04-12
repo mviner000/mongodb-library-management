@@ -1,6 +1,6 @@
 <!-- src/components/MongoDBStatus.vue -->
 <script setup lang="ts">
-import { ref, onMounted, computed, inject, provide } from 'vue';
+import { ref, onMounted, computed, provide } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { ReloadIcon } from '@radix-icons/vue';

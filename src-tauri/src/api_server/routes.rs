@@ -8,7 +8,6 @@ use axum::{
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
-
 use crate::api_server::{
     state::ApiServerState,
     handlers::{
@@ -27,6 +26,7 @@ use crate::api_server::{
             insert_document_handler,
             update_document_handler,
             delete_document_handler,
+            batch_delete_documents_handler,
         },
         system_handlers::{
             health_check_handler,
@@ -35,35 +35,58 @@ use crate::api_server::{
     },
 };
 
-// Create the API router
-pub fn create_api_router() -> Router<Arc<Mutex<ApiServerState>>> {
+// Create the API router and return both the router and a list of routes
+pub fn create_api_router() -> (Router<Arc<Mutex<ApiServerState>>>, Vec<String>) {
+    let mut routes = Vec::new();
+    let mut router = Router::new();
+    
     // Setup CORS
     let cors = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
         .allow_headers(Any)
         .allow_origin(Any);
     
-    Router::new()
-        // Collection routes
-        .route("/collections", get(list_collections_handler))
-        .route("/collections/:collection_name/schema", get(get_collection_schema_handler))
-        .route("/collections/:collection_name/ui-metadata", put(update_ui_metadata_handler))
-        
-        // Document routes
-        .route("/collections/:collection_name/documents", get(find_documents_handler))
-        .route("/collections/:collection_name/documents", post(insert_document_handler))
-        .route("/collections/:collection_name/documents/:id", put(update_document_handler))
-        .route("/collections/:collection_name/documents/:id", delete(delete_document_handler))
-        
-        // Auth routes
-        .route("/api/auth/login", post(auth_login_handler))
-        .route("/api/auth/register", post(auth_register_handler))
-        .route("/api/auth/check-session", post(auth_check_session_handler))
-        
-        // System routes
-        .route("/api/initialize-library-collections", post(initialize_library_collections_handler))
-        .route("/api/health", get(health_check_handler))
-        
-        // Apply CORS middleware
-        .layer(cors)
+    // Macro to add routes and track them
+    macro_rules! add_route {
+        ($method:expr, $path:expr, $handler:expr) => {
+            router = match $method {
+                Method::GET => router.route($path, get($handler)),
+                Method::POST => router.route($path, post($handler)),
+                Method::PUT => router.route($path, put($handler)),
+                Method::DELETE => router.route($path, delete($handler)),
+                _ => panic!("Unsupported method: {}. Update the router implementation.", $method),
+            };
+            routes.push(format!("{} {}", $method, $path));
+        };
+    }
+    
+    // Collection routes
+    add_route!(Method::GET, "/collections", list_collections_handler);
+    add_route!(Method::GET, "/collections/:collection_name/schema", get_collection_schema_handler);
+    add_route!(Method::PUT, "/collections/:collection_name/ui-metadata", update_ui_metadata_handler);
+    
+    // Document routes
+    add_route!(Method::GET, "/collections/:collection_name/documents", find_documents_handler);
+    add_route!(Method::POST, "/collections/:collection_name/documents", insert_document_handler);
+    add_route!(Method::PUT, "/collections/:collection_name/documents/:id", update_document_handler);
+    add_route!(Method::DELETE, "/collections/:collection_name/documents/:id", delete_document_handler);
+    add_route!(
+        Method::POST, 
+        "/collections/:collection_name/documents/batch-delete", 
+        batch_delete_documents_handler
+    );
+    
+    // Auth routes
+    add_route!(Method::POST, "/api/auth/login", auth_login_handler);
+    add_route!(Method::POST, "/api/auth/register", auth_register_handler);
+    add_route!(Method::POST, "/api/auth/check-session", auth_check_session_handler);
+    
+    // System routes
+    add_route!(Method::POST, "/api/initialize-library-collections", initialize_library_collections_handler);
+    add_route!(Method::GET, "/api/health", health_check_handler);
+    
+    // Apply CORS middleware
+    router = router.layer(cors);
+    
+    (router, routes)
 }

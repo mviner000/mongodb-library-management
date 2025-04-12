@@ -1,4 +1,4 @@
-// old src/lib.rs
+// src/lib.rs
 
 use tauri::{Manager, State};
 use std::sync::Arc;

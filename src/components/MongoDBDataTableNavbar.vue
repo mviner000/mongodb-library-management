@@ -82,7 +82,7 @@ const closeSidebar = () => {
 </script>
 
 <template>
-  <header class="sticky top-0 z-0 flex items-center w-full h-14 px-2 border-b bg-white">
+  <header class="sticky top-0 z-30 flex items-center w-full h-14 px-2 border-b bg-white">
     <!-- Left section: Menu and title -->
     <div class="flex items-center gap-2">
         

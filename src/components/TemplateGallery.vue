@@ -1,7 +1,6 @@
 <!-- src/components/TemplateGallery.vue -->
 <script setup lang="ts">
 import { ref, onMounted, inject } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'vue-router';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,6 +10,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import HomeNavbar from './HomeNavbar.vue';
+import { documentService } from '@/services/documentService';
 
 interface Template {
   id: string;
@@ -42,13 +42,20 @@ const router = useRouter();
 // Inject the global event bus or tab management function with proper typing
 const tabManager = inject<TabManager>('tabManager');
 
-// Fetch collections from MongoDB
+// Fetch collections from the API server using the service
 async function fetchCollections() {
   isLoading.value = true;
   error.value = '';
   
   try {
-    const collections = await invoke<string[]>('list_collections');
+    // Use the documentService instead of direct fetch
+    const responseData = await documentService.fetchCollections();
+    
+    if (!responseData.success) {
+      throw new Error(responseData.error || 'Unknown error occurred');
+    }
+    
+    const collections = responseData.data || [];
     
     // Convert collections to template format
     templates.value = collections.map(collection => ({
