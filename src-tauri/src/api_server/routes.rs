@@ -13,6 +13,7 @@ use crate::api_server::{
     handlers::{
         auth_handlers::{
             auth_login_handler,
+            auth_get_me_handler,
             auth_register_handler,
             auth_check_session_handler,
         },
@@ -78,9 +79,9 @@ pub fn create_api_router() -> (Router<Arc<Mutex<ApiServerState>>>, Vec<String>) 
     
     // Auth routes
     add_route!(Method::POST, "/api/auth/login", auth_login_handler);
+    add_route!(Method::GET, "/api/auth/me", auth_get_me_handler);
     add_route!(Method::POST, "/api/auth/register", auth_register_handler);
     add_route!(Method::POST, "/api/auth/check-session", auth_check_session_handler);
-    
     // System routes
     add_route!(Method::POST, "/api/initialize-library-collections", initialize_library_collections_handler);
     add_route!(Method::GET, "/api/health", health_check_handler);

@@ -34,6 +34,12 @@ pub struct LoginResponse {
 }
 
 #[derive(Serialize)]
+pub struct UserResponse {
+    pub username: String,
+    pub email: String,
+}
+
+#[derive(Serialize)]
 pub struct SessionCheckResponse {
     pub valid: bool,
 }

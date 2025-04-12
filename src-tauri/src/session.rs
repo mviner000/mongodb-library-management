@@ -52,7 +52,30 @@ impl SessionManager {
         })
     }
 
+    pub async fn get_user_id(&self, token: &str) -> Option<String> {
+        let db = match self.mongodb_state.get_database().await {
+            Ok(db) => db,
+            Err(_) => return None,
+        };
+        let collection: Collection<bson::Document> = db.collection("sessions");
+        
+        let filter = doc! {
+            "session_token": token,
+            "is_valid": true
+        };
+        
+        match collection.find_one(filter, None).await {
+            Ok(Some(session)) => {
+                // Extract the user_id from the session document
+                session.get_str("user_id").ok().map(|id| id.to_string())
+            },
+            Ok(None) => None,
+            Err(_) => None,
+        }
+    }
+
     pub async fn validate_session(&self, token: &str) -> bool {
+        println!("Validating token: {}", token);
         let db = match self.mongodb_state.get_database().await {
             Ok(db) => db,
             Err(_) => return false,

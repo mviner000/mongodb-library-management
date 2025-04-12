@@ -23,12 +23,15 @@ import ConnectionSettingsButton from './components/ConnectionSettingsButton.vue'
 import ConnectionSettingsModal from './components/ConnectionSettingsModal.vue';
 import ConnectionTester from './components/ConnectionTester.vue'
 import MongoDBStatus from './mongodb/MongoDBStatus.vue'
+import { useUserStore } from '@/composables/useUserStore'
+const { fetchUser, clearUser } = useUserStore()
+import { AUTH_CONSTANTS } from '@/constants/auth'
 
 const route = useRoute()
 const router = useRouter()
 
 const showAuthModal = ref(true)
-const authToken = ref(localStorage.getItem('token') || null)
+const authToken = ref(localStorage.getItem(AUTH_CONSTANTS.TOKEN_KEY) || null)
 
 const componentCache = ref(new Map())
 
@@ -773,13 +776,13 @@ onMounted(async () => {
       
       if (!response.valid) {
         authToken.value = null
-        localStorage.removeItem('token')
+        localStorage.removeItem(AUTH_CONSTANTS.TOKEN_KEY)
         showAuthModal.value = true
       }
     } catch (error) {
       console.error('Session check failed:', error)
       authToken.value = null
-      localStorage.removeItem('token')
+      localStorage.removeItem(AUTH_CONSTANTS.TOKEN_KEY)
       showAuthModal.value = true
     }
   } else {
@@ -794,27 +797,41 @@ const handleLogin = async (identifier: string, password: string) => {
     const response = await apiFetch<LoginResponse>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ identifier, password })
-    })
-
-    // Update parent state
-    authToken.value = response.token
-    localStorage.setItem('token', response.token)
+    });
     
-    // No need to close the modal here - AuthTabs will do it after delay
-    // showAuthModal.value = false // This is now handled by AuthTabs after delay
-
+    // Update parent state
+    authToken.value = response.token;
+    localStorage.setItem(AUTH_CONSTANTS.TOKEN_KEY, response.token);
+    
     toast({
       title: 'Login Successful',
       description: 'Welcome back!',
-    })
+    });
+    
+    await fetchUser();
+    
+    // Reset the active tab to home and reload after login
+    const activeTab = tabs.value.find(t => t.id === activeTabId.value);
+    if (activeTab) {
+      activeTab.path = '/home';
+      activeTab.title = 'Home';
+      activeTab.type = 'home';
+    }
+    
+    // Close auth modal
+    showAuthModal.value = false;
+    
+    // Force router to reload to the home page
+    
+    window.location.href = '/home';
   } catch (error) {
-    console.error('Login failed:', error)
+    console.error('Login failed:', error);
     toast({
       title: 'Login Failed',
       description: error instanceof Error ? error.message : 'Invalid credentials',
       variant: 'destructive'
-    })
-    throw error
+    });
+    throw error;
   }
 }
 
@@ -836,12 +853,10 @@ const handleRegister = async (username: string, email: string, password: string)
 }
 
 const handleLogout = () => {
-  // Navigate to home
   router.push('/home');
-  // Clear authentication state
   authToken.value = null;
-  localStorage.removeItem('token');
-  // Show auth modal
+  localStorage.removeItem(AUTH_CONSTANTS.TOKEN_KEY);
+  clearUser();
   showAuthModal.value = true;
 };
 

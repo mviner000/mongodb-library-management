@@ -4,6 +4,7 @@ import { inject, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useZoom } from '@/composables/useZoom'
 import { ShieldIcon, PasswordIcon, UserIcon, EditIcon, SyncIcon, SettingsIcon, LogoutIcon, MinusIcon, PlusIcon, BookmarkIcon, DotsIcon, BackIcon, ForwardIcon, ReloadIcon, HistoryIcon } from '@/components/Icons';
 import BrowserHistoryModal from '@/components/BrowserHistoryModal.vue';
+import { useUserStore } from '@/composables/useUserStore';
 
 // Props for the component
 const props = defineProps<{
@@ -25,6 +26,21 @@ const showProfileDropdown = ref(false)
 
 // Track history modal state
 const showHistoryModal = ref(false)
+
+// Add inside setup
+const { user, fetchUser, clearUser } = useUserStore()
+
+// Fetch user when component mounts if logged in
+onMounted(async () => {
+  await fetchUser()
+})
+
+// Update handleLogout to clear user
+function handleLogout() {
+  emit('logout');
+  clearUser();
+  showProfileDropdown.value = false;
+}
 
 // Update input when currentUrl prop changes
 watch(() => props.currentUrl, (newUrl) => {
@@ -74,11 +90,6 @@ function closeDropdown(event: MouseEvent) {
   }
 }
 
-function handleLogout() {
-  emit('logout');
-  showProfileDropdown.value = false; // Close dropdown when logout is pressed
-}
-
 // Add global click handler to close dropdown when clicking outside
 function handleGlobalClick(event: MouseEvent) {
   closeDropdown(event);
@@ -97,6 +108,14 @@ onBeforeUnmount(() => {
 function handleHistoryNavigation(url: string) {
   emit('navigate', url);
   showHistoryModal.value = false; // Close modal after navigation
+}
+
+// Helper to get user initial safely
+function getUserInitial(): string {
+  if (user.value && user.value.username && user.value.username.length > 0) {
+    return user.value.username[0].toUpperCase();
+  }
+  return 'U';
 }
 </script>
 
@@ -215,7 +234,7 @@ function handleHistoryNavigation(url: string) {
         >
           <!-- Default profile icon or user image -->
           <div class="w-full h-full bg-gray-600 flex items-center justify-center text-white">
-            <span class="text-xs">U</span>
+            <span class="text-xs">{{ getUserInitial() }}</span>
           </div>
         </button>
 
@@ -227,10 +246,10 @@ function handleHistoryNavigation(url: string) {
           <!-- User Profile Header -->
           <div class="p-3 flex flex-col items-center border-b border-gray-700">
             <div class="w-14 h-14 rounded-full bg-gray-600 flex items-center justify-center text-white mb-2">
-              <span class="text-lg">U</span>
+              <span class="text-lg">{{ getUserInitial() }}</span>
             </div>
-            <div class="text-gray-200 font-medium">User Name</div>
-            <div class="text-gray-400 text-sm">user@example.com</div>
+            <div class="text-gray-200 font-medium">{{ user?.username || 'Guest' }}</div>
+            <div class="text-gray-400 text-sm">{{ user?.email || 'Not logged in' }}</div>
           </div>
 
           <!-- Dropdown Menu Items -->
