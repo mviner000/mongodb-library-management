@@ -1,3 +1,4 @@
+<!-- src/components/ExcelCellReference.vue -->
 <template>
   <div class="fixed h-[42px] z-30 top-14 left-0 w-full flex items-center bg-white border-b border-b-gray-400">
     <!-- Cell reference box (e.g., A1) -->
@@ -15,9 +16,22 @@
     <!-- Empty space -->
     <div class="flex-1 h-full"></div>
     
-    <!-- Delete button for single selection -->
+    <!-- single selection buttons -->
     <div v-if="selectedRows.size === 1" class="mr-4 flex gap-2">
-      <!-- New Archive Button -->
+      <!-- Single Recover Button -->
+      <button 
+        @click="handleRecoverClick"
+        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-green-100 text-green-600 border-green-300 hover:bg-green-200"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+          <path d="M3 11v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-8"/>
+          <polyline points="7 12 12 17 17 12"/>
+          <line x1="12" y1="17" x2="12" y2="7"/>
+        </svg>
+        Recover 1 Item
+      </button>
+      
+      <!-- Archive Button -->
       <button 
         @click="handleArchiveClick"
         class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-blue-100 text-blue-500 border-blue-300 hover:bg-blue-200"
@@ -44,9 +58,21 @@
       </button>
     </div>
 
-    <!-- Batch Delete button for multiple selections -->
+    <!-- buttons for multiple selections -->
     <div v-if="selectedRows.size > 1" class="mr-4 flex gap-2">
-      <!-- Temporary Batch Archive -->
+      <!-- Batch Recover -->
+      <button 
+        @click="handleBatchRecover"
+        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-green-100 text-green-600 border-green-300 hover:bg-green-200"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+          <path d="M3 11v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-8"/>
+          <polyline points="7 12 12 17 17 12"/>
+          <line x1="12" y1="17" x2="12" y2="7"/>
+        </svg>
+        Batch Recover {{ selectedRows.size }} Items
+      </button>
+      <!-- Batch Archive -->
       <button 
         @click="handleBatchArchive"
         class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-blue-100 text-blue-500 border-blue-300 hover:bg-blue-200"
@@ -223,6 +249,7 @@ const confirmBatchDelete = async () => {
       toast({
         title: 'Documents deleted',
         description: `${props.selectedRows.size} documents were successfully removed`,
+        variant: 'success'
       });
       emit('document-deleted');
       emit('reset-selection');
@@ -385,7 +412,11 @@ const handleArchiveClick = async () => {
       throw new Error(errorData.error || 'Archive failed');
     }
 
-    toast({ title: 'Document archived', description: 'The document has been archived successfully' });
+    toast({ 
+      title: 'Document archived', 
+      description: 'The document has been archived successfully',
+      variant: 'success'
+    });
     emit('document-deleted');
     emit('reset-selection');
     } catch (error: unknown) {
@@ -431,6 +462,7 @@ const handleBatchArchive = async () => {
       toast({
         title: 'Archived successfully',
         description: data.data.message,
+        variant: 'success'
       });
       emit('document-deleted');
       emit('reset-selection');
@@ -444,6 +476,93 @@ const handleBatchArchive = async () => {
   } catch (error) {
     toast({
       title: 'Archive error',
+      description: String(error),
+      variant: 'destructive',
+    });
+  }
+};
+
+// Single recover handler
+const handleRecoverClick = async () => {
+  const documentId = getSelectedDocumentId();
+  if (!documentId) {
+    toast({ title: 'Error', description: 'No document selected' });
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `${API_BASE}/collections/${props.collectionName}/documents/${documentId}/recover`,
+      {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem(AUTH_CONSTANTS.TOKEN_KEY)}`
+        }
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Recover failed');
+    }
+
+    toast({ 
+      title: 'Document recovered', 
+      description: 'The document has been recovered successfully', 
+      variant: 'success' 
+    });
+    emit('document-deleted');
+    emit('reset-selection');
+  } catch (error: unknown) {
+    console.error('Recover error:', error);
+    toast({
+      title: 'Recover error',
+      description: error instanceof Error ? error.message : 'Failed to recover document',
+      variant: 'destructive'
+    });
+  }
+};
+
+// Batch recover handler
+const handleBatchRecover = async () => {
+  if (props.selectedRows.size === 0) {
+    toast({ title: 'No selection', description: 'Please select items to recover' });
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `${API_BASE}/collections/${props.collectionName}/documents/batch-recover`,
+      {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem(AUTH_CONSTANTS.TOKEN_KEY)}`
+        },
+        body: JSON.stringify({ ids: [...props.selectedRows] })
+      }
+    );
+
+    const data = await response.json();
+    
+    if (data.success) {
+      toast({
+        title: 'Recovered successfully',
+        description: data.data.message,
+        variant: 'success'
+      });
+      emit('document-deleted');
+      emit('reset-selection');
+    } else {
+      toast({
+        title: 'Recover failed',
+        description: data.error || 'Failed to recover documents',
+        variant: 'destructive',
+      });
+    }
+  } catch (error) {
+    toast({
+      title: 'Recover error',
       description: String(error),
       variant: 'destructive',
     });

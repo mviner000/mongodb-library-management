@@ -278,6 +278,8 @@ pub async fn batch_delete_documents_handler(
     }
 }
 
+// archive handlers
+
 pub async fn archive_document_handler(
     State(state): State<Arc<Mutex<ApiServerState>>>,
     Path((collection_name, id)): Path<(String, String)>,
@@ -489,6 +491,209 @@ pub async fn batch_archive_documents_handler(
                         data: Some(json!({
                             "message": format!("Successfully archived {} documents", result.modified_count),
                             "archived_count": result.modified_count
+                        })),
+                        error: None,
+                    }))
+                },
+                Err(e) => error_response::<serde_json::Value>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            }
+        },
+        Err((status, e)) => error_response::<serde_json::Value>(status, e),
+    }
+}
+
+// recovery handlers
+
+pub async fn recover_document_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path((collection_name, id)): Path<(String, String)>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+) -> impl IntoResponse {
+    let token = auth.token();
+    let state = state.lock().await;
+    let session_manager = &state.session_manager;
+    
+    // Validate session
+    let valid = session_manager.lock().await.validate_session(token).await;
+    if !valid {
+        return error_response::<()>(StatusCode::UNAUTHORIZED, "Invalid session".into());
+    }
+
+    // Get user ID from session
+    let user_id = match session_manager.lock().await.get_user_id(token).await {
+        Some(id) => id,
+        None => return error_response::<()>(StatusCode::UNAUTHORIZED, "Session expired".into()),
+    };
+
+    // Convert to ObjectId
+    let user_oid = match ObjectId::parse_str(&user_id) {
+        Ok(oid) => oid,
+        Err(_) => return error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, "Invalid user ID format".into()),
+    };
+
+    match get_database(&state.mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            let doc_id = match ObjectId::parse_str(&id) {
+                Ok(oid) => oid,
+                Err(e) => return error_response::<()>(StatusCode::BAD_REQUEST, format!("Invalid document ID: {}", e)),
+            };
+
+            let now = mongodb::bson::DateTime::now();
+
+            // Try to update only if archived
+            let filter = doc! {
+                "_id": doc_id,
+                "is_archive": true
+            };
+
+            let update = doc! {
+                "$set": { "is_archive": false },
+                "$push": {
+                    "archive_history": {
+                        "action": "recover",
+                        "user_id": user_oid,
+                        "timestamp": now
+                    }
+                }
+            };
+
+            match collection.update_one(filter, update, None).await {
+                Ok(result) => {
+                    if result.matched_count == 0 {
+                        match collection.count_documents(doc! { "_id": doc_id }, None).await {
+                            Ok(count) if count > 0 => (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(()),
+                                error: None,
+                            })),
+                            _ => error_response::<()>(StatusCode::NOT_FOUND, "Document not found".into()),
+                        }
+                    } else {
+                        (StatusCode::OK, Json(ApiResponse {
+                            success: true,
+                            data: Some(()),
+                            error: None,
+                        }))
+                    }
+                },
+                Err(e) => error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        },
+        Err((status, e)) => error_response::<()>(status, e),
+    }
+}
+
+pub async fn batch_recover_documents_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+    Json(payload): Json<HashMap<String, Vec<String>>>,
+) -> impl IntoResponse {
+    let token = auth.token();
+    let state = state.lock().await;
+    let session_manager = &state.session_manager;
+    
+    let valid = session_manager.lock().await.validate_session(token).await;
+    if !valid {
+        return error_response::<serde_json::Value>(
+            StatusCode::UNAUTHORIZED, 
+            "Invalid session".into()
+        );
+    }
+
+    let user_id = match session_manager.lock().await.get_user_id(token).await {
+        Some(id) => id,
+        None => return error_response::<serde_json::Value>(
+            StatusCode::UNAUTHORIZED, 
+            "Session expired".into()
+        ),
+    };
+
+    let user_oid = match ObjectId::parse_str(&user_id) {
+        Ok(oid) => oid,
+        Err(_) => return error_response::<serde_json::Value>(
+            StatusCode::INTERNAL_SERVER_ERROR, 
+            "Invalid user ID format".into()
+        ),
+    };
+
+    let ids = match payload.get("ids") {
+        Some(ids) => ids,
+        None => return error_response::<serde_json::Value>(
+            StatusCode::BAD_REQUEST, 
+            "Missing 'ids' in payload".into()
+        ),
+    };
+
+    let object_ids: Result<Vec<ObjectId>, _> = ids.iter()
+        .map(|id| ObjectId::parse_str(id))
+        .collect();
+
+    let object_ids = match object_ids {
+        Ok(ids) => ids,
+        Err(e) => return error_response::<serde_json::Value>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid ObjectId: {}", e)
+        ),
+    };
+
+    match get_database(&state.mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            let now = mongodb::bson::DateTime::now();
+
+            let count_archived = match collection.count_documents(
+                doc! { 
+                    "_id": { "$in": &object_ids },
+                    "is_archive": true 
+                },
+                None
+            ).await {
+                Ok(count) => count,
+                Err(e) => return error_response::<serde_json::Value>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            };
+
+            if count_archived == 0 {
+                return (StatusCode::OK, Json(ApiResponse {
+                    success: true,
+                    data: Some(json!({
+                        "message": "No archived documents found to recover",
+                        "recovered_count": 0
+                    })),
+                    error: None,
+                }));
+            }
+
+            let filter = doc! {
+                "_id": { "$in": &object_ids },
+                "is_archive": true
+            };
+
+            let update = doc! {
+                "$set": { "is_archive": false },
+                "$push": {
+                    "archive_history": {
+                        "action": "recover",
+                        "user_id": user_oid,
+                        "timestamp": now
+                    }
+                }
+            };
+
+            match collection.update_many(filter, update, None).await {
+                Ok(result) => {
+                    (StatusCode::OK, Json(ApiResponse {
+                        success: true,
+                        data: Some(json!({
+                            "message": format!("Successfully recovered {} documents", result.modified_count),
+                            "recovered_count": result.modified_count
                         })),
                         error: None,
                     }))

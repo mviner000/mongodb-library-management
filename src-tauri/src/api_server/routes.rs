@@ -30,6 +30,9 @@ use crate::api_server::{
             batch_delete_documents_handler,
             archive_document_handler,
             batch_archive_documents_handler,
+            recover_document_handler,
+            batch_recover_documents_handler,
+
         },
         system_handlers::{
             health_check_handler,
@@ -83,6 +86,12 @@ pub fn create_api_router() -> (Router<Arc<Mutex<ApiServerState>>>, Vec<String>) 
         Method::POST, 
         "/collections/:collection_name/documents/batch-archive", 
         batch_archive_documents_handler
+    );
+    add_route!(Method::PUT, "/collections/:collection_name/documents/:id/recover", recover_document_handler);
+    add_route!(
+        Method::POST, 
+        "/collections/:collection_name/documents/batch-recover", 
+        batch_recover_documents_handler
     );
     
     // Auth routes
