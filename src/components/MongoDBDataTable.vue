@@ -33,6 +33,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/components/ui/toast/use-toast';
 import { PlusCircledIcon } from '@radix-icons/vue';
 import MongoDBDataTableNavbar from './MongoDBDataTableNavbar.vue';
+import FooterTabsBar from './FooterTabsBar.vue';
 
 const { toast } = useToast();
 const route = useRoute();
@@ -1400,6 +1401,8 @@ const resetSelection = () => {
           {{ documents.length }} entries
         </span>
       </div>
+
+      <!-- <FooterTabsBar /> -->
     </div>
   </div>
 </template>
