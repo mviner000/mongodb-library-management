@@ -16,7 +16,21 @@
     <div class="flex-1 h-full"></div>
     
     <!-- Delete button for single selection -->
-    <div v-if="selectedRows.size === 1" class="mr-4">
+    <div v-if="selectedRows.size === 1" class="mr-4 flex gap-2">
+      <!-- New Archive Button -->
+      <button 
+        @click="handleArchiveClick"
+        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-blue-100 text-blue-500 border-blue-300 hover:bg-blue-200"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+          <path d="M21 8v13H3V8"/>
+          <path d="M1 3h22v5H1z"/>
+          <path d="M10 12h4"/>
+        </svg>
+        Archive 1 Item
+      </button>
+
+      <!-- Existing Delete Button -->
       <button 
         @click="handleDeleteClick"
         class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-red-100 text-red-500 border-red-300 hover:bg-red-200"
@@ -31,7 +45,21 @@
     </div>
 
     <!-- Batch Delete button for multiple selections -->
-    <div v-if="selectedRows.size > 1" class="mr-4">
+    <div v-if="selectedRows.size > 1" class="mr-4 flex gap-2">
+      <!-- Temporary Batch Archive -->
+      <button 
+        @click="handleBatchArchive"
+        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-blue-100 text-blue-500 border-blue-300 hover:bg-blue-200"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+          <path d="M21 8v13H3V8"/>
+          <path d="M1 3h22v5H1z"/>
+          <path d="M10 12h4"/>
+        </svg>
+        Batch Archive {{ selectedRows.size }} Items
+      </button>
+
+      <!-- Existing Batch Delete -->
       <button 
         @click="openBatchDeleteDialog"
         class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-red-100 text-red-500 border-red-300 hover:bg-red-200"
@@ -120,6 +148,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast/use-toast';
+import { AUTH_CONSTANTS } from '@/constants/auth';
 
 const API_BASE = getApiBaseUrl();
 const { toast } = useToast();
@@ -328,6 +357,97 @@ const handleDeleteClick = () => {
     console.log('Opening delete dialog with ref:', deleteDocumentRef.value);
     deleteDocumentRef.value?.openDeleteDialog();
   }, 50);
+};
+
+// Archive handler
+const handleArchiveClick = async () => {
+  const documentId = getSelectedDocumentId();
+  console.log('Archiving document ID:', documentId); // Debug log
+
+  if (!documentId) {
+    toast({ title: 'Error', description: 'No document selected' });
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `${API_BASE}/collections/${props.collectionName}/documents/${documentId}/archive`,
+      {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem(AUTH_CONSTANTS.TOKEN_KEY)}`
+        }
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Archive failed');
+    }
+
+    toast({ title: 'Document archived', description: 'The document has been archived successfully' });
+    emit('document-deleted');
+    emit('reset-selection');
+    } catch (error: unknown) {
+    console.error('Archive error:', error);
+
+    let message = 'Failed to archive document';
+
+    if (error instanceof Error) {
+      message = error.message;
+    }
+
+    toast({
+      title: 'Archive error',
+      description: message,
+      variant: 'destructive'
+    });
+  }
+};
+
+// batch archive handler
+const handleBatchArchive = async () => {
+  if (props.selectedRows.size === 0) {
+    toast({ title: 'No selection', description: 'Please select items to archive' });
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `${API_BASE}/collections/${props.collectionName}/documents/batch-archive`,
+      {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem(AUTH_CONSTANTS.TOKEN_KEY)}`
+        },
+        body: JSON.stringify({ ids: [...props.selectedRows] })
+      }
+    );
+
+    const data = await response.json();
+    
+    if (data.success) {
+      toast({
+        title: 'Archived successfully',
+        description: data.data.message,
+      });
+      emit('document-deleted');
+      emit('reset-selection');
+    } else {
+      toast({
+        title: 'Archive failed',
+        description: data.error || 'Failed to archive documents',
+        variant: 'destructive',
+      });
+    }
+  } catch (error) {
+    toast({
+      title: 'Archive error',
+      description: String(error),
+      variant: 'destructive',
+    });
+  }
 };
 
 // Event handlers for delete operations

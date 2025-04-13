@@ -108,8 +108,6 @@ pub async fn auth_get_me_handler(
     info!("Looking up user with ID: {} in database", &user_id);
     let collection = db.collection::<Document>("users");
     
-    // Clone user_id before passing it to the doc! macro since it takes ownership
-    let user_id_clone = user_id.clone();
     let user_result = collection.find_one(doc! { "_id": user_id }, None).await;
     
     let user = match user_result {
