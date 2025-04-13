@@ -70,6 +70,8 @@ const referenceOptions = ref<Record<string, Array<{ id: string; label: string }>
 const searchQuery = ref<Record<string, string>>({});
 const loadingReferences = ref<Record<string, boolean>>({});
 
+
+
 const resizingState = ref({
   isResizing: false,
   header: '',
@@ -606,15 +608,6 @@ const errorColumn = ref<string | null>(null);
 const pendingDeleteId = ref<string | null>(null);
 const errorTimeout = ref<ReturnType<typeof setTimeout> | null>(null);
 
-const currentView = ref<'archives' | 'recoveries'>('recoveries'); // Default endpoint is recoveries
-const showArchivesButton = ref(true); // Default button shown is "Show Archives"
-
-const toggleView = () => {
-  currentView.value = currentView.value === 'archives' ? 'recoveries' : 'archives';
-  showArchivesButton.value = !showArchivesButton.value;
-  fetchDocuments();
-};
-
 const saveNewDocument = async () => {
   try {
     const response = await fetch(`${API_BASE}/collections/${collectionName.value}/documents`, {
@@ -686,67 +679,74 @@ const saveNewDocument = async () => {
   }
 };
 
+const currentView = ref("empty-archive-history"); // Options: "all", "archives", "recoveries", "empty-archive-history"
+
 const fetchDocuments = async () => {
   isLoading.value = true;
   errorMessage.value = '';
   try {
     let filter = {};
     try {
-      // Use the ref holding the filter input string
       filter = JSON.parse(filterQuery.value);
     } catch (error) {
       errorMessage.value = `Invalid filter JSON: ${error}`;
-      isLoading.value = false; // Stop loading on filter error
       return;
     }
 
-    // Use dynamic endpoint based on current view state
-    let url = `${API_BASE}/collections/${collectionName.value}/${currentView.value}`; // Dynamically sets 'archives' or 'recoveries'
-
+    // Build base URL based on current view
+    let endpoint;
+    switch (currentView.value) {
+      case "archives":
+        endpoint = `${API_BASE}/collections/${collectionName.value}/archives`;
+        break;
+      case "recoveries":
+        endpoint = `${API_BASE}/collections/${collectionName.value}/recoveries`;
+        break;
+      case "empty-archive-history":
+        endpoint = `${API_BASE}/collections/${collectionName.value}/documents/empty-archive-history`;
+        break;
+      case "all":
+      default:
+        endpoint = `${API_BASE}/collections/${collectionName.value}/documents`;
+        break;
+    }
+    
+    // Add filter params if needed
     const params = new URLSearchParams();
     params.append('filter', JSON.stringify(filter));
-    url += `?${params.toString()}`;
-
+    const url = `${endpoint}?${params.toString()}`;
+    
     const response = await fetch(url, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        // Add Authorization header if needed, e.g.:
-        // 'Authorization': `Bearer ${localStorage.getItem(AUTH_CONSTANTS.TOKEN_KEY)}`
-      },
+      headers: { 'Content-Type': 'application/json' },
     });
 
-    if (!response.ok) {
-      // Try to parse error message from response body if possible
-      let errorDetail = `HTTP error! status: ${response.status}`;
-      try {
-        const errorData = await response.json();
-        errorDetail = errorData.error || errorData.message || errorDetail;
-      } catch (parseError) {
-        // Ignore if response body is not JSON or empty
-      }
-      throw new Error(errorDetail);
-    }
-
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const { success, data, error } = await response.json();
 
     if (success) {
       documents.value = data;
-      // Reset pagination if needed, e.g., if using currentPage ref:
-      // currentPage.value = 1;
-      console.log(`Workspaceed documents from ${currentView.value}:`, data);
+      currentPage.value = 1;
+      console.log(`Fetched documents for ${currentView.value} view:`, data);
     } else {
-      errorMessage.value = error || `Failed to fetch documents from ${currentView.value}`;
+      errorMessage.value = error || 'Failed to fetch documents';
       documents.value = [];
-      console.log(`Error from API (${currentView.value}):`, error);
+      console.log("Error from API:", error);
     }
   } catch (error) {
-    errorMessage.value = `Error fetching documents (${currentView.value}): ${error instanceof Error ? error.message : String(error)}`;
+    errorMessage.value = `Error fetching documents: ${error}`;
     documents.value = [];
-    console.error(`Exception during fetch (${currentView.value}):`, error);
+    console.error("Exception:", error);
   } finally {
     isLoading.value = false;
   }
+};
+
+// Handler for menu selection from ExcelCellReference
+const handleViewChange = (view: string) => {
+  console.log(`Changing view to: ${view}`);
+  currentView.value = view;
+  fetchDocuments();
 };
 
 const selectedCell = ref<{ colIndex: number; rowNumber: number } | null>(null);
@@ -945,20 +945,20 @@ const resetSelection = () => {
     <div ref="scrollContainer" class="w-full overflow-auto table-scroll-container">
       
       <!-- Excel-like table with consistent styling -->
-      <ExcelCellReference 
-        :selected-cell="selectedCell" 
-        :selected-rows="selectedRows"
-        :collection-name="collectionName"
-        :documents="documents"
-        :current-page="currentPage"
-        :page-size="pageSize"
-        :show-archives-button="showArchivesButton"
-        @toggle-view="toggleView"
-        @document-deleted="fetchDocuments"
-        @reset-selection="resetSelection"
-        @delete-start="(id) => pendingDeleteId = id"
-        @delete-end="pendingDeleteId = null"
-      />
+        <ExcelCellReference 
+          :selected-cell="selectedCell" 
+          :selected-rows="selectedRows"
+          :collection-name="collectionName"
+          :documents="documents"
+          :current-page="currentPage"
+          :page-size="pageSize"
+          :current-view="currentView"
+          @document-deleted="fetchDocuments"
+          @reset-selection="resetSelection"
+          @delete-start="(id) => pendingDeleteId = id"
+          @delete-end="pendingDeleteId = null"
+          @view-change="handleViewChange"
+        />
       <!-- just use native table, dont ever change to use Table from shadcn -->
       <table class="mt-10 excel-table" :style="{ width: `${totalTableWidth}px` }">
         

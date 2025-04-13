@@ -1,194 +1,3 @@
-<!-- src/components/ExcelCellReference.vue -->
-<template>
-  <div class="fixed h-[42px] z-30 top-14 left-0 w-full flex items-center bg-white border-b border-b-gray-400">
-    <!-- Cell reference box (e.g., A1) -->
-    <div class="flex items-center px-2">
-      <div class="flex items-center cursor-pointer">
-        <span class="text-sm font-bold text-gray-700">{{ cellReference }}</span>
-      </div>
-    </div>
-
-    <!-- fx formula indicator -->
-    <div class="flex items-center px-3 text-gray-500">
-      <span class="text-sm italic">fx</span>
-    </div>
-
-    <!-- Empty space -->
-    <div class="flex-1 h-full"></div>
-
-    <div class="pr-4 flex gap-2">
-      <button
-        v-if="showArchivesButton"
-        @click="emit('toggle-view')"
-        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-blue-100 text-blue-600 border-blue-300 hover:bg-blue-200"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-          <rect x="3" y="3" width="18" height="4" rx="1" ry="1" />
-          <path d="M4 7v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7" />
-          <path d="M9 12h6" />
-          </svg>
-        Show Archives
-      </button>
-
-      <button
-        v-else
-        @click="emit('toggle-view')"
-        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-green-100 text-green-600 border-green-300 hover:bg-green-200"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-           <polyline points="1 4 1 10 7 10" />
-           <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-        </svg>
-        Show Recoveries
-      </button>
-    </div>
-    
-    <!-- single selection buttons -->
-    <div v-if="selectedRows.size === 1" class="mr-4 flex gap-2">
-      <!-- Single Recover Button -->
-      <button 
-        @click="handleRecoverClick"
-        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-green-100 text-green-600 border-green-300 hover:bg-green-200"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-          <path d="M3 11v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-8"/>
-          <polyline points="7 12 12 17 17 12"/>
-          <line x1="12" y1="17" x2="12" y2="7"/>
-        </svg>
-        Recover 1 Item
-      </button>
-      
-      <!-- Archive Button -->
-      <button 
-        @click="handleArchiveClick"
-        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-blue-100 text-blue-500 border-blue-300 hover:bg-blue-200"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-          <path d="M21 8v13H3V8"/>
-          <path d="M1 3h22v5H1z"/>
-          <path d="M10 12h4"/>
-        </svg>
-        Archive 1 Item
-      </button>
-
-      <!-- Existing Delete Button -->
-      <button 
-        @click="handleDeleteClick"
-        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-red-100 text-red-500 border-red-300 hover:bg-red-200"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-          <path d="M3 6h18"></path>
-          <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
-          <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2v2"></path>
-        </svg>
-        Delete 1 Item
-      </button>
-    </div>
-
-    <!-- buttons for multiple selections -->
-    <div v-if="selectedRows.size > 1" class="mr-4 flex gap-2">
-      <!-- Batch Recover -->
-      <button 
-        @click="handleBatchRecover"
-        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-green-100 text-green-600 border-green-300 hover:bg-green-200"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-          <path d="M3 11v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-8"/>
-          <polyline points="7 12 12 17 17 12"/>
-          <line x1="12" y1="17" x2="12" y2="7"/>
-        </svg>
-        Batch Recover {{ selectedRows.size }} Items
-      </button>
-      <!-- Batch Archive -->
-      <button 
-        @click="handleBatchArchive"
-        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-blue-100 text-blue-500 border-blue-300 hover:bg-blue-200"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-          <path d="M21 8v13H3V8"/>
-          <path d="M1 3h22v5H1z"/>
-          <path d="M10 12h4"/>
-        </svg>
-        Batch Archive {{ selectedRows.size }} Items
-      </button>
-
-      <!-- Existing Batch Delete -->
-      <button 
-        @click="openBatchDeleteDialog"
-        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-red-100 text-red-500 border-red-300 hover:bg-red-200"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-          <path d="M3 6h18"></path>
-          <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
-          <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2v2"></path>
-        </svg>
-        Batch Delete {{ selectedRows.size }} Items
-      </button>
-    </div>
-    
-    <!-- Single Delete document dialog -->
-    <DeleteDocumentAction
-      v-if="documentToDelete"
-      :collection-name="collectionName"
-      :document-id="documentToDelete.id"
-      :row-number="documentToDelete.rowNumber"
-      ref="deleteDocumentRef"
-      @deleted="onDocumentDeleted"
-      @delete-start="(id) => $emit('delete-start', id)"
-      @delete-end="$emit('delete-end')"
-    />
-
-    <!-- Batch Delete confirmation dialog -->
-    <Dialog
-      :open="showBatchDeleteDialog"
-      @update:open="(val) => val === false && closeBatchDeleteDialog()"
-    >
-      <DialogContent
-        class="custom-delete-dialog p-0 overflow-hidden border-rose-200"
-        @keydown.enter.prevent="batchConfirmationText === confirmationRequired && !isBatchDeleting && confirmBatchDelete()"
-      >
-        <DialogTitle class="sr-only">Batch Delete Confirmation</DialogTitle>
-        <DialogDescription class="sr-only">
-          Please confirm your intention to delete {{ selectedRows.size }} documents by typing the confirmation text.
-        </DialogDescription>
-        
-        <div class="bg-rose-100 text-rose-700 p-4 border-b border-rose-200 flex items-center">
-          <div class="flex-1">
-            You are about to delete {{ selectedRows.size }} documents
-          </div>
-        </div>
-
-        <div class="p-4 bg-white">
-          <p class="text-sm text-gray-700 mb-3">
-            To confirm, type <span class="font-medium text-rose-600">{{ confirmationRequired }}</span> in the box below
-          </p>
-          <input
-            v-model="batchConfirmationText"
-            placeholder="Type confirmation text"
-            ref="batchInputRef"
-            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-rose-500"
-            aria-label="Confirmation text"
-          />
-          <p class="text-xs text-gray-500 mt-2">
-            Press Enter to confirm when text is correct
-          </p>
-        </div>
-
-        <div class="flex justify-end p-3 pt-0 bg-white">
-          <Button
-            @click="confirmBatchDelete"
-            size="lg"
-            class="w-full bg-rose-600 hover:bg-rose-700 text-white"
-            :disabled="batchConfirmationText !== confirmationRequired || isBatchDeleting"
-          >
-            {{ isBatchDeleting ? 'Deleting...' : `Delete ${selectedRows.size} documents` }}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  </div>
-</template>
-
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import DeleteDocumentAction from './mongodbtable/DeleteDocumentAction.vue';
@@ -203,6 +12,21 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast/use-toast';
 import { AUTH_CONSTANTS } from '@/constants/auth';
 
+import { 
+  ChevronDown, 
+  Circle, 
+  RotateCcw, 
+  Archive, 
+  Globe, 
+  ArrowDownToLine,
+  Trash2 
+} from 'lucide-vue-next';
+
+import DropdownMenu from './ui/dropdown-menu/DropdownMenu.vue';
+import DropdownMenuTrigger from './ui/dropdown-menu/DropdownMenuTrigger.vue';
+import DropdownMenuContent from './ui/dropdown-menu/DropdownMenuContent.vue';
+import DropdownMenuItem from './ui/dropdown-menu/DropdownMenuItem.vue';
+
 const API_BASE = getApiBaseUrl();
 const { toast } = useToast();
 
@@ -213,7 +37,6 @@ const props = defineProps<{
   documents: any[];
   currentPage: number;
   pageSize: number;
-  showArchivesButton: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -222,6 +45,7 @@ const emit = defineEmits<{
   (e: 'delete-end'): void;
   (e: 'reset-selection'): void;
   (e: 'toggle-view'): void;
+  (e: 'view-change', view: string): void;
 }>();
 
 // Reference to the DeleteDocumentAction component
@@ -233,6 +57,64 @@ const isBatchDeleting = ref(false);
 const batchConfirmationText = ref('');
 const confirmationRequired = 'confirm-delete';
 const batchInputRef = ref<HTMLInputElement | null>(null);
+
+// Menu state
+const selected = ref("Default");
+
+// Define the options for the view dropdown
+const options = [
+  { label: "Default" },
+  { label: "Recoveries" },
+  { label: "Archives" },
+  { label: "All" }
+];
+
+// Helper function to get the appropriate icon component based on menu item
+const getIconComponent = (label: string) => {
+  switch(label) {
+    case "Default": return Circle;
+    case "Recoveries": return RotateCcw;
+    case "Archives": return Archive;
+    case "All": return Globe;
+    default: return Circle;
+  }
+};
+
+// Computed property to get the icon component for the currently selected label
+const selectedIconComponent = computed(() => {
+  return getIconComponent(selected.value);
+});
+
+// Handle selecting an option from the menubar
+const select = (label: string) => {
+  console.log('Dropdown option clicked:', label);
+  selected.value = label;
+  
+  // Map dropdown selection to appropriate view type value
+  let viewType = '';
+  if (label === "Archives") {
+    viewType = "archives";
+  } else if (label === "Recoveries") {
+    viewType = "recoveries";
+  } else if (label === "Default") {
+    viewType = "empty-archive-history";
+  } else if (label === "All") {
+    viewType = "all";
+  }
+  
+  // Emit the view-change event with the view type and reset the selection in the parent component
+  emit('view-change', viewType);
+  emit('reset-selection');
+};
+
+// Add event listener for batch key handling
+onMounted(() => {
+  document.addEventListener('keydown', handleBatchKeyDown);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleBatchKeyDown);
+});
 
 // Open batch delete dialog
 const openBatchDeleteDialog = () => {
@@ -267,7 +149,10 @@ const confirmBatchDelete = async () => {
       `${API_BASE}/collections/${props.collectionName}/documents/batch-delete`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem(AUTH_CONSTANTS.TOKEN_KEY)}`
+        },
         body: JSON.stringify({ ids: [...props.selectedRows] })
       }
     );
@@ -321,22 +206,9 @@ const handleBatchKeyDown = (event: KeyboardEvent) => {
   }
 };
 
-// Set up and clean up global event listener for Enter key
-onMounted(() => {
-  document.addEventListener('keydown', handleBatchKeyDown);
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', handleBatchKeyDown);
-});
-
 // Store information about document to delete
 const documentToDelete = ref<{ id: string; rowNumber: number } | null>(null);
 const isDeleting = ref(false);
-
-watch(() => props.showArchivesButton, (newVal) => {
-  console.log('Show Archives Button prop:', newVal);
-});
 
 // Debug watcher for props
 watch(() => props.selectedRows, (newVal) => {
@@ -620,6 +492,176 @@ console.log('ExcelCellReference component props:', {
   pageSize: props.pageSize
 });
 </script>
+
+<template>
+  <div class="fixed h-[42px] z-30 top-14 left-0 w-full flex items-center bg-white border-b border-b-gray-400">
+    <!-- Cell reference box (e.g., A1) -->
+    <div class="flex items-center px-2">
+      <div class="flex items-center cursor-pointer">
+        <span class="text-sm font-bold text-gray-700">{{ cellReference }}</span>
+      </div>
+    </div>
+
+    <!-- fx formula indicator -->
+    <div class="flex items-center px-3 text-gray-500">
+      <span class="text-sm italic">fx</span>
+    </div>
+
+    <!-- Empty space -->
+    <div class="flex-1 h-full"></div>
+    
+    <!-- single selection buttons -->
+    <div v-if="selectedRows.size === 1" class="-mr-1 flex gap-2">
+      <!-- Single Recover Button -->
+      <button 
+        v-if="selected === 'Archives' || selected === 'All'"
+        @click="handleRecoverClick"
+        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-green-100 text-green-600 border-green-300 hover:bg-green-200"
+      >
+        <ArrowDownToLine class="h-3 w-3 mr-1" />
+        Recover 1 Item
+      </button>
+      
+      <!-- Single Archive Button -->
+      <button 
+        v-if="selected === 'Default' || selected === 'Recoveries' || selected === 'All'"
+        @click="handleArchiveClick"
+        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-blue-100 text-blue-500 border-blue-300 hover:bg-blue-200"
+      >
+        <Archive class="h-3 w-3 mr-1" />
+        Archive 1 Item
+      </button>
+
+      <!-- Single Delete Button -->
+      <button 
+        v-if="selected === 'Archives' || selected === 'All'"
+        @click="handleDeleteClick"
+        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-red-100 text-red-500 border-red-300 hover:bg-red-200"
+      >
+        <Trash2 class="h-3 w-3 mr-1" />
+        Delete 1 Item
+      </button>
+    </div>
+
+    <!-- buttons for multiple selections -->
+    <div v-if="selectedRows.size > 1" class="-mr-1 flex gap-2">
+      <!-- Batch Recovery Button -->
+      <button 
+        v-if="selected === 'Archives' || selected === 'All'"
+        @click="handleBatchRecover"
+        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-green-100 text-green-600 border-green-300 hover:bg-green-200"
+      >
+        <ArrowDownToLine class="h-3 w-3 mr-1" />
+        Batch Recover {{ selectedRows.size }} Items
+      </button>
+      <!-- Batch Archive Button -->
+      <button 
+        v-if="selected === 'Default' || selected === 'Recoveries' || selected === 'All'"
+        @click="handleBatchArchive"
+        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-blue-100 text-blue-500 border-blue-300 hover:bg-blue-200"
+      >
+        <Archive class="h-3 w-3 mr-1" />
+        Batch Archive {{ selectedRows.size }} Items
+      </button>
+
+      <!-- Batch Delete Button -->
+      <button 
+        v-if="selected === 'Archives' || selected === 'All'"
+        @click="openBatchDeleteDialog"
+        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-red-100 text-red-500 border-red-300 hover:bg-red-200"
+      >
+        <Trash2 class="h-3 w-3 mr-1" />
+        Batch Delete {{ selectedRows.size }} Items
+      </button>
+    </div>
+
+
+    <!-- Empty space -->
+    <div class="h-full border-r border-gray-600 mx-4"></div>
+
+    <!-- options for view as dropdown with shadcn menubar -->
+    <div class="pr-4">
+      <DropdownMenu>
+        <DropdownMenuTrigger class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200 gap-1">
+          <span class="inline-flex items-center"><component :is="selectedIconComponent" class="h-3 w-3 mr-1" />{{ selected }}</span>
+          <ChevronDown class="h-3 w-3" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuItem
+            v-for="item in options" 
+            :key="item.label" 
+            @click="select(item.label)"
+            class="flex items-center gap-2 text-sm"
+          >
+            <component :is="getIconComponent(item.label)" class="h-3 w-3" />
+            {{ item.label }}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+    
+    <!-- Single Delete document dialog -->
+    <DeleteDocumentAction
+      v-if="documentToDelete"
+      :collection-name="collectionName"
+      :document-id="documentToDelete.id"
+      :row-number="documentToDelete.rowNumber"
+      ref="deleteDocumentRef"
+      @deleted="onDocumentDeleted"
+      @delete-start="(id) => $emit('delete-start', id)"
+      @delete-end="$emit('delete-end')"
+    />
+
+    <!-- Batch Delete confirmation dialog -->
+    <Dialog
+      :open="showBatchDeleteDialog"
+      @update:open="(val) => val === false && closeBatchDeleteDialog()"
+    >
+      <DialogContent
+        class="custom-delete-dialog p-0 overflow-hidden border-rose-200"
+        @keydown.enter.prevent="batchConfirmationText === confirmationRequired && !isBatchDeleting && confirmBatchDelete()"
+      >
+        <DialogTitle class="sr-only">Batch Delete Confirmation</DialogTitle>
+        <DialogDescription class="sr-only">
+          Please confirm your intention to delete {{ selectedRows.size }} documents by typing the confirmation text.
+        </DialogDescription>
+        
+        <div class="bg-rose-100 text-rose-700 p-4 border-b border-rose-200 flex items-center">
+          <div class="flex-1">
+            You are about to delete {{ selectedRows.size }} documents
+          </div>
+        </div>
+
+        <div class="p-4 bg-white">
+          <p class="text-sm text-gray-700 mb-3">
+            To confirm, type <span class="font-medium text-rose-600">{{ confirmationRequired }}</span> in the box below
+          </p>
+          <input
+            v-model="batchConfirmationText"
+            placeholder="Type confirmation text"
+            ref="batchInputRef"
+            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-rose-500"
+            aria-label="Confirmation text"
+          />
+          <p class="text-xs text-gray-500 mt-2">
+            Press Enter to confirm when text is correct
+          </p>
+        </div>
+
+        <div class="flex justify-end p-3 pt-0 bg-white">
+          <Button
+            @click="confirmBatchDelete"
+            size="lg"
+            class="w-full bg-rose-600 hover:bg-rose-700 text-white"
+            :disabled="batchConfirmationText !== confirmationRequired || isBatchDeleting"
+          >
+            {{ isBatchDeleting ? 'Deleting...' : `Delete ${selectedRows.size} documents` }}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  </div>
+</template>
 
 <style scoped>
 .custom-delete-dialog {

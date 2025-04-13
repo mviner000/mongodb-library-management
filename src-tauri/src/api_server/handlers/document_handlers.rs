@@ -135,8 +135,62 @@ pub async fn find_recovered_documents_handler(
         ),
     };
     
-    // Filter for non-archived documents
-    filter.insert("is_archive", doc! { "$ne": true });
+    // Update filter criteria for recovered documents
+    filter.insert("is_archive", false);
+    filter.insert("archive_history", doc! {
+        "$elemMatch": { 
+            "action": "recover" 
+        }
+    });
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            
+            match collection.find(filter, None).await {
+                Ok(cursor) => {
+                    match process_cursor(cursor).await {
+                        Ok(documents) => {
+                            (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(documents),
+                                error: None,
+                            }))
+                        },
+                        Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e),
+                    }
+                },
+                Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        },
+        Err((status, e)) => error_response::<Vec<Document>>(status, e),
+    }
+}
+
+pub async fn find_empty_archive_history_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    // Extract filter from query parameters
+    let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
+    
+    // Parse the JSON string into a Document
+    let mut filter: Document = match serde_json::from_str(&filter_str) {
+        Ok(f) => f,
+        Err(e) => return error_response::<Vec<Document>>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid filter JSON: {}", e)
+        ),
+    };
+    
+    // Add condition for empty archive history
+    filter.insert("$or", vec![
+        doc! { "archive_history": doc! { "$exists": false } },
+        doc! { "archive_history": doc! { "$size": 0 } }
+    ]);
     
     match get_database(mongodb_state).await {
         Ok(db) => {

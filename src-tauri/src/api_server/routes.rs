@@ -24,6 +24,7 @@ use crate::api_server::{
         },
         document_handlers::{
             find_documents_handler,
+            find_empty_archive_history_handler,
             find_archived_documents_handler,
             find_recovered_documents_handler,
             insert_document_handler,
@@ -75,6 +76,11 @@ pub fn create_api_router() -> (Router<Arc<Mutex<ApiServerState>>>, Vec<String>) 
     
     // Document routes
     add_route!(Method::GET, "/collections/:collection_name/documents", find_documents_handler);
+    add_route!(
+        Method::GET, 
+        "/collections/:collection_name/documents/empty-archive-history", 
+        find_empty_archive_history_handler
+    );
     add_route!(Method::GET, "/collections/:collection_name/archives", find_archived_documents_handler);
     add_route!(Method::GET, "/collections/:collection_name/recoveries", find_recovered_documents_handler);
     add_route!(Method::POST, "/collections/:collection_name/documents", insert_document_handler);
