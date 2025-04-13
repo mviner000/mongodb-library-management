@@ -135,12 +135,13 @@ pub async fn find_recovered_documents_handler(
         ),
     };
     
-    // Update filter criteria for recovered documents
+    // Correctly filter for documents where the latest archive action is "recover"
     filter.insert("is_archive", false);
-    filter.insert("archive_history", doc! {
-        "$elemMatch": { 
-            "action": "recover" 
-        }
+    filter.insert("$expr", doc! {
+        "$eq": [
+            { "$arrayElemAt": ["$archive_history.action", -1] },
+            "recover"
+        ]
     });
     
     match get_database(mongodb_state).await {
