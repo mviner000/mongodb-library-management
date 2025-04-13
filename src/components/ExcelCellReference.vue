@@ -15,6 +15,33 @@
 
     <!-- Empty space -->
     <div class="flex-1 h-full"></div>
+
+    <div class="pr-4 flex gap-2">
+      <button
+        v-if="showArchivesButton"
+        @click="emit('toggle-view')"
+        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-blue-100 text-blue-600 border-blue-300 hover:bg-blue-200"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+          <rect x="3" y="3" width="18" height="4" rx="1" ry="1" />
+          <path d="M4 7v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7" />
+          <path d="M9 12h6" />
+          </svg>
+        Show Archives
+      </button>
+
+      <button
+        v-else
+        @click="emit('toggle-view')"
+        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-green-100 text-green-600 border-green-300 hover:bg-green-200"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
+           <polyline points="1 4 1 10 7 10" />
+           <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+        </svg>
+        Show Recoveries
+      </button>
+    </div>
     
     <!-- single selection buttons -->
     <div v-if="selectedRows.size === 1" class="mr-4 flex gap-2">
@@ -186,6 +213,7 @@ const props = defineProps<{
   documents: any[];
   currentPage: number;
   pageSize: number;
+  showArchivesButton: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -193,6 +221,7 @@ const emit = defineEmits<{
   (e: 'delete-start', id: string): void;
   (e: 'delete-end'): void;
   (e: 'reset-selection'): void;
+  (e: 'toggle-view'): void;
 }>();
 
 // Reference to the DeleteDocumentAction component
@@ -304,6 +333,10 @@ onBeforeUnmount(() => {
 // Store information about document to delete
 const documentToDelete = ref<{ id: string; rowNumber: number } | null>(null);
 const isDeleting = ref(false);
+
+watch(() => props.showArchivesButton, (newVal) => {
+  console.log('Show Archives Button prop:', newVal);
+});
 
 // Debug watcher for props
 watch(() => props.selectedRows, (newVal) => {

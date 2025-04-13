@@ -74,6 +74,94 @@ pub async fn find_documents_handler(
     }
 }
 
+pub async fn find_archived_documents_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
+    
+    let mut filter: Document = match serde_json::from_str(&filter_str) {
+        Ok(f) => f,
+        Err(e) => return error_response::<Vec<Document>>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid filter JSON: {}", e)
+        ),
+    };
+    
+    // Filter for archived documents
+    filter.insert("is_archive", true);
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            
+            match collection.find(filter, None).await {
+                Ok(cursor) => {
+                    match process_cursor(cursor).await {
+                        Ok(documents) => {
+                            (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(documents),
+                                error: None,
+                            }))
+                        },
+                        Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e),
+                    }
+                },
+                Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        },
+        Err((status, e)) => error_response::<Vec<Document>>(status, e),
+    }
+}
+
+pub async fn find_recovered_documents_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
+    
+    let mut filter: Document = match serde_json::from_str(&filter_str) {
+        Ok(f) => f,
+        Err(e) => return error_response::<Vec<Document>>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid filter JSON: {}", e)
+        ),
+    };
+    
+    // Filter for non-archived documents
+    filter.insert("is_archive", doc! { "$ne": true });
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            
+            match collection.find(filter, None).await {
+                Ok(cursor) => {
+                    match process_cursor(cursor).await {
+                        Ok(documents) => {
+                            (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(documents),
+                                error: None,
+                            }))
+                        },
+                        Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e),
+                    }
+                },
+                Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        },
+        Err((status, e)) => error_response::<Vec<Document>>(status, e),
+    }
+}
+
 pub async fn insert_document_handler(
     State(state): State<Arc<Mutex<ApiServerState>>>,
     Path(collection_name): Path<String>,

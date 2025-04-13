@@ -606,6 +606,15 @@ const errorColumn = ref<string | null>(null);
 const pendingDeleteId = ref<string | null>(null);
 const errorTimeout = ref<ReturnType<typeof setTimeout> | null>(null);
 
+const currentView = ref<'archives' | 'recoveries'>('recoveries'); // Default endpoint is recoveries
+const showArchivesButton = ref(true); // Default button shown is "Show Archives"
+
+const toggleView = () => {
+  currentView.value = currentView.value === 'archives' ? 'recoveries' : 'archives';
+  showArchivesButton.value = !showArchivesButton.value;
+  fetchDocuments();
+};
+
 const saveNewDocument = async () => {
   try {
     const response = await fetch(`${API_BASE}/collections/${collectionName.value}/documents`, {
@@ -683,40 +692,58 @@ const fetchDocuments = async () => {
   try {
     let filter = {};
     try {
+      // Use the ref holding the filter input string
       filter = JSON.parse(filterQuery.value);
     } catch (error) {
       errorMessage.value = `Invalid filter JSON: ${error}`;
+      isLoading.value = false; // Stop loading on filter error
       return;
     }
 
-    // Build URL with URLSearchParams for the filter
-    let url = `${API_BASE}/collections/${collectionName.value}/documents`;
-    
+    // Use dynamic endpoint based on current view state
+    let url = `${API_BASE}/collections/${collectionName.value}/${currentView.value}`; // Dynamically sets 'archives' or 'recoveries'
+
     const params = new URLSearchParams();
     params.append('filter', JSON.stringify(filter));
     url += `?${params.toString()}`;
-    
+
     const response = await fetch(url, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        // Add Authorization header if needed, e.g.:
+        // 'Authorization': `Bearer ${localStorage.getItem(AUTH_CONSTANTS.TOKEN_KEY)}`
+      },
     });
 
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    if (!response.ok) {
+      // Try to parse error message from response body if possible
+      let errorDetail = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorDetail = errorData.error || errorData.message || errorDetail;
+      } catch (parseError) {
+        // Ignore if response body is not JSON or empty
+      }
+      throw new Error(errorDetail);
+    }
+
     const { success, data, error } = await response.json();
 
     if (success) {
       documents.value = data;
-      currentPage.value = 1;
-      console.log("Fetched documents:", data);
+      // Reset pagination if needed, e.g., if using currentPage ref:
+      // currentPage.value = 1;
+      console.log(`Workspaceed documents from ${currentView.value}:`, data);
     } else {
-      errorMessage.value = error || 'Failed to fetch documents';
+      errorMessage.value = error || `Failed to fetch documents from ${currentView.value}`;
       documents.value = [];
-      console.log("Error from API:", error);
+      console.log(`Error from API (${currentView.value}):`, error);
     }
   } catch (error) {
-    errorMessage.value = `Error fetching documents: ${error}`;
+    errorMessage.value = `Error fetching documents (${currentView.value}): ${error instanceof Error ? error.message : String(error)}`;
     documents.value = [];
-    console.error("Exception:", error);
+    console.error(`Exception during fetch (${currentView.value}):`, error);
   } finally {
     isLoading.value = false;
   }
@@ -925,6 +952,8 @@ const resetSelection = () => {
         :documents="documents"
         :current-page="currentPage"
         :page-size="pageSize"
+        :show-archives-button="showArchivesButton"
+        @toggle-view="toggleView"
         @document-deleted="fetchDocuments"
         @reset-selection="resetSelection"
         @delete-start="(id) => pendingDeleteId = id"
