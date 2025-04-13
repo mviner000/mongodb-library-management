@@ -1,6 +1,6 @@
 <!-- src/components/TemplateGallery.vue -->
 <script setup lang="ts">
-import { ref, onMounted, inject } from 'vue';
+import { ref, onMounted, inject, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/context-menu';
 import HomeNavbar from './HomeNavbar.vue';
 import { documentService } from '@/services/documentService';
+import { MONGODB_CONSTANTS } from '@/constants/mongodb';
 
 interface Template {
   id: string;
@@ -33,11 +34,34 @@ interface TabManager {
   addNewTab: () => void;
 }
 
+// System collections that should be filtered by default
+const filteredCollectionNames = ref(MONGODB_CONSTANTS.SYSTEM_COLLECTIONS);
+const showFilteredCollections = ref(false);
+
 // Will be populated with MongoDB collections
-const templates = ref<Template[]>([]);
+const allCollections = ref<Template[]>([]);
 const isLoading = ref(true);
 const error = ref('');
 const router = useRouter();
+
+// Blank template definition
+const blankTemplate = ref<Template>({
+  id: 'blank',
+  title: 'Blank spreadsheet',
+  image: '/templates/blank.png'
+});
+
+// Create a computed property for displayed templates
+const displayedTemplates = computed(() => {
+  const nonFiltered = allCollections.value.filter(t => 
+    !filteredCollectionNames.value.includes(t.id)
+  );
+  const filtered = showFilteredCollections.value ? 
+    allCollections.value.filter(t => 
+      filteredCollectionNames.value.includes(t.id)
+    ) : [];
+  return [blankTemplate.value, ...nonFiltered, ...filtered];
+});
 
 // Inject the global event bus or tab management function with proper typing
 const tabManager = inject<TabManager>('tabManager');
@@ -58,29 +82,16 @@ async function fetchCollections() {
     const collections = responseData.data || [];
     
     // Convert collections to template format
-    templates.value = collections.map(collection => ({
+    allCollections.value = collections.map(collection => ({
       id: collection,
       title: collection.charAt(0).toUpperCase() + collection.slice(1),
       image: `/templates/collection.png` // Using a placeholder image
     }));
     
-    // Always add a blank template option
-    templates.value.unshift({
-      id: 'blank',
-      title: 'Blank spreadsheet',
-      image: '/templates/blank.png'
-    });
-    
   } catch (err) {
     console.error('Error fetching collections:', err);
     error.value = `Failed to load collections: ${err}`;
-    
-    // Add blank template even if collections fail to load
-    templates.value = [{
-      id: 'blank',
-      title: 'Blank spreadsheet',
-      image: '/templates/blank.png'
-    }];
+    allCollections.value = [];
   } finally {
     isLoading.value = false;
   }
@@ -147,6 +158,22 @@ onMounted(() => {
         </div>
       </div>
       
+      <!-- System collections toggle -->
+      <div class="mb-4 flex items-center space-x-2">
+        <input
+          type="checkbox"
+          id="showFiltered"
+          v-model="showFilteredCollections"
+          class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+        >
+        <label 
+          for="showFiltered" 
+          class="text-sm text-gray-600"
+        >
+          Show system collections
+        </label>
+      </div>
+      
       <!-- Loading state -->
       <div v-if="isLoading" class="flex justify-center items-center py-12">
         <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
@@ -162,7 +189,7 @@ onMounted(() => {
       
       <!-- Template grid -->
       <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-        <ContextMenu v-for="template in templates" :key="template.id">
+        <ContextMenu v-for="template in displayedTemplates" :key="template.id">
           <ContextMenuTrigger>
             <div 
               class="flex flex-col items-center cursor-pointer" 
