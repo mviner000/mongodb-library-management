@@ -217,6 +217,71 @@ pub async fn find_empty_archive_history_handler(
     }
 }
 
+pub async fn find_empty_or_recovered_documents_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    // Extract filter from query parameters
+    let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
+    
+    // Parse the JSON string into a Document
+    let mut filter: Document = match serde_json::from_str(&filter_str) {
+        Ok(f) => f,
+        Err(e) => return error_response::<Vec<Document>>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid filter JSON: {}", e)
+        ),
+    };
+    
+    // Build the combined $or condition
+    filter.insert("$or", vec![
+        // Condition 1: Empty archive history (either doesn't exist or array is empty)
+        doc! {
+            "$or": [
+                { "archive_history": { "$exists": false } },
+                { "archive_history": { "$size": 0 } }
+            ]
+        },
+        // Condition 2: Latest archive action is 'recover' and array is not empty
+        doc! {
+            "archive_history.0": { "$exists": true },
+            "$expr": {
+                "$eq": [
+                    { "$arrayElemAt": ["$archive_history.action", -1] },
+                    "recover"
+                ]
+            }
+        }
+    ]);
+    
+    // Execute the query with the combined filter
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            
+            match collection.find(filter, None).await {
+                Ok(cursor) => {
+                    match process_cursor(cursor).await {
+                        Ok(documents) => {
+                            (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(documents),
+                                error: None,
+                            }))
+                        },
+                        Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e),
+                    }
+                },
+                Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        },
+        Err((status, e)) => error_response::<Vec<Document>>(status, e),
+    }
+}
+
 pub async fn insert_document_handler(
     State(state): State<Arc<Mutex<ApiServerState>>>,
     Path(collection_name): Path<String>,

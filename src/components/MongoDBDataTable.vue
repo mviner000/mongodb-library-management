@@ -679,7 +679,7 @@ const saveNewDocument = async () => {
   }
 };
 
-const currentView = ref("empty-archive-history"); // Options: "all", "archives", "recoveries", "empty-archive-history"
+const currentView = ref("empty-or-recovered"); // Options: "all", "archives", "recoveries", "empty-or-recovered"
 
 const fetchDocuments = async () => {
   isLoading.value = true;
@@ -702,8 +702,8 @@ const fetchDocuments = async () => {
       case "recoveries":
         endpoint = `${API_BASE}/collections/${collectionName.value}/recoveries`;
         break;
-      case "empty-archive-history":
-        endpoint = `${API_BASE}/collections/${collectionName.value}/documents/empty-archive-history`;
+      case "empty-or-recovered":
+        endpoint = `${API_BASE}/collections/${collectionName.value}/empty-or-recovered`;
         break;
       case "all":
       default:

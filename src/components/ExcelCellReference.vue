@@ -97,7 +97,7 @@ const select = (label: string) => {
   } else if (label === "Recoveries") {
     viewType = "recoveries";
   } else if (label === "Default") {
-    viewType = "empty-archive-history";
+    viewType = "empty-or-recovered";
   } else if (label === "All") {
     viewType = "all";
   }
