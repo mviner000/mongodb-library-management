@@ -1,399 +1,160 @@
 <!-- src/components/MongoDBDataTable.vue -->
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, Ref, inject } from 'vue';
+// --- Script Section (Pinia Integrated) ---
+import { ref, computed, watch, onMounted, Ref, inject, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { invoke } from '@tauri-apps/api/core';
-import { Cross2Icon, ReloadIcon } from '@radix-icons/vue';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from '@/components/ui/table';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Pagination,
-  PaginationList,
-  PaginationListItem,
-  PaginationFirst,
-  PaginationLast,
-  PaginationNext,
-  PaginationPrev,
-} from '@/components/ui/pagination';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { useToast } from '@/components/ui/toast/use-toast';
-import { PlusCircledIcon } from '@radix-icons/vue';
-import MongoDBDataTableNavbar from './MongoDBDataTableNavbar.vue';
-import FooterTabsBar from './FooterTabsBar.vue';
+import { storeToRefs } from 'pinia';
+import { useDataTableStore } from '@/store/dataTableStore'; // Make sure this path is correct
+import { useDebounceFn } from '@vueuse/core';
 
-const { toast } = useToast();
+// Import UI Components as used in your *original* template
+import { Cross2Icon, ReloadIcon, PlusCircledIcon } from '@radix-icons/vue'; // [cite: 1]
+import { Button } from '@/components/ui/button'; // [cite: 1]
+import { Input } from '@/components/ui/input'; // [cite: 41]
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'; // Used implicitly by <Table...> tags in old template
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; // [cite: 39, 82]
+import { Pagination, PaginationList, PaginationListItem, PaginationFirst, PaginationLast, PaginationNext, PaginationPrev } from '@/components/ui/pagination'; // [cite: 79]
+import { ScrollArea } from '@/components/ui/scroll-area'; // [cite: 40]
+// Remove toast import if not used directly in setup, it's in the store
+// import { useToast } from '@/components/ui/toast/use-toast';
+import ExcelCellReference from './ExcelCellReference.vue'; // [cite: 2]
+import TableActions from './mongodbtable/TableActions.vue'; // [cite: 57]
+import StickyTableActions from './mongodbtable/StickyTableActions.vue'; // [cite: 59]
+import MongoDBDataTableNavbar from './MongoDBDataTableNavbar.vue'; // [cite: 1]
+// Remove FooterTabsBar import if not used in old template
+// import FooterTabsBar from './FooterTabsBar.vue';
+
+
+// Store setup
+const dataTableStore = useDataTableStore();
+// Destructure state and getters into reactive refs
+const {
+  collectionName,
+  documents,
+  collectionSchema,
+  isLoading,
+  errorMessage,
+  pageSize,
+  currentPage,
+  newDocument,
+  isAdding,
+  editingCell,
+  editValue,
+  isSaving,
+  selectedRows,
+  currentView,
+  pendingDeleteId,
+  referenceOptions,
+  loadingReferences,
+  errorColumn,
+  addingRowError,
+  totalPages,
+  paginatedDocuments,
+  tableHeaders,
+  columnWidths,
+  allSelected,
+} = storeToRefs(dataTableStore);
+
+// Destructure actions (they are just functions)
+const {
+  fetchCollections,
+  setCollection,
+  fetchDocuments,
+  fetchReferenceOptions,
+  getReferenceLabel,
+  startAdding,
+  cancelAdding,
+  saveNewDocument,
+  startEditingCell,
+  cancelEdit,
+  saveEdit,
+  toggleRow,
+  resetSelection,
+  changeView,
+  setPage, // Renamed from onPageChange
+  setPageSize, // Added action
+  updateColumnWidth,
+  resetColumnWidth,
+  saveColumnWidthsToBackend,
+  clearError, // Renamed from closeError
+  getSchemaInfo,
+  isReferenceField,
+  getReferencedCollection,
+  // fetchSchema, // Optional direct access
+} = dataTableStore;
+
+// Local component state
 const route = useRoute();
 const router = useRouter();
+const isSplit = inject<Ref<boolean>>('isSplit')!;
+const scrollContainer = ref<HTMLElement | null>(null); // [cite: 2]
+// const filterQuery = ref('{}'); // Kept local filter state
+const searchQuery = ref<Record<string, string>>({}); // [cite: 41]
+const resizingState = ref({ isResizing: false, header: '', startX: 0, startWidth: 0, currentWidth: 0 }); // [cite: 20]
+const alphaResizingState = ref({ isResizing: false, columnIndex: -1, startX: 0, startWidth: 0, currentWidth: 0 }); // [cite: 9]
+const selectedCell = ref<{ colIndex: number; rowNumber: number } | null>(null); // [cite: 2]
+const timeoutId = ref<number | null>(null); // For error message timeout [cite: 1] - Keep or remove based on preference
 
-// Accept both direct prop and route param
+// Props
 const props = defineProps<{
   selectedCollection?: string;
-  name?: string; // From route params
+  name?: string;
 }>();
 
-// Use route param or direct prop, with fallback to 'users'
-const collectionName = ref(props.name || props.selectedCollection || 'users');
-const documents = ref<any[]>([]);
-const isLoading = ref(false);
-const errorMessage = ref('');
-const pageSize = ref(10);
-const currentPage = ref(1);
-const filterQuery = ref('{}');
-const collectionSchema = ref<any>({});
-const newDocument = ref<Record<string, any>>({});
-const isAdding = ref(false);
-const timeoutId = ref<number | null>(null);
-  const addingRowError = ref(false);
-
-import { getApiBaseUrl } from '@/utils/api';
-import { useDebounceFn } from '@vueuse/core';
-import ExcelCellReference from './ExcelCellReference.vue';
-import TableActions from './mongodbtable/TableActions.vue';
-import StickyTableActions from './mongodbtable/StickyTableActions.vue';
-const API_BASE = getApiBaseUrl();
-
-// Reference handling
-const referenceOptions = ref<Record<string, Array<{ id: string; label: string }>>>({});
-const searchQuery = ref<Record<string, string>>({});
-const loadingReferences = ref<Record<string, boolean>>({});
-
-
-
-const resizingState = ref({
-  isResizing: false,
-  header: '',
-  startX: 0,
-  startWidth: 0,
-  currentWidth: 0 // Added for visual feedback during resize
-});
-
-// Add column letter headers (Excel-like)
+// --- Computed properties specific to component ---
 const getColumnLabel = (index: number): string => {
-  // Convert 0-based index to Excel-like column label (A, B, C, ..., Z, AA, AB, ...)
   let label = '';
   let i = index;
-  
   do {
-    // Get remainder when divided by 26 (number of letters in alphabet)
     const remainder = i % 26;
-    // Convert to corresponding letter (0->A, 1->B, etc.)
     label = String.fromCharCode(65 + remainder) + label;
-    // Integer division by 26, minus 1 to account for the previous calculation
     i = Math.floor(i / 26) - 1;
   } while (i >= 0);
-  
   return label;
-};
+}; // [cite: 9]
 
-// Column letter headers for Excel-like feel
 const columnLetters = computed(() => {
   return tableHeaders.value.map((_, index) => getColumnLabel(index));
-});
+}); // [cite: 9]
 
-// State for alphabetical header resizing
-const alphaResizingState = ref({
-  isResizing: false,
-  columnIndex: -1,
-  startX: 0,
-  startWidth: 0,
-  currentWidth: 0
-});
+const numberColumnWidth = computed(() => {
+   const maxDigits = documents.value.length > 0 ? String(documents.value.length).length : 1;
+  return `${Math.max(3, maxDigits + 1)}ch`;
+}); // [cite: 18] adjusted logic slightly
 
-// Start resize for alphabetical header
-const startAlphaResize = (columnIndex: number, event: MouseEvent) => {
-  const header = tableHeaders.value[columnIndex];
-  console.log(`Starting alpha resize for column ${columnIndex}: ${header}`);
-  
-  // Get current width from columnWidths or default
-  const currentWidth = columnWidths.value[header] || 200;
-  
-  alphaResizingState.value = {
-    isResizing: true,
-    columnIndex,
-    startX: event.clientX,
-    startWidth: currentWidth,
-    currentWidth: currentWidth
-  };
-  
-  // Add global event listeners
-  document.addEventListener('mousemove', handleAlphaMouseMove);
-  document.addEventListener('mouseup', stopAlphaResize);
-  
-  // Prevent text selection during resize
-  event.preventDefault();
-};
+const totalTableWidth = computed(() => {
+  const dataColumnsWidth = tableHeaders.value
+      .reduce((acc, header) => acc + (columnWidths.value[header] || 200), 0);
+  const selectColWidth = 40; // [cite: 5]
+  const rowNumColWidth = 30; // As per original template [cite: 7] - Adjust if needed
+  const actionsColWidth = 60; // As per original styles [cite: 125]
 
-const handleAlphaMouseMove = (event: MouseEvent) => {
-  if (!alphaResizingState.value.isResizing) return;
-  
-  const delta = event.clientX - alphaResizingState.value.startX;
-  const newWidth = Math.max(50, alphaResizingState.value.startWidth + delta);
-  
-  // Update the current width for visual feedback
-  alphaResizingState.value.currentWidth = newWidth;
-  
-  const header = tableHeaders.value[alphaResizingState.value.columnIndex];
-  
-  // Update local schema
-  const updatedWidths = {
-    ...columnWidths.value,
-    [header]: newWidth
-  };
-  
-  // Update the UI schema with new widths
-  collectionSchema.value = {
-    ...collectionSchema.value,
-    ui: {
-      ...collectionSchema.value.ui || {},
-      columnWidths: updatedWidths
-    }
-  };
-  
-  // console.log(`Alpha resizing column '${header}' to ${newWidth}px`);
-};
+  return selectColWidth + rowNumColWidth + dataColumnsWidth + actionsColWidth + 1;
+}); // Adjusted calculation based on old template fixed widths
 
-const stopAlphaResize = async () => {
-  if (!alphaResizingState.value.isResizing) return;
-  
-  const header = tableHeaders.value[alphaResizingState.value.columnIndex];
-  console.log(`Finish alpha resize: Column '${header}' set to ${alphaResizingState.value.currentWidth}px`);
-  
-  // Save final width to database
-  alphaResizingState.value.isResizing = false;
-  document.removeEventListener('mousemove', handleAlphaMouseMove);
-  document.removeEventListener('mouseup', stopAlphaResize);
-  
-  // Save to backend
-  await saveColumnWidths();
-};
+// --- Utility Functions ---
+const isFieldRequired = (field: string): boolean => {
+  return collectionSchema.value.required?.includes(field) || false;
+}; // [cite: 22]
 
-// Reset width for alphabetical header
-const resetAlphaColumnWidth = async (columnIndex: number) => {
-  const header = tableHeaders.value[columnIndex];
-  console.log(`Resetting alpha column width for: ${header}`);
-  
-  const newWidths = { ...columnWidths.value };
-  delete newWidths[header];
-  
-  collectionSchema.value = {
-    ...collectionSchema.value,
-    ui: {
-      ...collectionSchema.value.ui || {},
-      columnWidths: newWidths
-    }
-  };
-  
-  await saveColumnWidths();
-};
+const formatSchemaValue = (value: any, bsonType?: string | string[]) => {
+  if (value === undefined || value === null) return '';
+  const type = bsonType ? (Array.isArray(bsonType) ? bsonType[0] : bsonType) : typeof value;
 
-// Add resize handlers
-const startResize = (header: string, event: MouseEvent) => {
-  console.log(`Starting resize for column: ${header}`);
-  
-  // Get current width from columnWidths or default
-  const currentWidth = columnWidths.value[header] || 200;
-  
-  resizingState.value = {
-    isResizing: true,
-    header,
-    startX: event.clientX,
-    startWidth: currentWidth,
-    currentWidth: currentWidth
-  };
-  
-  // Add global event listeners
-  document.addEventListener('mousemove', handleMouseMove);
-  document.addEventListener('mouseup', stopResize);
-  
-  // Prevent text selection during resize
-  event.preventDefault();
-};
-
-const handleMouseMove = (event: MouseEvent) => {
-  if (!resizingState.value.isResizing) return;
-  
-  const delta = event.clientX - resizingState.value.startX;
-  const newWidth = Math.max(50, resizingState.value.startWidth + delta);
-  
-  // Update the current width for visual feedback
-  resizingState.value.currentWidth = newWidth;
-  
-  // Update local schema
-  const updatedWidths = {
-    ...columnWidths.value,
-    [resizingState.value.header]: newWidth
-  };
-  
-  // Update the UI schema with new widths
-  collectionSchema.value = {
-    ...collectionSchema.value,
-    ui: {
-      ...collectionSchema.value.ui || {},
-      columnWidths: updatedWidths
-    }
-  };
-  
-  console.log(`Resizing column '${resizingState.value.header}' to ${newWidth}px`);
-};
-
-const stopResize = async () => {
-  if (!resizingState.value.isResizing) return;
-  
-  console.log(`Finish resize: Column '${resizingState.value.header}' set to ${resizingState.value.currentWidth}px`);
-  
-  // Save final width to database
-  resizingState.value.isResizing = false;
-  document.removeEventListener('mousemove', handleMouseMove);
-  document.removeEventListener('mouseup', stopResize);
-  
-  // Save to backend
-  await saveColumnWidths();
-};
-
-// Debounced save function
-const saveColumnWidths = useDebounceFn(async () => {
-  try {
-    console.log(`Saving column widths to backend for ${collectionName.value}`);
-    console.log('Widths to save:', collectionSchema.value.ui?.columnWidths);
-    
-    const response = await fetch(`${API_BASE}/collections/${collectionName.value}/ui-metadata`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        columnWidths: collectionSchema.value.ui?.columnWidths
-      })
-    });
-    
-    const result = await response.json();
-    console.log('Column width save result:', result);
-    
-    if (result.success) {
-      console.log('Column widths saved successfully');
-    } else {
-      console.error('Failed to save column widths:', result.error);
-      toast({ 
-        title: 'Failed to save column widths',
-        description: result.error || 'Unknown error',
-        variant: 'destructive' 
-      });
-    }
-  } catch (error) {
-    console.error('Error saving column widths:', error);
-    toast({ 
-      title: 'Failed to save column widths', 
-      description: String(error),
-      variant: 'destructive' 
-    });
+  if (type === 'date' && value instanceof Date) { // Check if it's already a Date object
+    return value.toLocaleString();
+  } else if (type === 'date') { // Try parsing if it's not a Date object
+     try {
+         return new Date(value).toLocaleString();
+     } catch {
+         return String(value); // Fallback
+     }
   }
-}, 500);
-
-const resetColumnWidth = async (header: string) => {
-  console.log(`Resetting column width for: ${header}`);
-  
-  const newWidths = { ...columnWidths.value };
-  delete newWidths[header];
-  
-  collectionSchema.value = {
-    ...collectionSchema.value,
-    ui: {
-      ...collectionSchema.value.ui || {},
-      columnWidths: newWidths
-    }
-  };
-  
-  await saveColumnWidths();
-};
-
-const isReferenceField = (field: string) => {
-  return getSchemaInfo(field).description?.includes('REF:');
-};
-
-const getReferencedCollection = (field: string) => {
-  const desc = getSchemaInfo(field).description || '';
-  const match = desc.match(/REF:(\w+)/);
-  return match ? match[1] : null;
-};
-
-const columnWidths = computed(() => {
-  return collectionSchema.value?.ui?.columnWidths || {};
-});
-
-async function fetchReferenceOptions(collectionName: string) {
-  loadingReferences.value[collectionName] = true;
-  try {
-    // Fetch the referenced collection's schema
-    const schemaResponse = await fetch(`${API_BASE}/collections/${collectionName}/schema`);
-    const { success: schemaSuccess, data: schemaData, error: schemaError } = await schemaResponse.json();
-    
-    if (!schemaSuccess) throw new Error(schemaError || 'Failed to fetch schema');
-    
-    // Determine label field from schema
-    let labelField = '_id';
-    const properties = schemaData.properties || {};
-    
-    // Find unique string fields (e.g., username, email, label)
-    const uniqueStringFields = Object.keys(properties).filter(field => {
-      const prop = properties[field];
-      return prop.bsonType === 'string' && prop.unique === true;
-    });
-    
-    // Fallback to common label fields if no unique fields
-    if (uniqueStringFields.length > 0) {
-      labelField = uniqueStringFields[0];
-    } else {
-      const candidates = ['label', 'name', 'title', 'username'];
-      labelField = candidates.find(f => properties[f]?.bsonType === 'string') || '_id';
-    }
-    
-    // Fetch documents from the referenced collection
-    const docsResponse = await fetch(`${API_BASE}/collections/${collectionName}/documents`);
-    const { success, data, error } = await docsResponse.json();
-    
-    if (success) {
-      const options = data.map((doc: any) => ({
-        id: doc._id.$oid,
-        label: doc[labelField] || doc._id.$oid, // Use determined label field
-      }));
-      referenceOptions.value[collectionName] = options;
-      
-      if (options.length === 0) {
-        toast({
-          title: 'No options found',
-          description: `No documents found in ${collectionName}. Please add some first.`,
-          variant: 'destructive',
-        });
-      }
-    } else {
-      toast({
-        title: 'Error fetching options',
-        description: error || 'Failed to fetch reference data',
-        variant: 'destructive',
-      });
-    }
-  } catch (error) {
-    toast({
-      title: 'Error',
-      description: `Failed to fetch ${collectionName}: ${error}`,
-      variant: 'destructive',
-    });
-  } finally {
-    loadingReferences.value[collectionName] = false;
+  if (typeof value === 'object') {
+    return JSON.stringify(value, null, 2); // Keep original formatting [cite: 57]
   }
-}
+  return String(value);
+}; // [cite: 56, 57]
 
 const filteredOptions = (field: string) => {
   const refCollection = getReferencedCollection(field);
@@ -401,1452 +162,1135 @@ const filteredOptions = (field: string) => {
   const options = referenceOptions.value[refCollection] || [];
   const query = (searchQuery.value[field] || '').toLowerCase();
   return options.filter(opt => opt.label.toLowerCase().includes(query));
-};
+}; // [cite: 42]
 
-// Watch for errorMessage changes
+
+// --- Watchers ---
+
+// Watch route parameter 'name'
+watch(() => route.params.name, (newName) => {
+  const nameStr = Array.isArray(newName) ? newName[0] : newName;
+  if (nameStr && nameStr !== collectionName.value) {
+    setCollection(nameStr);
+  }
+}, { immediate: true });
+
+// Watch the prop 'selectedCollection'
+watch(() => props.selectedCollection, (newVal) => {
+  if (newVal && newVal !== collectionName.value) {
+    setCollection(newVal);
+    if (route.params.name !== newVal) {
+       router.push(`/collection/${newVal}`);
+    }
+  }
+});
+
+// Watch the store's collectionName to sync the route if needed
+watch(collectionName, (newName, oldName) => {
+    if (newName && newName !== oldName && route.params.name !== newName) {
+        router.push(`/collection/${newName}`);
+    }
+});
+
+// Watch for error message to auto-clear (optional, kept from original logic)
 watch(errorMessage, (newVal) => {
   if (newVal) {
-    // Clear any existing timeout
     if (timeoutId.value) {
       clearTimeout(timeoutId.value);
     }
-    // Set new timeout
     timeoutId.value = setTimeout(() => {
-      errorMessage.value = '';
+      clearError(); // Use store action
       timeoutId.value = null;
-    }, 2500) as unknown as number;
+    }, 2500) as unknown as number; // [cite: 1] matching timeout
   }
 });
 
-// Manual close handler
-const closeError = () => {
-  if (timeoutId.value) {
-    clearTimeout(timeoutId.value);
-    timeoutId.value = null;
-  }
-  errorMessage.value = '';
-};
-
-// Watch for collection name changes with immediate execution
-watch(collectionName, async (newVal) => {
-  try {
-    // Update route if it doesn't match the current collection
-    if (route.params.name !== newVal) {
-      router.push(`/collection/${newVal}`);
-    }
-    
-    const response = await fetch(`${API_BASE}/collections/${newVal}/schema`);
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    const { success, data, error } = await response.json();
-    
-    if (success) {
-      console.log(`Loaded schema for ${newVal}:`, data);
-      console.log(`Column widths:`, data.ui?.columnWidths);
-      collectionSchema.value = data;
-      newDocument.value = initializeNewDocument();
-      await fetchDocuments();
-      
-      // Fetch reference data for this collection's schema
-      if (data.properties) {
-        Object.keys(data.properties).forEach((field) => {
-          const refCollection = getReferencedCollection(field);
-          if (refCollection && !referenceOptions.value[refCollection]) {
-            fetchReferenceOptions(refCollection);
-          }
-        });
-      }
-    } else {
-      errorMessage.value = error || 'Schema fetch failed';
-    }
-  } catch (error) {
-    errorMessage.value = `Schema error: ${error}`;
-  }
-}, { immediate: true });
-
-// Watch for route changes to update collection name
-watch(() => props.name, (newVal) => {
-  if (newVal && newVal !== collectionName.value) {
-    collectionName.value = newVal;
-  }
-}, { immediate: true });
-
-// Watch for prop changes from parent
-watch(() => props.selectedCollection, (newVal) => {
-  if (newVal && newVal !== collectionName.value) {
-    collectionName.value = newVal;
-  }
-});
-
-// Watch for adding state
+// Watch isAdding to prefetch reference options (kept from original logic)
 watch(isAdding, async (newVal) => {
   if (newVal) {
-    tableHeaders.value.forEach((field) => {
+    tableHeaders.value.forEach((field) => { // Use tableHeaders getter
       const refCollection = getReferencedCollection(field);
       if (refCollection && !referenceOptions.value[refCollection]) {
-        fetchReferenceOptions(refCollection);
+        fetchReferenceOptions(refCollection); // Use store action
       }
     });
   }
-});
+}); // [cite: 67] reference fetching logic
 
-// Inline editing states
-const editingCell = ref<{rowIndex: number; header: string} | null>(null);
-const editValue = ref('');
-const isSaving = ref(false);
 
-// For pagination
-const totalPages = computed(() => Math.ceil(documents.value.length / pageSize.value));
-const paginatedDocuments = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value;
-  const end = start + pageSize.value;
-  return documents.value.slice(start, end);
-});
+// --- Lifecycle Hooks ---
+onMounted(async () => {
+  console.log("MongoDBDataTable mounted (Pinia + Old Style).");
+  await fetchCollections();
+  const routeName = Array.isArray(route.params.name) ? route.params.name[0] : route.params.name;
+  const initialCollection = routeName || props.selectedCollection;
 
-// Get all unique keys from all documents for table headers
-const tableHeaders = computed(() => {
-  if (!collectionSchema.value.properties) return [];
-  const props = collectionSchema.value.properties;
-  return Object.keys(props).sort((a, b) => {
-    // Sort required fields first
-    const required = collectionSchema.value.required || [];
-    if (required.includes(a) && !required.includes(b)) return -1;
-    if (!required.includes(a) && required.includes(b)) return 1;
-    return a.localeCompare(b);
-  });
-});
-
-// Get schema information for a specific field
-const getSchemaInfo = (field: string) => {
-  if (!collectionSchema.value.properties || !collectionSchema.value.properties[field]) return {};
-  return collectionSchema.value.properties[field];
-};
-
-// function to resolve reference labels
-const getReferenceLabel = (field: string, id: string) => {
-  const refCollection = getReferencedCollection(field);
-  if (!refCollection) return id;
-  const options = referenceOptions.value[refCollection] || [];
-  const option = options.find(opt => opt.id === id);
-  return option ? option.label : id;
-};
-
-// Check if a field is required
-const isFieldRequired = (field: string) => {
-  return collectionSchema.value.required?.includes(field) || false;
-};
-
-// Move formatSchemaValue into the setup scope
-const formatSchemaValue = (value: any, bsonType: string | string[]) => {
-  if (value === undefined || value === null) return '';
-  const type = Array.isArray(bsonType) ? bsonType[0] : bsonType;
-  
-  if (type === 'date' && value instanceof Date) {
-    return value.toLocaleString();
-  }
-  if (typeof value === 'object') {
-    return JSON.stringify(value, null, 2);
-  }
-  return String(value);
-};
-
-watch(collectionName, async (newVal) => {
-  try {
-    console.log(`Fetching schema for collection: ${newVal}`);
-    collectionSchema.value = await invoke('get_collection_schema', { 
-      collectionName: newVal 
-    });
-    console.log('Schema fetch successful:', collectionSchema.value);
-    newDocument.value = initializeNewDocument();
-  } catch (error) {
-    console.error('Schema fetch error:', error);
-    errorMessage.value = `Schema error: ${error}`;
-  }
-});
-
-const initializeNewDocument = () => {
-  const doc: Record<string, any> = {};
-  const required = collectionSchema.value.required || [];
-  const properties = collectionSchema.value.properties || {};
-  
-  required.forEach((field: string) => {
-    if (['created_at', 'updated_at'].includes(field)) return;
-    const prop = properties[field];
-    // Handle boolean initialization
-    if (prop.bsonType === 'bool') {
-      doc[field] = false;
-    } else {
-      doc[field] = getDefaultValue(prop.bsonType);
-    }
-  });
-  
-  return doc;
-};
-
-const getDefaultValue = (bsonType: string | string[]) => {
-  const type = Array.isArray(bsonType) ? bsonType[0] : bsonType;
-  switch (type) {
-    case 'string': return '';
-    case 'int': case 'double': return 0;
-    case 'bool': return false;
-    case 'date': return new Date();
-    case 'object': return {};
-    case 'array': return [];
-    default: return null;
-  }
-};
-
-const startAdding = () => {
-  isAdding.value = true;
-  newDocument.value = initializeNewDocument();
-};
-
-const cancelAdding = () => {
-  isAdding.value = false;
-  newDocument.value = {};
-};
-
-const errorColumn = ref<string | null>(null);
-const pendingDeleteId = ref<string | null>(null);
-const errorTimeout = ref<ReturnType<typeof setTimeout> | null>(null);
-
-const saveNewDocument = async () => {
-  try {
-    const response = await fetch(`${API_BASE}/collections/${collectionName.value}/documents`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newDocument.value)
-    });
-
-    const { success, error } = await response.json();
-    
-    if (success) {
-      isAdding.value = false;
-      await fetchDocuments();
-    } else {
-      // Handle duplicate key errors with a user-friendly message
-      if (error && error.includes('E11000')) {
-        // Try different patterns to extract field name and value
-        let fieldName = "";
-        let fieldValue = "";
-        
-        // Pattern 1: Standard MongoDB error format
-        const keyValueMatch = error.match(/dup key: { (\w+): "(.+?)" }/);
-        if (keyValueMatch && keyValueMatch[1] && keyValueMatch[2]) {
-          fieldName = keyValueMatch[1];
-          fieldValue = keyValueMatch[2];
-        } 
-        // Pattern 2: Look for the format in the logs portion
-        else {
-          const logPattern = /{ (\w+): \\"(.+?)\\" }/;
-          const logMatch = error.match(logPattern);
-          if (logMatch && logMatch[1] && logMatch[2]) {
-            fieldName = logMatch[1];
-            fieldValue = logMatch[2];
-          }
-        }
-        
-        if (fieldName && fieldValue) {
-          // Create user-friendly message with extracted information
-          errorMessage.value = `"${fieldValue}" already exists in column "${fieldName}". Please check for duplicates. Choose another value for your ${fieldName}.`;
-          
-          // Highlight the problematic field
-          errorColumn.value = fieldName;
-        } else {
-          // Last resort fallback message
-          errorMessage.value = 'A duplicate value exists. Please check your entries and try again.';
-        }
-        
-        if (errorTimeout.value) clearTimeout(errorTimeout.value);
-        errorTimeout.value = setTimeout(() => {
-          errorColumn.value = null;
-        }, 2500);
-      } else {
-        // For other errors
-        errorMessage.value = error || 'Failed to create record';
-      }
-      
-      addingRowError.value = true;
-      setTimeout(() => {
-        addingRowError.value = false;
-      }, 2500);
-    }
-  } catch (error) {
-    errorMessage.value = `Create failed: ${error}`;
-    console.error('Exception while adding new document:', error);
-    addingRowError.value = true;
-    setTimeout(() => {
-      addingRowError.value = false;
-    }, 2500);
-  }
-};
-
-const currentView = ref("empty-or-recovered"); // Options: "all", "archives", "recoveries", "empty-or-recovered"
-
-const fetchDocuments = async () => {
-  isLoading.value = true;
-  errorMessage.value = '';
-  try {
-    let filter = {};
+  if (initialCollection && typeof initialCollection === 'string' && initialCollection !== collectionName.value) {
+    await setCollection(initialCollection);
+  } else if (collectionName.value && documents.value.length === 0 && !isLoading.value) {
     try {
-      filter = JSON.parse(filterQuery.value);
+        await dataTableStore.fetchSchema();
+        await dataTableStore.fetchDocuments();
     } catch (error) {
-      errorMessage.value = `Invalid filter JSON: ${error}`;
-      return;
+         console.error("Error fetching initial schema/documents in onMounted:", error);
     }
+  }
+});
 
-    // Build base URL based on current view
-    let endpoint;
-    switch (currentView.value) {
-      case "archives":
-        endpoint = `${API_BASE}/collections/${collectionName.value}/archives`;
-        break;
-      case "recoveries":
-        endpoint = `${API_BASE}/collections/${collectionName.value}/recoveries`;
-        break;
-      case "empty-or-recovered":
-        endpoint = `${API_BASE}/collections/${collectionName.value}/empty-or-recovered`;
-        break;
-      case "all":
-      default:
-        endpoint = `${API_BASE}/collections/${collectionName.value}/documents`;
-        break;
+// --- Methods ---
+
+// Error closing (if keeping the manual close button)
+const closeErrorManual = () => {
+    if (timeoutId.value) {
+        clearTimeout(timeoutId.value);
+        timeoutId.value = null;
     }
-    
-    // Add filter params if needed
-    const params = new URLSearchParams();
-    params.append('filter', JSON.stringify(filter));
-    const url = `${endpoint}?${params.toString()}`;
-    
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    });
+    clearError(); // Use store action
+}; // Matches original @click="closeError" [cite: 1]
 
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    const { success, data, error } = await response.json();
+// Debounced function for saving widths
+const debouncedSaveWidths = useDebounceFn(async () => {
+    await saveColumnWidthsToBackend(); // Call store action
+}, 750); // Keep debounce consistent
 
-    if (success) {
-      documents.value = data;
-      currentPage.value = 1;
-      console.log(`Fetched documents for ${currentView.value} view:`, data);
-    } else {
-      errorMessage.value = error || 'Failed to fetch documents';
-      documents.value = [];
-      console.log("Error from API:", error);
-    }
-  } catch (error) {
-    errorMessage.value = `Error fetching documents: ${error}`;
-    documents.value = [];
-    console.error("Exception:", error);
-  } finally {
-    isLoading.value = false;
+// --- Column Resizing Handlers ---
+// These call store actions now but retain the local state for visual feedback during drag
+
+const startAlphaResize = (columnIndex: number, event: MouseEvent) => {
+  const header = tableHeaders.value[columnIndex]; // Use getter
+  if (!header) return;
+  const currentWidth = columnWidths.value[header] || 200; // Use getter
+
+  alphaResizingState.value = {
+    isResizing: true,
+    columnIndex,
+    startX: event.clientX,
+    startWidth: currentWidth,
+    currentWidth: currentWidth
+  };
+  document.addEventListener('mousemove', handleAlphaMouseMove);
+  document.addEventListener('mouseup', stopAlphaResize);
+  event.preventDefault();
+}; // [cite: 14]
+
+const handleAlphaMouseMove = (event: MouseEvent) => {
+  if (!alphaResizingState.value.isResizing) return;
+  const delta = event.clientX - alphaResizingState.value.startX;
+  const newWidth = Math.max(50, alphaResizingState.value.startWidth + delta);
+  alphaResizingState.value.currentWidth = newWidth;
+
+  const header = tableHeaders.value[alphaResizingState.value.columnIndex];
+   if (header && collectionSchema.value.ui) {
+       // Temporarily update local schema for visual feedback
+       collectionSchema.value.ui.columnWidths = {
+           ...collectionSchema.value.ui.columnWidths,
+           [header]: newWidth
+       };
+   }
+};
+
+const stopAlphaResize = async () => {
+  if (!alphaResizingState.value.isResizing) return;
+  const header = tableHeaders.value[alphaResizingState.value.columnIndex];
+  const finalWidth = alphaResizingState.value.currentWidth;
+  alphaResizingState.value.isResizing = false;
+  document.removeEventListener('mousemove', handleAlphaMouseMove);
+  document.removeEventListener('mouseup', stopAlphaResize);
+
+  if (header) {
+    await updateColumnWidth(header, finalWidth); // Update store
+    debouncedSaveWidths(); // Trigger debounced save
   }
 };
 
-// Handler for menu selection from ExcelCellReference
+const resetAlphaColumnWidth = async (columnIndex: number) => {
+  const header = tableHeaders.value[columnIndex];
+  if (header) {
+    await resetColumnWidth(header); // Update store
+    debouncedSaveWidths(); // Trigger save
+  }
+}; // [cite: 14]
+
+const startResize = (header: string, event: MouseEvent) => {
+  const currentWidth = columnWidths.value[header] || 200;
+  resizingState.value = {
+    isResizing: true,
+    header,
+    startX: event.clientX,
+    startWidth: currentWidth,
+    currentWidth: currentWidth
+  };
+  document.addEventListener('mousemove', handleMouseMove);
+  document.addEventListener('mouseup', stopResize);
+  event.preventDefault();
+}; // [cite: 25]
+
+const handleMouseMove = (event: MouseEvent) => {
+  if (!resizingState.value.isResizing) return;
+  const delta = event.clientX - resizingState.value.startX;
+  const newWidth = Math.max(50, resizingState.value.startWidth + delta);
+  resizingState.value.currentWidth = newWidth;
+
+   const header = resizingState.value.header;
+   if (header && collectionSchema.value.ui) {
+       // Temporarily update local schema for visual feedback
+       collectionSchema.value.ui.columnWidths = {
+            ...collectionSchema.value.ui.columnWidths,
+           [header]: newWidth
+       };
+   }
+};
+
+const stopResize = async () => {
+  if (!resizingState.value.isResizing) return;
+  const header = resizingState.value.header;
+  const finalWidth = resizingState.value.currentWidth;
+  resizingState.value.isResizing = false;
+  document.removeEventListener('mousemove', handleMouseMove);
+  document.removeEventListener('mouseup', stopResize);
+
+  if (header) {
+    await updateColumnWidth(header, finalWidth); // Update store
+    debouncedSaveWidths(); // Trigger save
+  }
+};
+
+// const resetColumnWidth = async (header: string) => { // Renamed from original resetDataColumnWidth for clarity
+//   await resetColumnWidth(header); // Call store action (make sure names don't clash)
+//   debouncedSaveWidths();
+// }; // [cite: 25]
+
+
+// --- Cell Click/Edit Handling ---
+
+const handleCellClick = (rowIndex: number, header: string, value: any) => { // Value param from original template [cite: 52]
+    if (isSaving.value || ['_id', 'created_at', 'updated_at'].includes(header)) return;
+
+    // Use the original value passed from the template click event
+    startEditingCell(rowIndex, header, value); // Use store action
+
+    // Update selectedCell for visual feedback (Excel-like)
+    const actualRowNumber = (currentPage.value - 1) * pageSize.value + rowIndex + 1;
+    const colIndex = tableHeaders.value.indexOf(header);
+    selectedCell.value = { colIndex, rowNumber: actualRowNumber }; // [cite: 2]
+
+    // Focus logic can be kept if desired
+    nextTick(() => {
+       // Simplified focus selector - adjust if needed
+       const inputElement = scrollContainer.value?.querySelector<HTMLInputElement | HTMLTextAreaElement>(`tr:nth-child(${rowIndex + 1}) td[class*='excel-cell'] textarea, tr:nth-child(${rowIndex + 1}) td[class*='excel-cell'] input`);
+       inputElement?.focus();
+       if (inputElement && (inputElement.tagName === 'TEXTAREA' || inputElement.type === 'text')) {
+           inputElement.select();
+       }
+    });
+}; // Combines original template call [cite: 52] with store logic
+
+// Handle blur event on editable inputs/textareas - uses store action
+const handleEditBlur = async () => {
+    setTimeout(async () => {
+         const activeElement = document.activeElement;
+         // Basic check if focus is still within the editing area (might need refinement)
+         const isStillEditing = editingCell.value && activeElement &&
+                               (activeElement.closest('.excel-cell-selected') || activeElement.closest('[data-radix-popper-content-wrapper]')); // Consider Radix poppers for Select
+
+         if (editingCell.value && !isStillEditing) {
+            await saveEdit(); // Use store action
+         } else if (!isStillEditing) {
+             cancelEdit(); // Use store action
+         }
+    }, 100);
+}; // Connects to @blur event [cite: 50]
+
+// --- Template specific handlers ---
+// Handle view change from ExcelCellReference component
 const handleViewChange = (view: string) => {
-  console.log(`Changing view to: ${view}`);
-  currentView.value = view;
-  fetchDocuments();
-};
+  changeView(view); // Use store action
+}; // [cite: 4]
 
-const selectedCell = ref<{ colIndex: number; rowNumber: number } | null>(null);
-const handleCellClick = (rowIndex: number, header: string, value: any) => {
-  if (['_id', 'created_at', 'updated_at'].includes(header)) return;
-  editingCell.value = { rowIndex, header };
-  editValue.value = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
-  
-  // Calculate actual row number and column index
-  const actualRowNumber = (currentPage.value - 1) * pageSize.value + rowIndex + 1;
-  const colIndex = tableHeaders.value.indexOf(header);
-  selectedCell.value = { colIndex, rowNumber: actualRowNumber };
-};
-
-const saveEdit = async () => {
-  if (!editingCell.value || isSaving.value) return;
-  isSaving.value = true;
-
-  try {
-    const doc = paginatedDocuments.value[editingCell.value.rowIndex];
-    
-    // Handle reference fields differently
-    let parsedValue: any;
-    if (isReferenceField(editingCell.value.header)) {
-      parsedValue = editValue.value;
-    } else {
-      const fieldInfo = getSchemaInfo(editingCell.value.header);
-      const bsonType = Array.isArray(fieldInfo.bsonType) 
-        ? fieldInfo.bsonType[0] 
-        : fieldInfo.bsonType;
-      
-      // Handle string fields without JSON parsing
-      if (bsonType === 'string') {
-        parsedValue = editValue.value;
-      } else {
-        parsedValue = JSON.parse(editValue.value);
-      }
-    }
-
-    const update = { [editingCell.value.header]: parsedValue };
-
-    const response = await fetch(
-      `${API_BASE}/collections/${collectionName.value}/documents/${doc._id.$oid}`,
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(update)
-      }
-    );
-
-    const { success, data, error } = await response.json();
-    
-    if (success && data.modified_count > 0) {
-      // Refresh the updated document
-      const filter = JSON.stringify({ _id: { $oid: doc._id.$oid } });
-      const response = await fetch(
-        `${API_BASE}/collections/${collectionName.value}/documents?filter=${encodeURIComponent(filter)}`
-      );
-      const { success: fetchSuccess, data: fetchData } = await response.json();
-
-      if (fetchSuccess && fetchData.length > 0) {
-        const index = documents.value.findIndex(d => d._id.$oid === doc._id.$oid);
-        if (index !== -1) {
-          documents.value.splice(index, 1, fetchData[0]);
-          documents.value = [...documents.value];
-        }
-      }
-      editingCell.value = null;
-    } else {
-      errorMessage.value = error || 'Update failed';
-    }
-  } catch (error) {
-    errorMessage.value = `Error updating field: ${error}`;
-  } finally {
-    isSaving.value = false;
-  }
-};
-
-
-const collectionsList = ref<string[]>([]);
-const fetchCollections = async () => {
-  try {
-    const response = await fetch(`${API_BASE}/collections`);
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    const { success, data, error } = await response.json();
-    
-    if (success) {
-      collectionsList.value = data;
-      if (data.length > 0 && !data.includes(collectionName.value)) {
-        // If current collection not in list, select first
-        collectionName.value = data[0];
-      }
-    } else {
-      errorMessage.value = error || 'Failed to fetch collections';
-    }
-  } catch (error) {
-    errorMessage.value = `Error fetching collections: ${error}`;
-  }
-};
-
-onMounted(() => {
-  fetchCollections();
-});
-
-defineExpose({ 
-  fetchDocuments, 
-  fetchCollections,
-  setCollection: (name: string) => {
-    collectionName.value = name;
-  }
-});
-
+// Handler for pagination component update event
 const onPageChange = (page: number) => {
-  currentPage.value = page;
-};
+    setPage(page); // Use store action
+}; // [cite: 79]
 
-const numberColumnWidth = computed(() => {
-  // Calculate based on max digits needed (3 digits for up to 999 rows)
-  return `${Math.max(3, Math.floor(Math.log10(documents.value.length) + 2))}ch`;
+// Handlers for delete start/end from actions components
+const handleDeleteStart = (id: string) => {
+   dataTableStore.pendingDeleteId = id;
+}; // [cite: 3, 58, 60]
+const handleDeleteEnd = () => {
+   dataTableStore.pendingDeleteId = null;
+}; // [cite: 4, 59, 60]
+
+// Expose methods (less common with Pinia but kept if original template needed it)
+defineExpose({
+  fetchDocuments: dataTableStore.fetchDocuments,
+  fetchCollections: dataTableStore.fetchCollections,
+  setCollection: dataTableStore.setCollection
 });
 
-const totalTableWidth = computed(() => {
-  const dataColumnsWidth = Object.values(columnWidths.value)
-    .reduce((acc: number, width: unknown) => acc + Number(width), 0);
-  return dataColumnsWidth + 40 + 30 + 60 + 1; // Added 40px for selector
-});
-
-
-const isSplit = inject<Ref<boolean>>('isSplit')!; // Inject isSplit from App.vue
-
-
-const scrollContainer = ref<HTMLElement | null>(null);
-
-// selected rows state
-const selectedRows = ref(new Set<string>());
-const allSelected = computed({
-  get: () => documents.value.length > 0 && 
-    documents.value.every(doc => selectedRows.value.has(doc._id.$oid)),
-  set: (val: boolean) => {
-    // Replace the Set instead of mutating it
-    selectedRows.value = val 
-      ? new Set(documents.value.map(doc => doc._id.$oid))
-      : new Set();
-  }
-});
-
-const toggleRow = (id: string) => {
-  const newSet = new Set(selectedRows.value);
-  newSet.has(id) ? newSet.delete(id) : newSet.add(id);
-  selectedRows.value = newSet; // Assign new Set to trigger reactivity
-};
-
-// Add toast on selection change
-watch(selectedRows, (newVal) => {
-  // Only show toast if there are selected rows
-  if (newVal.size > 0) {
-    toast({
-      title: 'Selection Updated',
-      description: `You have selected ${newVal.size} rows`,
-      duration: 2000
-    });
-  }
-}, { deep: true });
-
-const resetSelection = () => {
-  console.log('Resetting selected rows');
-  selectedRows.value = new Set(); // Clear the selection
-  selectedCell.value = null; // Clear the selected cell
-};
-// We already have a watch on collectionName that calls fetchDocuments
 </script>
 
 <template>
-  <MongoDBDataTableNavbar 
-    :isSplitActive="isSplit" 
-    class="sticky top-0 z-50" 
-  />
-  <div class="excel-container w-full">
-    
-    <div v-if="errorMessage" class="fixed top-4 left-4 right-4 z-[9999] mx-4 my-4 p-4 bg-red-100 text-red-700 rounded-lg shadow-xl border-2 border-red-300 break-words">
-      {{ errorMessage }}
-      <Button
-        @click="closeError"
-        variant="ghost"
-        size="sm"
-        class="absolute right-3 top-3 p-1 h-6 w-6 text-red-700 hover:bg-red-200"
-      >
-        <Cross2Icon class="h-3 w-3" />
-      </Button>
-    </div>
-    
-    <div v-if="isLoading" class="flex justify-center my-8">
-      <ReloadIcon class="h-8 w-8 animate-spin text-gray-500" />
-    </div>
+    <MongoDBDataTableNavbar
+      :isSplitActive="isSplit"
+      class="sticky top-0 z-50"
+    /> <div class="excel-container w-full"> <div v-if="errorMessage" class="fixed top-4 left-4 right-4 z-[9999] mx-4 my-4 p-4 bg-red-100 text-red-700 rounded-lg shadow-xl border-2 border-red-300 break-words"> {{ errorMessage }}
+        <Button
+          @click="closeErrorManual"
+          variant="ghost"
+          size="sm"
+          class="absolute right-3 top-3 p-1 h-6 w-6 text-red-700 hover:bg-red-200"
+        > <Cross2Icon class="h-3 w-3" /> </Button>
+      </div>
 
-    <div ref="scrollContainer" class="w-full overflow-auto table-scroll-container">
-      
-      <!-- Excel-like table with consistent styling -->
-        <ExcelCellReference 
-          :selected-cell="selectedCell" 
-          :selected-rows="selectedRows"
-          :collection-name="collectionName"
-          :documents="documents"
-          :current-page="currentPage"
-          :page-size="pageSize"
-          :current-view="currentView"
-          @document-deleted="fetchDocuments"
-          @reset-selection="resetSelection"
-          @delete-start="(id) => pendingDeleteId = id"
-          @delete-end="pendingDeleteId = null"
-          @view-change="handleViewChange"
-        />
-      <!-- just use native table, dont ever change to use Table from shadcn -->
-      <table class="mt-10 excel-table" :style="{ width: `${totalTableWidth}px` }">
-        
-        <!-- Excel-like column headers (A, B, C, ...) -->
-        <TableHeader>
-         
-          <TableRow class="excel-header-row">
-            <!-- New Selector Column -->
-            <TableHead 
-              class="excel-column-checkbox-selector"
-              :style="{ 
-                width: '40px',
-                minWidth: '40px',
-                maxWidth: '40px' 
-              }"
-            >
-            <input 
-              type="checkbox" 
-              v-model="allSelected"
-              class="excel-checkbox"
-            />
-            </TableHead>
-            
-            <!-- Row number header -->
-            <TableHead 
-              class="excel-column-checkbox"
-              :style="{ 
-                width: '30px',
-                minWidth: '30px',
-                maxWidth: '30px' 
-              }"
-            >
-              <!-- hidden -->@
-            </TableHead>
-            <TableHead 
-              v-for="(letter, index) in columnLetters" 
-              :key="`letter-${index}`"
-              class="excel-column-letter relative "
-              :style="{ 
-                width: alphaResizingState.isResizing && alphaResizingState.columnIndex === index 
-                  ? `${alphaResizingState.currentWidth}px` 
-                  : `${columnWidths[tableHeaders[index]] || 200}px` 
-              }"
-            >
-              <div class="flex items-center justify-center">
-                <span class="excel-letter">{{ letter }}</span>
-                <div 
-                  class="excel-resizer absolute right-0 top-0"
-                  :class="[
-                    alphaResizingState.isResizing && alphaResizingState.columnIndex === index 
-                      ? 'excel-resizer-active' 
-                      : ''
-                  ]"
-                  @mousedown="startAlphaResize(index, $event)"
-                  @dblclick="resetAlphaColumnWidth(index)"
-                ></div>
-              </div>
-            </TableHead>
-            <!-- Actions column in alpha header row -->
-            <TableHead class="excel-column-letter excel-actions-header w-24">
-              <!-- Empty for alignment -->
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        
-        <TableHeader>
-          <TableRow>
-            <!-- Row number column header -->
-            <TableHead 
-              class="excel-column-checkbox-selector"
-              :style="{ 
-                width: '40px',
-                minWidth: '40px',
-                maxWidth: '40px' 
-              }"
-            >
-            ***
-            </TableHead>
-            
-            <TableHead 
-              class="excel-row-number-header"
-              :style="{ 
-                width: numberColumnWidth,
-                minWidth: numberColumnWidth,
-                maxWidth: numberColumnWidth 
-              }"
-            >
-              <!-- hidden -->&
-            </TableHead>
-            <TableHead 
-              v-for="header in tableHeaders" 
-              :key="header" 
-              class="excel-column-header font-bold text-black relative"
-              :class="{ 'error-column-header': header === errorColumn }"
-              :style="{ 
-                width: resizingState.isResizing && resizingState.header === header 
-                  ? `${resizingState.currentWidth}px` 
-                  : `${columnWidths[header] || 200}px` 
-              }"
-            >
-              <div class="flex items-center justify-between">
-                <span>
-                  {{ header }}
-                  <span v-if="isFieldRequired(header)" class="text-red-500">*</span>
-                </span>
-                <div 
-                  class="excel-resizer absolute right-0 top-0"
-                  :class="[
-                    resizingState.isResizing && resizingState.header === header 
-                      ? 'excel-resizer-active' 
-                      : ''
-                  ]"
-                  @mousedown="startResize(header, $event)"
-                  @dblclick="resetColumnWidth(header)"
-                ></div>
-              </div>
-            </TableHead>
-            <TableHead 
-              class="excel-column-header excel-actions-header select-none" 
-              :style="{ width: '30px' }"
-            >
-              Actions
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        
-        <TableBody>
-          <!-- Regular Data Rows -->
-          <template v-if="documents.length > 0">
-            <TableRow 
-                v-for="(doc, rowIndex) in paginatedDocuments" 
-                :key="rowIndex"
-                class="excel-data-row"
-                :class="{ 
-                  'bg-red-100 border-2 border-red-500 text-red-800': doc._id.$oid === pendingDeleteId,
-                  'selected-row bg-blue-100': selectedRows.has(doc._id.$oid) && doc._id.$oid !== pendingDeleteId
-                }"
-              >
-              <!-- Selector Checkbox -->
-              <TableCell 
+      <div v-if="isLoading" class="flex justify-center my-8"> <ReloadIcon class="h-8 w-8 animate-spin text-gray-500" /> </div>
+
+      <div ref="scrollContainer" class="w-full overflow-auto table-scroll-container"> <ExcelCellReference
+            :selected-cell="selectedCell"
+            :selected-rows="selectedRows"
+            :collection-name="collectionName"
+            :documents="documents"
+            :current-page="currentPage"
+            :page-size="pageSize"
+            :current-view="currentView"
+            @document-deleted="fetchDocuments"
+            @reset-selection="resetSelection"
+            @delete-start="handleDeleteStart"
+            @delete-end="handleDeleteEnd"
+            @view-change="handleViewChange"
+          /> <table class="mt-10 excel-table" :style="{ width: `${totalTableWidth}px` }"> <TableHeader> <TableRow class="excel-header-row"> <TableHead
                 class="excel-column-checkbox-selector"
-                :style="{ 
+                :style="{
                   width: '40px',
                   minWidth: '40px',
-                  maxWidth: '40px' 
+                  maxWidth: '40px'
                 }"
-              >
-                <input
-                  type="checkbox"
-                  :checked="selectedRows.has(doc._id.$oid)"
-                  @change="toggleRow(doc._id.$oid)"
-                  class="excel-checkbox"
-                />
-              </TableCell>
-              <!-- Row number -->
-              <TableCell 
-                class="excel-row-number"
-                :style="{ 
+              > <input
+                type="checkbox"
+                :checked="allSelected"
+                @change="allSelected = !allSelected"
+                :disabled="documents.length === 0"
+                class="excel-checkbox"
+              /> </TableHead>
+
+              <TableHead
+                class="excel-column-checkbox"
+                :style="{
+                  width: '30px',
+                  minWidth: '30px',
+                  maxWidth: '30px'
+                }"
+              > @ </TableHead>
+              <TableHead
+                v-for="(letter, index) in columnLetters"
+                :key="`letter-${index}`"
+                class="excel-column-letter relative "
+                :style="{
+                  width: alphaResizingState.isResizing && alphaResizingState.columnIndex === index
+                    ? `${alphaResizingState.currentWidth}px`
+                    : `${columnWidths[tableHeaders[index]] || 200}px`
+                }"
+              > <div class="flex items-center justify-center"> <span class="excel-letter">{{ letter }}</span> <div
+                    class="excel-resizer absolute right-0 top-0"
+                    :class="[
+                      alphaResizingState.isResizing && alphaResizingState.columnIndex === index
+                        ? 'excel-resizer-active'
+                        : ''
+                    ]"
+                    @mousedown="startAlphaResize(index, $event)"
+                    @dblclick="resetAlphaColumnWidth(index)"
+                  ></div> </div>
+              </TableHead>
+              <TableHead class="excel-column-letter excel-actions-header w-24"> </TableHead>
+            </TableRow>
+          </TableHeader> <TableHeader> <TableRow> <TableHead
+                class="excel-column-checkbox-selector"
+                :style="{
+                  width: '40px',
+                  minWidth: '40px',
+                  maxWidth: '40px'
+                }"
+              > *** </TableHead>
+
+              <TableHead
+                class="excel-row-number-header"
+                :style="{
                   width: numberColumnWidth,
                   minWidth: numberColumnWidth,
-                  maxWidth: numberColumnWidth 
+                  maxWidth: numberColumnWidth
                 }"
-              >
-               {{ (currentPage - 1) * pageSize + rowIndex + 1 }}
-              </TableCell>
-              <TableCell 
-                v-for="header in tableHeaders" 
-                :key="`${rowIndex}-${header}`" 
-                class="excel-cell"
-                :class="{
-                  'error-column-cell': header === errorColumn,
-                  'excel-cell-selected': editingCell?.rowIndex === rowIndex && editingCell?.header === header
+              > & </TableHead>
+              <TableHead
+                v-for="header in tableHeaders"
+                :key="header"
+                class="excel-column-header font-bold text-black relative"
+                :class="{ 'error-column-header': header === errorColumn && isAdding }"
+                :style="{
+                  width: resizingState.isResizing && resizingState.header === header
+                    ? `${resizingState.currentWidth}px`
+                    : `${columnWidths[header] || 200}px`
+                }"
+              > <div class="flex items-center justify-between"> <span>
+                    {{ header }}
+                    <span v-if="isFieldRequired(header)" class="text-red-500">*</span> </span>
+                  <div
+                    class="excel-resizer absolute right-0 top-0"
+                    :class="[
+                      resizingState.isResizing && resizingState.header === header
+                        ? 'excel-resizer-active'
+                        : ''
+                    ]"
+                    @mousedown="startResize(header, $event)"
+                    @dblclick="resetColumnWidth(header)"
+                  ></div> </div>
+              </TableHead>
+              <TableHead
+                class="excel-column-header excel-actions-header select-none"
+                :style="{ width: '30px' }"
+              > Actions
+              </TableHead>
+            </TableRow>
+          </TableHeader> <TableBody> <template v-if="documents.length > 0"> <TableRow
+                  v-for="(doc, rowIndex) in paginatedDocuments"
+                  :key="doc._id.$oid"
+                  class="excel-data-row"
+                  :class="{
+                    'bg-red-100 border-2 border-red-500 text-red-800': doc._id.$oid === pendingDeleteId,
+                    'selected-row bg-blue-100': selectedRows.has(doc._id.$oid) && doc._id.$oid !== pendingDeleteId
                   }"
-              >
-                <div class="h-full">
-                  <div v-if="editingCell?.rowIndex === rowIndex && editingCell?.header === header" 
-                      class="h-full">
-                    <!-- Boolean field editing -->
-                    <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" 
-                      class="flex items-center justify-center h-full p-2">
-                      <input 
-                        type="checkbox" 
-                        v-model="editValue" 
-                        @change="saveEdit"
-                        class="excel-checkbox"
-                      />
-                    </div>
-                    <!-- Reference field editing -->
-                    <div v-else-if="isReferenceField(header)" class="p-1">
-                      <Select v-model="editValue" @update:modelValue="saveEdit" class="excel-select">
-                        <SelectTrigger>
-                          <SelectValue :placeholder="`Select ${getReferencedCollection(header)}`" :model-value="editValue" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <ScrollArea class="h-48">
-                            <div class="p-1">
-                              <Input 
-                                v-model="searchQuery[header]"
-                                placeholder="Search..."
-                                class="mb-2 excel-input"
-                              />
-                              <div v-if="filteredOptions(header).length">
-                                <SelectItem 
-                                  v-for="option in filteredOptions(header)"
-                                  :key="option.id"
-                                  :value="option.id"
-                                >
-                                  {{ option.label }}
-                                </SelectItem>
-                              </div>
-                              <div v-else class="text-sm text-gray-500 px-2 py-1">
-                                No options found
-                              </div>
-                            </div>
-                          </ScrollArea>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <!-- Date input for date fields -->
-                    <Input v-else-if="collectionSchema.properties[header]?.bsonType === 'date'"
-                      type="datetime-local"
-                      v-model="editValue"
-                      @blur="saveEdit"
-                      class="excel-input excel-date-input"
-                    />
-                    <!-- Default textarea for other fields -->
-                    <textarea v-else
-                      v-model="editValue"
-                      @blur="saveEdit"
-                      @keyup.ctrl.enter="saveEdit"
-                      class="excel-textarea"
-                      rows="1"
-                    ></textarea>
-                  </div>
-                  <div v-else
-                    class="excel-cell-content"
-                    :class="{
-                      'excel-cell-editable': !['created_at', 'updated_at'].includes(header),
-                      'excel-cell-readonly': ['created_at', 'updated_at'].includes(header)
+                > <TableCell
+                  class="excel-column-checkbox-selector"
+                  :style="{
+                    width: '40px',
+                    minWidth: '40px',
+                    maxWidth: '40px'
+                  }"
+                > <input
+                    type="checkbox"
+                    :checked="selectedRows.has(doc._id.$oid)"
+                    @change="toggleRow(doc._id.$oid)"
+                    class="excel-checkbox"
+                  /> </TableCell>
+                <TableCell
+                  class="excel-row-number"
+                  :style="{
+                    width: numberColumnWidth,
+                    minWidth: numberColumnWidth,
+                    maxWidth: numberColumnWidth
+                  }"
+                > {{ (currentPage - 1) * pageSize + rowIndex + 1 }} </TableCell>
+                <TableCell
+                  v-for="header in tableHeaders"
+                  :key="`${doc._id.$oid}-${header}`"
+                  class="excel-cell"
+                  :class="{
+                    'error-column-cell': header === errorColumn,
+                    'excel-cell-selected': editingCell?.rowIndex === rowIndex && editingCell?.header === header
                     }"
-                    @click="!['created_at', 'updated_at', '_id'].includes(header) && handleCellClick(rowIndex, header, doc[header])"
-                  >
-                    <!-- Show boolean values with checkboxes in read-only mode -->
-                    <div v-if="collectionSchema.properties[header]?.bsonType === 'bool'" class="flex justify-center">
-                      <input type="checkbox" :checked="doc[header]" disabled class="excel-checkbox" />
+                > <div class="h-full"> <div v-if="editingCell?.rowIndex === rowIndex && editingCell?.header === header"
+                      class="h-full"> <div v-if="getSchemaInfo(header).bsonType === 'bool'"
+                        class="flex items-center justify-center h-full p-2"> <input
+                          type="checkbox"
+                          v-model="editValue"
+                          @change="saveEdit"
+                          class="excel-checkbox"
+                        /> </div>
+                      <div v-else-if="isReferenceField(header)" class="p-1"> <Select v-model="editValue" @update:modelValue="saveEdit" class="excel-select"> <SelectTrigger> <SelectValue :placeholder="`Select ${getReferencedCollection(header)}`" :model-value="editValue" /> </SelectTrigger>
+                          <SelectContent> <ScrollArea class="h-48"> <div class="p-1"> <Input
+                                  v-model="searchQuery[header]"
+                                  placeholder="Search..."
+                                  class="mb-2 excel-input"
+                                /> <div v-if="loadingReferences[getReferencedCollection(header)!]" class="text-center p-2"><ReloadIcon class="h-4 w-4 animate-spin"/></div>
+                                <div v-else-if="filteredOptions(header).length"> <SelectItem
+                                    v-for="option in filteredOptions(header)"
+                                    :key="option.id"
+                                    :value="option.id"
+                                  > {{ option.label }} </SelectItem>
+                                </div>
+                                <div v-else class="text-sm text-gray-500 px-2 py-1"> No options found </div>
+                              </div>
+                            </ScrollArea>
+                          </SelectContent> </Select>
+                      </div>
+                      <Input v-else-if="getSchemaInfo(header).bsonType === 'date'"
+                        type="datetime-local"
+                        v-model="editValue"
+                        @blur="handleEditBlur"
+                        class="excel-input excel-date-input"
+                      /> <textarea v-else
+                        v-model="editValue"
+                        @blur="handleEditBlur"
+                        @keyup.ctrl.enter="saveEdit"
+                        @keyup.esc="cancelEdit"
+                        class="excel-textarea"
+                        rows="1"
+                      ></textarea> </div>
+                    <div v-else
+                      class="excel-cell-content"
+                      :class="{
+                        'excel-cell-editable': !['_id', 'created_at', 'updated_at'].includes(header),
+                        'excel-cell-readonly': ['_id', 'created_at', 'updated_at'].includes(header)
+                      }"
+                      @click="handleCellClick(rowIndex, header, doc[header])"
+                    > <div v-if="getSchemaInfo(header).bsonType === 'bool'" class="flex justify-center"> <input type="checkbox" :checked="doc[header]" disabled class="excel-checkbox" /> </div>
+                     <div v-else-if="isReferenceField(header)" class="excel-reference-value"> <span v-if="loadingReferences[getReferencedCollection(header)!]">...</span>
+                         <span v-else>{{ getReferenceLabel(header, doc[header]) || doc[header] }}</span>
+                         </div>
+                      <template v-else-if="['created_at', 'updated_at'].includes(header)"> <span class="excel-timestamp"> {{ formatSchemaValue(doc[header], getSchemaInfo(header).bsonType) }} </span>
+                      </template>
+                       <template v-else-if="header === '_id'">
+                          <span>{{ doc[header]?.$oid || doc[header] }}</span>
+                       </template>
+                      <template v-else> {{ formatSchemaValue(doc[header], getSchemaInfo(header).bsonType) }} </template>
                     </div>
-                    <!-- Show reference field labels in read-only mode -->
-                    <div v-else-if="isReferenceField(header)" class="excel-reference-value">
-                      {{ getReferenceLabel(header, doc[header]) || doc[header] }}
-                    </div>
-                    <!-- Add disabled display for timestamp fields -->
-                    <template v-else-if="['created_at', 'updated_at'].includes(header)">
-                      <span class="excel-timestamp">
-                        {{ formatSchemaValue(doc[header], collectionSchema.properties[header]?.bsonType) }}
-                      </span>
-                    </template>
-                    <template v-else>
-                      {{ formatSchemaValue(doc[header], collectionSchema.properties[header]?.bsonType) }}
-                    </template>
                   </div>
+                </TableCell>
+                <TableActions
+                  :collection-name="collectionName"
+                  :document-id="doc._id.$oid"
+                  :row-number="(currentPage - 1) * pageSize + rowIndex + 1"
+                  @deleted="fetchDocuments"
+                  @delete-start="handleDeleteStart"
+                  @delete-end="handleDeleteEnd"
+                /> <StickyTableActions
+                  :collection-name="collectionName"
+                  :document-id="doc._id.$oid"
+                  :row-number="(currentPage - 1) * pageSize + rowIndex + 1"
+                  :target-ref="scrollContainer"
+                  @deleted="fetchDocuments"
+                  @delete-start="handleDeleteStart"
+                  @delete-end="handleDeleteEnd"
+                /> </TableRow>
+            </template>
+
+            <TableRow v-if="isAdding"
+              class="excel-new-row"
+              :class="['excel-new-row', { 'excel-new-row-error': addingRowError }]"
+            > <TableCell
+              class="excel-column-checkbox-selector"
+              :style="{
+                width: '40px',
+                minWidth: '40px',
+                maxWidth: '40px'
+              }"
+            > <input
+                type="checkbox"
+                disabled
+                class="excel-checkbox"
+              /> </TableCell>
+              <TableCell class="excel-row-number"> {{ documents.length + 1 }} </TableCell>
+              <TableCell v-for="header in tableHeaders" :key="`new-${header}`" class="excel-cell" :class="{'error-column-cell': header === errorColumn}"> <span v-if="['created_at', 'updated_at'].includes(header)" class="excel-timestamp"> (auto-generated) </span>
+
+                <div v-else-if="header !== '_id' && getSchemaInfo(header).bsonType === 'bool'"
+                  class="flex items-center justify-center"> <input
+                    type="checkbox"
+                    v-model="newDocument[header]"
+                    class="excel-checkbox"
+                  /> </div>
+                <div v-else-if="header !== '_id' && isReferenceField(header)" class="h-8"> <Select v-model="newDocument[header]" class="excel-select"> <SelectTrigger class="h-8"> <SelectValue :placeholder="`Select`" /> </SelectTrigger>
+                    <SelectContent> <div v-if="loadingReferences[getReferencedCollection(header)!]" class="p-2"> <ReloadIcon class="h-4 w-4 animate-spin mx-auto" /> </div>
+                      <ScrollArea v-else class="h-48"> <Input
+                          v-model="searchQuery[header]"
+                          placeholder="Search..."
+                          class="mb-1 mx-1 excel-input"
+                        /> <SelectItem
+                          v-for="option in filteredOptions(header)"
+                          :key="option.id"
+                          :value="option.id"
+                        > {{ option.label }} </SelectItem>
+                      </ScrollArea> </SelectContent>
+                  </Select>
+                </div>
+                <Input v-else-if="header !== '_id'"
+                  v-model="newDocument[header]"
+                  :type="getSchemaInfo(header).bsonType === 'date' ? 'datetime-local' : 'text'"
+                  class="excel-input"
+                  :class="{'ring-2 ring-red-500': header === errorColumn}"
+                /> <span v-else class="excel-auto-id">(auto)</span> </TableCell>
+              <TableCell class="excel-cell text-center"> <Button variant="ghost" @click="saveNewDocument" size="sm" class="px-0 -ml-1" :disabled="isSaving">
+                    <ReloadIcon v-if="isSaving" class="h-4 w-4 animate-spin"/>
+                    <span v-else>💾</span>
+                </Button> </TableCell>
+            </TableRow>
+
+            <TableRow
+              v-if="!isAdding"
+              class="excel-add-row"
+              @click="startAdding"
+            > <TableCell :colspan="tableHeaders.length + 3" class="excel-add-cell"> <div class="inline-flex items-center gap-2 excel-add-button"> <PlusCircledIcon class="h-4 w-4" /> <span class="text-sm"> {{ documents.length === 0 ? 'Add first document' : 'Add new document' }} </span>
                 </div>
               </TableCell>
-              <TableActions
-                :collection-name="collectionName"
-                :document-id="doc._id.$oid"
-                :row-number="(currentPage - 1) * pageSize + rowIndex + 1"
-                @deleted="fetchDocuments"
-                @delete-start="(id) => pendingDeleteId = id"
-                @delete-end="pendingDeleteId = null"
-              />
-              <StickyTableActions
-                :collection-name="collectionName"
-                :document-id="doc._id.$oid"
-                :row-number="(currentPage - 1) * pageSize + rowIndex + 1"
-                :target-ref="scrollContainer"
-                @deleted="fetchDocuments"
-                @delete-start="(id) => pendingDeleteId = id"
-                @delete-end="pendingDeleteId = null"
-              />
             </TableRow>
-          </template>
+          </TableBody> </table>
 
-          <!-- Add new document form row -->
-          <TableRow v-if="isAdding" 
-            class="excel-new-row"
-            :class="['excel-new-row', { 'excel-new-row-error': addingRowError }]"
-          >
-
-          <!-- Placeholder for Selector Column Cell -->
-          <TableCell 
-            class="excel-column-checkbox-selector"
-            :style="{ 
-              width: '40px',
-              minWidth: '40px',
-              maxWidth: '40px' 
-            }"
-          >
-            <input 
-              type="checkbox" 
-              disabled 
-              class="excel-checkbox"
-            />
-          </TableCell>
-            <!-- Row number for new row -->
-            <TableCell class="excel-row-number">
-              {{ documents.length + 1 }}
-            </TableCell>
-            <TableCell v-for="header in tableHeaders" :key="header" class="excel-cell">
-              <!-- Timestamp fields - not editable -->
-              <span v-if="['created_at', 'updated_at'].includes(header)" class="excel-timestamp">
-                (auto-generated)
-              </span>
-              
-              <!-- Boolean field in inline add mode -->
-              <div v-else-if="header !== '_id' && collectionSchema.properties[header]?.bsonType === 'bool'" 
-                class="flex items-center justify-center">
-                <input 
-                  type="checkbox" 
-                  v-model="newDocument[header]"
-                  class="excel-checkbox"
-                />
-              </div>
-              <!-- Reference field in inline add mode -->
-              <div v-else-if="header !== '_id' && isReferenceField(header)" class="h-8">
-                <Select v-model="newDocument[header]" class="excel-select">
-                  <SelectTrigger class="h-8">
-                    <SelectValue :placeholder="`Select`" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <div v-if="loadingReferences[getReferencedCollection(header)]" class="p-2">
-                      <ReloadIcon class="h-4 w-4 animate-spin mx-auto" />
-                    </div>
-                    <ScrollArea v-else class="h-48">
-                      <Input 
-                        v-model="searchQuery[header]"
-                        placeholder="Search..."
-                        class="mb-1 mx-1 excel-input"
-                      />
-                      <SelectItem 
-                        v-for="option in filteredOptions(header)"
-                        :key="option.id"
-                        :value="option.id"
-                      >
-                        {{ option.label }}
-                      </SelectItem>
-                    </ScrollArea>
-                  </SelectContent>
-                </Select>
-              </div>
-              <!-- Regular field in inline add mode -->
-              <Input v-else-if="header !== '_id'"
-                v-model="newDocument[header]"
-                :type="collectionSchema.properties[header]?.bsonType === 'date' ? 'datetime-local' : 'text'"
-                class="excel-input"
-              />
-              <span v-else class="excel-auto-id">(auto)</span>
-            </TableCell>
-            <TableCell class="excel-cell text-center">
-              <Button variant="ghost" @click="saveNewDocument" size="sm" class="px-0 -ml-1">
-                💾
-                </Button>
-            </TableCell>
-          </TableRow>
-
-          <!-- Add new document button row -->
-          <TableRow 
-            v-if="!isAdding" 
-            class="excel-add-row" 
-            @click="startAdding"
-          >
-            <TableCell :colspan="tableHeaders.length + 2" class="excel-add-cell">
-              <div class="inline-flex items-center gap-2 excel-add-button">
-                <PlusCircledIcon class="h-4 w-4" />
-                <span class="text-sm">
-                  {{ documents.length === 0 ? 'Add first document' : 'Add new document' }}
-                </span>
-              </div>
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </table>
-
-  <!-- Floating Add Widget -->
-  <div
-    v-if="isAdding"
-    class="sticky top-2 left-2 z-20 p-3 shadow-lg flex items-center space-x-2 w-auto rounded-md bg-green-50"
-  >
-    <Button @click="saveNewDocument" size="sm" class="bg-green-600 hover:bg-green-700 text-white">
-      <PlusCircledIcon class="w-4 h-4" />
-      Save
-    </Button>
-    <Button @click="cancelAdding" variant="outline" size="sm" class="border-green-600 text-green-700 hover:bg-green-100">
-      <Cross2Icon class="w-4 h-4" />
-      Cancel
-    </Button>
-  </div>
-      
-      <div v-if="totalPages > 1" class="excel-pagination">
-        <Pagination :page="currentPage" :itemsPerPage="pageSize" :total="documents.length"
-          @update:page="onPageChange" :siblingCount="1">
-          <PaginationList>
-            <PaginationListItem :value="1">
-              <PaginationFirst :disabled="currentPage === 1" @click="currentPage = 1" class="excel-pagination-button" />
-            </PaginationListItem>
-            <PaginationListItem :value="Math.max(1, currentPage - 1)">
-              <PaginationPrev :disabled="currentPage === 1" 
-                @click="currentPage = Math.max(1, currentPage - 1)" class="excel-pagination-button" />
-            </PaginationListItem>
-            <PaginationListItem :value="Math.min(totalPages, currentPage + 1)">
-              <PaginationNext :disabled="currentPage === totalPages" 
-                @click="currentPage = Math.min(totalPages, currentPage + 1)" class="excel-pagination-button" />
-            </PaginationListItem>
-            <PaginationListItem :value="totalPages">
-              <PaginationLast :disabled="currentPage === totalPages" 
-                @click="currentPage = totalPages" class="excel-pagination-button" />
-            </PaginationListItem>
-          </PaginationList>
-        </Pagination>
-      </div>
-      
-      <div v-if="!isAdding" class="excel-footer">
-        <span class="excel-page-size-label">Rows per page:</span>
-        <Select v-model="pageSize" class="excel-page-size-select">
-          <SelectTrigger class="w-16">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="5">5</SelectItem>
-            <SelectItem value="10">10</SelectItem>
-            <SelectItem value="20">20</SelectItem>
-            <SelectItem value="50">50</SelectItem>
-            <SelectItem value="100">100</SelectItem>
-          </SelectContent>
-        </Select>
-        
-        <span class="excel-status-info">
-          Showing {{ (currentPage - 1) * pageSize + 1 }} to 
-          {{ Math.min(currentPage * pageSize, documents.length) }} of 
-          {{ documents.length }} entries
-        </span>
-      </div>
-
-      <!-- <FooterTabsBar /> -->
+    <div
+      v-if="isAdding"
+      class="sticky top-2 left-2 z-20 p-3 shadow-lg flex items-center space-x-2 w-auto rounded-md bg-green-50"
+    > <Button @click="saveNewDocument" size="sm" class="bg-green-600 hover:bg-green-700 text-white" :disabled="isSaving"> <ReloadIcon v-if="isSaving" class="w-4 h-4 animate-spin"/> <PlusCircledIcon v-else class="w-4 h-4 mr-1" /> Save
+      </Button>
+      <Button @click="cancelAdding" variant="outline" size="sm" class="border-green-600 text-green-700 hover:bg-green-100" :disabled="isSaving"> <Cross2Icon class="w-4 h-4 mr-1" /> Cancel
+      </Button>
     </div>
-  </div>
+
+        <div v-if="totalPages > 1" class="excel-pagination"> <Pagination :page="currentPage" :itemsPerPage="pageSize" :total="documents.length"
+            @update:page="onPageChange" :siblingCount="1"> <PaginationList> <PaginationListItem :value="1"> <PaginationFirst :disabled="currentPage === 1" @click="setPage(1)" class="excel-pagination-button" /> </PaginationListItem>
+              <PaginationListItem :value="Math.max(1, currentPage - 1)"> <PaginationPrev :disabled="currentPage === 1"
+                  @click="setPage(currentPage - 1)" class="excel-pagination-button" /> </PaginationListItem>
+              <PaginationListItem :value="Math.min(totalPages, currentPage + 1)"> <PaginationNext :disabled="currentPage === totalPages"
+                  @click="setPage(currentPage + 1)" class="excel-pagination-button" /> </PaginationListItem>
+              <PaginationListItem :value="totalPages"> <PaginationLast :disabled="currentPage === totalPages"
+                  @click="setPage(totalPages)" class="excel-pagination-button" /> </PaginationListItem>
+            </PaginationList>
+          </Pagination>
+        </div>
+
+         <div v-if="!isAdding" class="excel-footer"> <span class="excel-page-size-label">Rows per page:</span> <Select :modelValue="String(pageSize)" @update:modelValue="val => setPageSize(Number(val))" class="excel-page-size-select"> <SelectTrigger class="w-16"> <SelectValue /> </SelectTrigger>
+            <SelectContent> <SelectItem value="5">5</SelectItem> <SelectItem value="10">10</SelectItem> <SelectItem value="20">20</SelectItem> <SelectItem value="50">50</SelectItem> <SelectItem value="100">100</SelectItem> </SelectContent>
+          </Select>
+
+          <span class="excel-status-info"> Showing {{ paginatedDocuments.length ? (currentPage - 1) * pageSize + 1 : 0 }} to
+            {{ (currentPage - 1) * pageSize + paginatedDocuments.length }} of
+            {{ documents.length }} entries
+          </span> </div>
+
+        </div>
+    </div>
 </template>
 
-<style>
+<style scoped>
+/* --- Style Section (From old_codes.txt, using <style scoped>) --- */
 .selected-row {
-  outline: 2px solid #2196F3;
-  border: 2px solid #2196F3;
+  outline: 2px solid #2196F3; /* [cite: 84] */
+  border: 2px solid #2196F3; /* [cite: 85] */
   outline-offset: -1px;
   position: relative;
 }
 
-.bg-red-100 {
-  outline: none !important;
+.bg-red-100 { /* Style for pending delete row */
+  outline: none !important; /* [cite: 85] */
 }
 
 /* Excel-inspired container */
 .excel-container {
-  font-family: 'Segoe UI', Arial, sans-serif;
-  border: 1px solid #d4d4d8;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+  font-family: 'Segoe UI', Arial, sans-serif; /* [cite: 86] */
+  border: 1px solid #d4d4d8; /* [cite: 86] */
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05); /* [cite: 87] */
   border-radius: 2px;
-  background-color: #ffffff;
+  background-color: #ffffff; /* [cite: 87] */
 }
 
 /* Excel table styling */
 .excel-table {
-  table-layout: fixed;
-  min-width: fit-content;
+  table-layout: fixed; /* [cite: 88] */
+  min-width: fit-content; /* [cite: 88] */
+  border-collapse: collapse; /* Add this */
 }
 
 /* Excel header row */
 .excel-header-row {
-  background-color: #f3f3f3;
+  background-color: #f3f3f3; /* [cite: 88] */
 }
 
 /* Excel column headers */
 .excel-column-header {
-  background-color: #f3f3f3;
-  border: 1px solid #d0d0d0;
-  padding: 6px 8px;
-  font-weight: 600;
-  font-size: 14px;
-  color: #000000;
-  position: relative;
-  text-align: left;
+  background-color: #f3f3f3; /* [cite: 89] */
+  border: 1px solid #d0d0d0; /* [cite: 89] */
+  padding: 6px 8px; /* [cite: 89] */
+  font-weight: 600; /* [cite: 89] */
+  font-size: 14px; /* [cite: 89] */
+  color: #000000; /* [cite: 90] */
+  position: relative; /* [cite: 90] */
+  text-align: left; /* [cite: 90] */
+  height: 32px; /* Added height */
+  box-sizing: border-box; /* Added box-sizing */
+  vertical-align: middle; /* Center vertically */
 }
 
 /* Excel column letter headers (A, B, C) */
 .excel-column-letter {
-  background-color: #e6e6e6;
-  border: 1px solid #d0d0d0;
-  padding: 4px 8px;
-  font-weight: 600;
-  font-size: 14px;
-  color: #616161;
-  text-align: center;
+  background-color: #e6e6e6; /* [cite: 90] */
+  border: 1px solid #d0d0d0; /* [cite: 91] */
+  padding: 4px 8px; /* [cite: 91] */
+  font-weight: 600; /* [cite: 91] */
+  font-size: 14px; /* [cite: 91] */
+  color: #616161; /* [cite: 91] */
+  text-align: center; /* [cite: 91] */
+  height: 28px; /* Added height */
+  box-sizing: border-box; /* Added box-sizing */
+  vertical-align: middle; /* Center vertically */
 }
+
 
 /* Update sticky positioning for new column */
 .excel-column-checkbox-selector {
-  position: sticky;
-  left: 0;
-  z-index: 5;
-  background-color: #f3f3f3;
-  outline: 1px solid #d0d0d0;
+  position: sticky; /* [cite: 92] */
+  left: 0; /* [cite: 92] */
+  z-index: 5; /* [cite: 92] */
+  background-color: #f3f3f3; /* [cite: 92] */ /* Match header */
+  border: 1px solid #d0d0d0; /* Added border */
+  text-align: center; /* Center checkbox */
+  vertical-align: middle; /* Center checkbox */
+  box-sizing: border-box;
 }
+/* Need background for sticky cells in body */
+.excel-data-row .excel-column-checkbox-selector {
+    background-color: #ffffff; /* White for data rows */
+}
+.excel-data-row:hover .excel-column-checkbox-selector {
+    background-color: #edf5fd; /* Match row hover */
+}
+.excel-data-row.selected-row .excel-column-checkbox-selector {
+    background-color: #EBF8FF; /* Match selected row (adjust color) */
+}
+.excel-data-row.bg-red-100 .excel-column-checkbox-selector {
+    background-color: #fee2e2; /* Match delete row */
+}
+
 
 /* Adjust row number positioning */
-.excel-row-number-header-selector {
-  left: 40px; /* Account for selector column */
-  z-index: 4;
+.excel-row-number-header { /* Applied to TH */
+  position: sticky; /* [cite: 98, 100] */
+  left: 40px; /* [cite: 98, 101] */ /* Match selector width */
+  z-index: 4; /* [cite: 99, 101] */
+  background-color: #f3f3f3; /* [cite: 99, 101] */
+  border: 1px solid #d0d0d0; /* [cite: 100, 102] */
+  /* outline: 1px solid #d0d0d0; */ /* [cite: 100, 103] Outline removed, use border */
+  text-align: center; /* Center text */
+  vertical-align: middle; /* Center text */
+  box-sizing: border-box;
+  width: 30px !important; /* [cite: 124] */
+  min-width: 30px !important; /* [cite: 124] */
+  max-width: 30px !important; /* [cite: 124] */
+  padding: 6px 0px; /* Adjust padding */
+  font-weight: 600; /* [cite: 97] */
+  font-size: 14px; /* [cite: 97] */
+  color: #616161; /* [cite: 97] */
 }
-
-.excel-row-number-selector {
-  left: 40px; /* Account for selector column */
-  z-index: 3;
-}
-
-
-.excel-column-checkbox {
-  position: sticky;
-  left: 40px;
-  z-index: 4; /* Ensure it's above other headers */
-  
-  background-color: #e6e6e6;
-  border: 1px solid #d0d0d0;
-  padding: 4px 8px;
-  font-weight: 600;
-  font-size: 14px;
-  color: #616161;
+.excel-row-number { /* Applied to TD */
+  position: sticky; /* [cite: 104] */
+  left: 40px; /* [cite: 104] */ /* Match selector width */
+  z-index: 2; /* [cite: 105] */
+  background-color: #f3f3f3; /* [cite: 105] */
+  border: 1px solid #d0d0d0; /* [cite: 105] */
+  /* outline: 1px solid #d0d0d0; */ /* [cite: 106] Outline removed, use border */
   text-align: center;
-
-  outline: 1px solid #d0d0d0; /* Added outline */
+  vertical-align: middle;
+  box-sizing: border-box;
+  width: 30px !important; /* [cite: 124] */
+  min-width: 30px !important; /* [cite: 124] */
+  max-width: 30px !important; /* [cite: 124] */
+  font-size: 14px; /* Match headers */
+  color: #616161; /* Match headers */
 }
+/* Hover state for row numbers */
+.excel-data-row:hover .excel-row-number {
+  background-color: #edf5fd; /* [cite: 140] */ /* Match row hover color */
+}
+.excel-data-row.selected-row .excel-row-number {
+    background-color: #EBF8FF; /* Match selected row (adjust color) */
+}
+.excel-data-row.bg-red-100 .excel-row-number {
+    background-color: #fee2e2; /* Match delete row */
+}
+
+/* Original selector column TH style (no longer needed?) */
+/* .excel-column-checkbox {
+  position: sticky; [cite: 95]
+  left: 40px; [cite: 95]
+  z-index: 4; [cite: 95]
+  background-color: #e6e6e6; [cite: 96]
+  border: 1px solid #d0d0d0; [cite: 96]
+  padding: 4px 8px; [cite: 96]
+  font-weight: 600; [cite: 97]
+  font-size: 14px; [cite: 97]
+  color: #616161; [cite: 97]
+  text-align: center; [cite: 97]
+  outline: 1px solid #d0d0d0; [cite: 97]
+} */
 
 .excel-letter {
-  font-weight: 700;
+  font-weight: 700; /* [cite: 97] */
 }
 
-/* Excel row @ header */
-.excel-row-number-header {
-  position: sticky;
-  left: 40px; /* This should match the width of your selector column */
-  z-index: 4;
-  background-color: #f3f3f3;
-  border: 1px solid rgb(198, 198, 198);
-  outline: 1px solid #d0d0d0;
-}
-
-/* Excel row & header */
-.excel-row-number-header {
-  position: sticky;
-  left: 40px;
-  
-  z-index: 4; /* Ensure it's above other headers */
-  background-color: #f3f3f3; /* Match header background */
-  border: 1px solid rgb(198, 198, 198); /* Add black border on all sides */
-  outline: 1px solid #d0d0d0;
-}
-
-
-
-/* Excel row number cells */
-.excel-row-number {
-  position: sticky;
-  left: 40px; /* This should match the width of your selector column */
-  z-index: 2;
-  background-color: #f3f3f3;
-  border: 1px solid #d0d0d0;
-  outline: 1px solid #d0d0d0;
-}
 
 /* Excel actions header */
-.excel-actions-header {
-  background-color: #f3f3f3;
-  border: 1px solid #d0d0d0;
-  text-align: center;
+.excel-actions-header { /* Applied to TH */
+  background-color: #f3f3f3; /* [cite: 106] */
+  border: 1px solid #d0d0d0; /* [cite: 106] */
+  text-align: center; /* [cite: 106] */
+  position: sticky; /* Added sticky */
+  right: 0; /* Added sticky */
+  z-index: 4; /* Added sticky */
+  width: 60px !important; /* [cite: 125] */
+  min-width: 60px !important; /* [cite: 125] */
+  max-width: 60px !important; /* [cite: 125] */
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+.excel-actions-cell { /* Applied to TD */
+   border: 1px solid #d0d0d0;
+   position: sticky; /* Added sticky */
+   right: 0; /* Added sticky */
+   z-index: 2; /* Added sticky */
+   width: 60px !important; /* [cite: 125] */
+   min-width: 60px !important; /* [cite: 125] */
+   max-width: 60px !important; /* [cite: 125] */
+   background-color: #ffffff; /* Need background for sticky */
+   text-align: center;
+   vertical-align: middle;
+   box-sizing: border-box;
+}
+/* Hover/Selected states for actions cell */
+.excel-data-row:hover .excel-actions-cell {
+    background-color: #edf5fd; /* Match row hover */
+}
+.excel-data-row.selected-row .excel-actions-cell {
+    background-color: #EBF8FF; /* Match selected row (adjust color) */
+}
+.excel-data-row.bg-red-100 .excel-actions-cell {
+    background-color: #fee2e2; /* Match delete row */
 }
 
 /* Excel data rows */
 .excel-data-row:hover {
-  background-color: #edf5fd;
+  background-color: #edf5fd; /* [cite: 107] */
 }
 
 /* Excel data cell */
 .excel-cell {
-  border: 1px solid #d0d0d0;
-  padding: 0;
-  font-size: 14px;
-  color: #212121;
-  position: relative;
-  height: 8px;
-  line-height: 8px; /* Optional: vertically center text */
+  border: 1px solid #d0d0d0; /* [cite: 107] */
+  padding: 0; /* [cite: 108] */ /* Reset padding for inputs */
+  font-size: 14px; /* [cite: 108] */
+  color: #212121; /* [cite: 108] */
+  position: relative; /* [cite: 108] */
+  height: 40px; /* [cite: 108, 116] */ /* Set consistent height */
+  box-sizing: border-box; /* Add box-sizing */
+  vertical-align: middle; /* Center content */
+  overflow: hidden; /* Hide overflow */
+  white-space: nowrap; /* Prevent wrapping */
+  text-overflow: ellipsis; /* Add ellipsis */
+}
+.excel-cell div { /* Ensure divs within cells allow vertical centering */
+   display: flex;
+   align-items: center;
+   height: 100%;
 }
 
 
 /* Excel cell content */
 .excel-cell-content {
-  padding: 6px 8px;
-  min-height: 40px;
+  padding: 6px 8px; /* [cite: 109] */ /* Restore padding for read-only */
+  min-height: 40px; /* [cite: 109] */
+  width: 100%; /* Ensure it fills cell */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  display: block; /* Override flex from div rule */
 }
 
 /* Excel cell editable */
 .excel-cell-editable {
-  cursor: pointer;
+  cursor: pointer; /* [cite: 110] */
 }
 
 .excel-cell-editable:hover {
-  background-color: #e8f3fd;
+  background-color: #e8f3fd; /* [cite: 110] */
 }
 
 /* Excel cell readonly */
 .excel-cell-readonly {
-  cursor: not-allowed;
-  opacity: 0.8;
-  background-color: #f9f9f9;
+  cursor: not-allowed; /* [cite: 111] */
+  opacity: 0.8; /* [cite: 111] */
+  background-color: #f9f9f9; /* [cite: 111] */
 }
 
 /* Excel cell selected - active cell styling */
 .excel-cell-selected {
-  outline: 2px solid #217346;
-  outline-offset: -2px;
-  position: relative;
-  z-index: 1;
+  outline: 2px solid #217346; /* [cite: 112] */
+  outline-offset: -2px; /* [cite: 112] */
+  position: relative; /* [cite: 112] */
+  z-index: 1; /* [cite: 113] */
+  overflow: visible; /* Allow input to overflow slightly if needed */
 }
 
 /* Excel textarea */
 .excel-textarea {
-  width: 100%;
-  height: 100%;
-  padding: 6px 8px;
-  font-family: 'Segoe UI', Arial, sans-serif;
-  font-size: 14px;
-  border: none;
-  resize: none; /* Change from vertical to none */
-  min-height: 40px; /* Reduce from 80px to 40px to match other row heights */
-  outline: none;
-  box-shadow: none;
-  overflow: hidden; /* Hide overflow */
-}
-
-.excel-new-row .excel-cell {
-  overflow: visible; /* Ensure content is visible */
-  height: 40px; /* Set a consistent height */
-}
-
-/* Ensure inputs in the new row don't cause scrolling */
-.excel-new-row .excel-input {
-  overflow: hidden;
-}
-
-.excel-textarea:focus {
-  outline: none;
-  box-shadow: none;
+  width: 100%; /* [cite: 113] */
+  height: 100%; /* [cite: 113] */
+  padding: 6px 8px; /* [cite: 113] */
+  font-family: 'Segoe UI', Arial, sans-serif; /* [cite: 113] */
+  font-size: 14px; /* [cite: 114] */
+  border: none; /* [cite: 114] */
+  resize: none; /* [cite: 114] */
+  min-height: 40px; /* [cite: 114] */
+  outline: none; /* [cite: 115] */
+  box-shadow: none; /* [cite: 115] */
+  overflow: hidden; /* [cite: 115] */
+  box-sizing: border-box; /* Added */
+  background-color: white; /* Ensure background */
+  vertical-align: top; /* Align text top */
 }
 
 /* Excel input */
 .excel-input {
-  height: 100%;
-  min-height: 32px;
-  border-radius: 0;
-  border: none;
-  box-shadow: none;
-  font-size: 14px;
-  padding: 4px 6px;
+  height: 100%; /* [cite: 118] */
+  width: 100%; /* Added */
+  min-height: 32px; /* [cite: 118] */ /* Ensure min height */
+  border-radius: 0; /* [cite: 118] */
+  border: none; /* [cite: 119] */
+  box-shadow: none; /* [cite: 119] */
+  font-size: 14px; /* [cite: 119] */
+  padding: 4px 6px; /* [cite: 119] */
+  outline: none; /* Added */
+  box-sizing: border-box; /* Added */
+  background-color: white; /* Ensure background */
 }
 
 .excel-input:focus-visible {
-  outline: none;
-  box-shadow: none;
-  border: none;
-  ring: none;
+  outline: none; /* [cite: 119] */
+  box-shadow: none; /* [cite: 120] */
+  border: none; /* [cite: 120] */
+  /* ring: none; */ /* [cite: 120] */ /* Removed ring */
 }
 
 /* Excel date input */
 .excel-date-input {
-  padding: 2px 4px;
-  font-size: 14px;
+  padding: 2px 4px; /* [cite: 120] */
+  font-size: 14px; /* [cite: 120] */
 }
 
 /* Excel checkbox */
 .excel-checkbox {
-  height: 16px;
-  width: 16px;
-  cursor: pointer;
-  accent-color: #217346;
+  height: 16px; /* [cite: 120] */
+  width: 16px; /* [cite: 121] */
+  cursor: pointer; /* [cite: 121] */
+  accent-color: #217346; /* [cite: 121] */
+  vertical-align: middle; /* Align checkbox */
 }
 
 /* Excel reference value */
 .excel-reference-value {
-  color: #0066cc;
-  cursor: pointer;
+  color: #0066cc; /* [cite: 121] */
+  cursor: pointer; /* [cite: 121] */
+  text-decoration: underline; /* Added underline */
 }
 
 /* Excel timestamp value */
 .excel-timestamp {
-  color: #666666;
-  font-style: italic;
-  font-size: 14px;
+  color: #666666; /* [cite: 122] */
+  font-style: italic; /* [cite: 122] */
+  font-size: 12px; /* [cite: 122] */ /* Slightly smaller */
+  display: block; /* Ensure it takes space */
+  line-height: normal; /* Reset line height */
 }
 
 /* Excel auto ID */
 .excel-auto-id {
-  color: #888888;
-  font-style: italic;
-  padding: 0 8px;
-  font-size: 14px;
-}
-
-/* Excel actions cell */
-.excel-row-number-header,
-.excel-row-number {
-  width: 30px !important;
-  min-width: 30px !important;
-  max-width: 30px !important;
-}
-
-.excel-actions-header,
-.excel-actions-cell {
-  width: 60px !important;
-  min-width: 60px !important;
-  max-width: 60px !important;
-  border-right: 1px solid #d0d0d0;
+  color: #888888; /* [cite: 123] */
+  font-style: italic; /* [cite: 123] */
+  padding: 0 8px; /* [cite: 123] */
+  font-size: 12px; /* [cite: 123] */ /* Slightly smaller */
+  display: block;
+  line-height: normal;
 }
 
 /* Excel new row */
 .excel-new-row {
-  background-color: #e8f5e9;
+  background-color: #e8f5e9; /* [cite: 126] */
+}
+.excel-new-row .excel-cell {
+  height: 40px; /* [cite: 116] */
+  overflow: visible; /* [cite: 116] */ /* Allow select dropdown */
+  vertical-align: middle; /* Center vertically */
+}
+.excel-new-row .excel-input {
+  overflow: hidden; /* [cite: 117] */
+  height: 100%; /* Ensure input fills cell */
+  background-color: white;
+  border: 1px solid #d0d0d0; /* Add border for clarity */
+}
+.excel-new-row .excel-select > button { /* Target trigger */
+    height: 100%;
+    background-color: white;
+    border: 1px solid #d0d0d0;
 }
 
-/* Excel cancel button */
+/* Excel cancel button (if used) */
 .excel-cancel-button {
-  color: #666666;
-  font-size: 14px;
-  height: 28px;
+  color: #666666; /* [cite: 126] */
+  font-size: 14px; /* [cite: 126] */
+  height: 28px; /* [cite: 127] */
 }
 
 /* Excel add row */
 .excel-add-row {
-  cursor: pointer;
+  cursor: pointer; /* [cite: 127] */
 }
 
 .excel-add-row:hover {
-  background-color: #f0f8ff;
+  background-color: #f0f8ff; /* [cite: 127] */
 }
 
 /* Excel add cell */
 .excel-add-cell {
-  text-align: center;
-  padding: 8px 0;
+  text-align: left; /* [cite: 128] */ /* Changed from center */
+  padding: 8px 8px; /* [cite: 128] */ /* Adjusted padding */
+  border-top: 1px solid #d0d0d0; /* Add border */
 }
 
 /* Excel add button */
 .excel-add-button {
-  color: #217346;
-  font-weight: 500;
+  color: #217346; /* [cite: 129] */
+  font-weight: 500; /* [cite: 129] */
 }
 
 /* Excel column resizer */
 .excel-resizer {
-  width: 5px;
-  height: 100%;
-  cursor: col-resize;
-  position: absolute;
-  right: 0;
-  top: 0;
-  background-color: transparent;
+  width: 5px; /* [cite: 129] */
+  height: 100%; /* [cite: 130] */
+  cursor: col-resize; /* [cite: 130] */
+  position: absolute; /* [cite: 130] */
+  right: 0; /* [cite: 130] */
+  top: 0; /* [cite: 130] */
+  background-color: transparent; /* [cite: 130] */
+  z-index: 10; /* Ensure above cell content */
 }
 
 .excel-resizer:hover {
-  background-color: #217346;
+  background-color: #93c5fd; /* [cite: 130] */ /* Lighter blue */
 }
 
 .excel-resizer-active {
-  background-color: #217346;
+  background-color: #3b82f6 !important; /* [cite: 131] */ /* Brighter blue */
 }
 
 /* Excel select */
 .excel-select {
-  font-size: 14px;
+  font-size: 14px; /* [cite: 131] */
+  width: 100%; /* Ensure select fills space */
+}
+/* Style trigger specifically */
+.excel-select > button {
+    height: 100%;
+    border-radius: 0;
+    border: none; /* Remove trigger border in view mode */
+    padding: 6px 8px;
+    box-sizing: border-box;
+    justify-content: space-between; /* Align icon right */
+    background-color: transparent;
+}
+.excel-cell-selected .excel-select > button {
+    border: 2px solid #217346; /* Add border only when selected */
+    background-color: white;
 }
 
-/* Excel row alternate colors used for future styling */
-/* .excel-row-even {
-  background-color: #f9f9f9;
-} */
 
 /* Excel pagination */
 .excel-pagination {
-  margin-top: 16px;
-  padding: 8px;
-  border-top: 1px solid #e0e0e0;
-  display: flex;
-  justify-content: center;
+  margin-top: 16px; /* [cite: 133] */
+  padding: 8px; /* [cite: 133] */
+  border-top: 1px solid #e0e0e0; /* [cite: 133] */
+  display: flex; /* [cite: 133] */
+  justify-content: center; /* [cite: 133] */
 }
 
 .excel-pagination-button {
-  color: #217346;
+  color: #217346; /* [cite: 134] */
+  /* Add other button styling if needed */
 }
 
 /* Excel footer */
 .excel-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-top: 1px solid #e0e0e0;
-  background-color: #f9f9f9;
+  display: flex; /* [cite: 134] */
+  align-items: center; /* [cite: 134] */
+  gap: 16px; /* [cite: 134] */ /* Increased gap */
+  padding: 8px 16px; /* [cite: 134] */
+  border-top: 1px solid #e0e0e0; /* [cite: 135] */
+  background-color: #f9f9f9; /* [cite: 135] */
 }
 
 .excel-page-size-label {
-  font-size: 14px;
-  color: #666666;
+  font-size: 14px; /* [cite: 135] */
+  color: #666666; /* [cite: 135] */
 }
 
 .excel-page-size-select {
-  font-size: 14px;
+  font-size: 14px; /* [cite: 135] */
 }
 
 .excel-status-info {
-  margin-left: 16px;
-  font-size: 14px;
-  color: #666666;
+  margin-left: auto; /* [cite: 136] */ /* Push to right */
+  font-size: 14px; /* [cite: 136] */
+  color: #666666; /* [cite: 136] */
 }
 
 .error-column-header {
-  background-color: #fee2e2 !important;
-  border: 2px solid #ef4444 !important;
+  background-color: #fee2e2 !important; /* [cite: 136] */
+  border: 1px solid #ef4444 !important; /* [cite: 136] */ /* Changed border width */
 }
 
-.error-column-cell {
-  background-color: #fef2f2 !important;
-  border-right: 2px solid #ef4444 !important;
-  border-left: 2px solid #ef4444 !important;
-  animation: error-flash 5s;
+.error-column-cell { /* Applied to TD in add row */
+  background-color: #fef2f2 !important; /* [cite: 137] */
+  /* Removed border here, applied to input instead */
+  /* animation: error-flash 5s; */ /* [cite: 137] */ /* Removed animation */
+}
+.excel-new-row .error-column-cell .excel-input { /* Target input in error cell */
+    border: 1px solid #ef4444 !important;
+    outline: 1px solid #ef4444 !important;
 }
 
-.excel-new-row-error {
-  background-color: #fee2e2 !important;
-  animation: error-flash 5s;
-}
 
+.excel-new-row-error { /* Applied to the TR for adding */
+  background-color: #fee2e2 !important; /* [cite: 138] */
+  /* animation: error-flash 5s; */ /* [cite: 138] */ /* Removed animation */
+}
+/* Flash effect was removed as it might be jarring */
+/* @keyframes error-flash { ... } */ /**/
+
+
+/* Sticky Header Adjustments */
 /* Ensure data headers stay below the numbering column header */
 .excel-column-header {
+  position: sticky; /* [cite: 138] */
+  top: 28px; /* [cite: 139] */ /* Height of alpha header */
+  z-index: 3; /* [cite: 139] */
+}
+/* Adjust z-index for the column letters header */
+.excel-header-row th { /* Target TH in alpha row */
   position: sticky;
   top: 0;
-  z-index: 3; /* Lower than numbering's z-index */
+  z-index: 5; /* [cite: 139] */
 }
+/* Override z-index for specific sticky headers in alpha row */
+.excel-header-row .excel-column-checkbox-selector { z-index: 6; background-color: #e6e6e6; }
+.excel-header-row .excel-column-checkbox { z-index: 5; background-color: #e6e6e6; } /* Row number in alpha */
+.excel-header-row .excel-actions-header { z-index: 5; background-color: #e6e6e6; }
 
-/* Adjust z-index for the column letters header */
-.excel-header-row .excel-row-number-header {
-  z-index: 5; /* Higher than data headers */
-}
-
-/* Hover state for row numbers */
-.excel-data-row:hover .excel-row-number {
-  background-color: #edf5fd; /* Match row hover color */
-}
 
 /* Add green scrollbar to the table container */
 .table-scroll-container::-webkit-scrollbar {
-  height: 12px;
-  background-color: #f0fdf4;
+  height: 12px; /* [cite: 141] */
+  width: 12px; /* Added width */
+  background-color: #f0fdf4; /* [cite: 141] */
 }
 
 .table-scroll-container::-webkit-scrollbar-track {
-  background: #f0fdf4;
-  border-radius: 6px;
+  background: #f0fdf4; /* [cite: 142] */
+  border-radius: 6px; /* [cite: 142] */
 }
 
 .table-scroll-container::-webkit-scrollbar-thumb {
-  background: #16a34a;
-  border-radius: 6px;
-  border: 2px solid #f0fdf4;
+  background: #16a34a; /* [cite: 142] */
+  border-radius: 6px; /* [cite: 142] */
+  border: 2px solid #f0fdf4; /* [cite: 142] */
 }
 
 .table-scroll-container::-webkit-scrollbar-thumb:hover {
-  background: #22c55e;
+  background: #22c55e; /* [cite: 143] */
 }
 
-@keyframes error-flash {
-  0% { background-color: #fee2e2; }
-  90% { background-color: #fef2f2; }
-  100% { background-color: inherit; }
+/* Ensure sticky backgrounds cover content */
+th, td {
+    background-clip: padding-box; /* Prevents background from going under border */
 }
+
 </style>
