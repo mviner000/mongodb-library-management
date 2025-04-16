@@ -62,6 +62,13 @@ pub fn get_pinned_properties() -> Document {
             "bsonType": "bool", 
             "description": "Flag indicating if the document is pinned (true) or not (false)" 
         },
+        "pinned_by": {
+            "bsonType": "array",
+            "description": "Array of strings representing who pinned this document",
+            "items": {
+                "bsonType": "string"
+            }
+        },
         "pinned_history": {
             "bsonType": "array",
             "description": "Log of pin and unpin actions",
@@ -413,6 +420,7 @@ fn get_default_column_widths(collection_name: &str) -> Document {
             "password": DEFAULT_COLUMN_WIDTH,
             "is_archive": DEFAULT_COLUMN_WIDTH,
             "is_pinned": DEFAULT_COLUMN_WIDTH,
+            "pinned_by": DEFAULT_COLUMN_WIDTH,
             "created_at": DEFAULT_COLUMN_WIDTH, 
             "updated_at": DEFAULT_COLUMN_WIDTH
         },
@@ -423,6 +431,7 @@ fn get_default_column_widths(collection_name: &str) -> Document {
             "is_valid": DEFAULT_COLUMN_WIDTH,
             "is_archive": DEFAULT_COLUMN_WIDTH,
             "is_pinned": DEFAULT_COLUMN_WIDTH,
+            "pinned_by": DEFAULT_COLUMN_WIDTH,
             "created_at": DEFAULT_COLUMN_WIDTH, 
             "label": DEFAULT_COLUMN_WIDTH
         },
@@ -458,9 +467,10 @@ fn get_field_names_for_collection(collection_name: &str) -> Vec<&str> {
         _ => vec!["created_at", "updated_at"] // Fallback for unknown collections
     };
     
-    // Add is_archive and is_pinned fields to each collection's fields
+    // Add is_archive, is_pinned, and pinned_by fields to each collection's fields
     fields.push("is_archive");
     fields.push("is_pinned");
+    fields.push("pinned_by");
     fields
 }
 // metadata for collections ends here

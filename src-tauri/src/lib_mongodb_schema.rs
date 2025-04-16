@@ -296,6 +296,7 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "last_updated_semester_id": default_column_width,
             "is_archive": default_column_width,
             "is_pinned": default_column_width,
+            "pinned_by": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
@@ -307,6 +308,7 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "purpose_label": default_column_width,
             "is_archive": default_column_width,
             "is_pinned": default_column_width,
+            "pinned_by": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
@@ -316,6 +318,7 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "is_deleted": default_column_width,
             "is_archive": default_column_width,
             "is_pinned": default_column_width,
+            "pinned_by": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
@@ -324,6 +327,7 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "is_active": default_column_width,
             "is_archive": default_column_width,
             "is_pinned": default_column_width,
+            "pinned_by": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
@@ -333,6 +337,7 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "label": default_column_width,
             "is_archive": default_column_width,
             "is_pinned": default_column_width,
+            "pinned_by": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },

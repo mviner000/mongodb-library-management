@@ -1080,7 +1080,8 @@ pub async fn pin_document_handler(
                                 "action": "pin",
                                 "user_id": user_oid,
                                 "timestamp": now
-                            }
+                            },
+                            "pinned_by": user_id  // Add user ID to pinned_by array
                         }
                     };
 
@@ -1226,6 +1227,9 @@ pub async fn unpin_document_handler(
                                 "user_id": user_oid,
                                 "timestamp": now
                             }
+                        },
+                        "$pull": {
+                            "pinned_by": user_id  // Remove user ID from pinned_by array
                         }
                     };
 
@@ -1271,8 +1275,8 @@ pub async fn unpin_document_handler(
 // Helper function to check if the schema includes the 'is_pinned' property
 fn schema_has_pinned_property(schema: &Document) -> bool {
     if let Ok(properties) = schema.get_document("properties") {
-        let has = properties.contains_key("is_pinned");
-        tracing::debug!("Schema has is_pinned: {}", has);
+        let has = properties.contains_key("pinned_by");
+        tracing::debug!("Schema has pinned_by: {}", has);
         has
     } else {
         tracing::error!("Schema properties not found");
