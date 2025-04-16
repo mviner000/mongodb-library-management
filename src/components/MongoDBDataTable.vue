@@ -502,9 +502,47 @@
     selectedCellInfo.value = null
   }
 
-  const pinCell = () => {
-    if (!selectedCellInfo.value) return
-    console.log('Pinning cell:', selectedCellInfo.value)
+  const pinCell = async () => {
+    console.log('pinCell: Function called')
+
+    if (!selectedCellInfo.value) {
+      console.warn('pinCell: No cell selected')
+      return
+    }
+
+    if (isSelectedArchived.value) {
+      console.warn('pinCell: Selected document is archived, cannot pin/unpin')
+      return
+    }
+
+    const rowIndex = selectedCellInfo.value.rowIndex
+    console.log(`pinCell: Selected row index: ${rowIndex}`)
+
+    const doc = paginatedDocuments.value[rowIndex]
+    if (!doc) {
+      console.warn(`pinCell: No document found at row index ${rowIndex}`)
+      return
+    }
+
+    console.log(
+      `pinCell: Document ID: ${doc._id.$oid}, Current pin state: ${doc.is_pinned ? 'pinned' : 'unpinned'}`
+    )
+
+    try {
+      if (doc.is_pinned) {
+        console.log(`pinCell: Document is currently pinned, attempting to unpin`)
+        await dataTableStore.unpinDocument(doc._id.$oid)
+        console.log(`pinCell: Unpin operation completed`)
+      } else {
+        console.log(`pinCell: Document is currently unpinned, attempting to pin`)
+        await dataTableStore.pinDocument(doc._id.$oid)
+        console.log(`pinCell: Pin operation completed`)
+      }
+    } catch (error) {
+      console.error('pinCell: Pin/Unpin error:', error)
+    }
+
+    console.log('pinCell: Closing context menu')
     closeContextMenu()
   }
 
@@ -542,6 +580,25 @@
 
     return isArchived
   })
+
+  const selectedDocumentIsPinned = computed(() => {
+    if (!selectedCellInfo.value) return false
+    const rowIndex = selectedCellInfo.value.rowIndex
+    const document = paginatedDocuments.value[rowIndex]
+    return document?.is_pinned === true
+  })
+
+  const togglePinStatus = async (docId: string, currentPinStatus: boolean): Promise<void> => {
+    try {
+      if (currentPinStatus) {
+        await dataTableStore.unpinDocument(docId)
+      } else {
+        await dataTableStore.pinDocument(docId)
+      }
+    } catch (error) {
+      console.error('Error toggling pin status:', error)
+    }
+  }
 </script>
 
 <template>
@@ -750,10 +807,26 @@
                   maxWidth: numberColumnWidth,
                 }"
               >
-                <span class="relative inline-block">
-                  <span class="text-xl absolute top-1 left-0 -translate-y-1/2">📌</span>
+                <div
+                  class="relative inline-block w-full h-full cursor-pointer"
+                  @click.stop="togglePinStatus(doc._id.$oid, doc.is_pinned)"
+                  :class="{ 'hover:bg-gray-100': !doc.is_archive }"
+                  :title="
+                    doc.is_archive
+                      ? 'Cannot pin/unpin archived items'
+                      : doc.is_pinned
+                        ? 'Click to unpin'
+                        : 'Click to pin'
+                  "
+                >
+                  <span
+                    v-if="doc.is_pinned"
+                    class="text-xl absolute top-1 left-[5px] -translate-y-1/2"
+                  >
+                    📌
+                  </span>
                   <span class="">{{ (currentPage - 1) * pageSize + rowIndex + 1 }}</span>
-                </span>
+                </div>
               </TableCell>
               <TableCell
                 v-for="header in tableHeaders"
@@ -935,7 +1008,10 @@
                 @mouseenter="isSelectedArchived && (showPinTooltip = true)"
                 @mouseleave="showPinTooltip = false"
               >
-                <span>📌 Pin the item</span>
+                <span>
+                  <template v-if="selectedDocumentIsPinned">📌 Unpin this item</template>
+                  <template v-else>📌 Pin this item</template>
+                </span>
                 <!-- Custom tooltip -->
                 <div
                   v-if="isSelectedArchived && showPinTooltip"
@@ -954,6 +1030,7 @@
                 🔖 Bookmark
               </div>
             </div>
+
             <!-- End of Context Menu -->
           </template>
 

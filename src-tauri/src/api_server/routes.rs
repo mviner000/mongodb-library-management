@@ -36,6 +36,8 @@ use crate::api_server::{
             batch_archive_documents_handler,
             recover_document_handler,
             batch_recover_documents_handler,
+            pin_document_handler,
+            unpin_document_handler,
 
         },
         system_handlers::{
@@ -109,6 +111,8 @@ pub fn create_api_router() -> (Router<Arc<Mutex<ApiServerState>>>, Vec<String>) 
         "/collections/:collection_name/documents/batch-recover", 
         batch_recover_documents_handler
     );
+    add_route!(Method::PUT, "/collections/:collection_name/documents/:id/pin", pin_document_handler);
+add_route!(Method::PUT, "/collections/:collection_name/documents/:id/unpin", unpin_document_handler);
     
     // Auth routes
     add_route!(Method::POST, "/api/auth/login", auth_login_handler);

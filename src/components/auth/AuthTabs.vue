@@ -7,18 +7,22 @@
         <button
           @click="activeTab = 'login'"
           class="px-4 py-2 -mb-px font-medium text-sm transition-colors"
-          :class="activeTab === 'login'
-            ? 'border-b-2 border-blue-500 text-blue-600'
-            : 'text-gray-600 hover:text-blue-500'"
+          :class="
+            activeTab === 'login'
+              ? 'border-b-2 border-blue-500 text-blue-600'
+              : 'text-gray-600 hover:text-blue-500'
+          "
         >
           Login
         </button>
         <button
           @click="handleRegisterTabClick"
           class="px-4 py-2 -mb-px font-medium text-sm transition-colors"
-          :class="activeTab === 'register'
-            ? 'border-b-2 border-blue-500 text-blue-600'
-            : 'text-gray-600 hover:text-blue-500'"
+          :class="
+            activeTab === 'register'
+              ? 'border-b-2 border-blue-500 text-blue-600'
+              : 'text-gray-600 hover:text-blue-500'
+          "
         >
           {{ registerUnlocked ? '🔓 Register' : '🔒 Register' }}
         </button>
@@ -43,7 +47,7 @@
               required
               class="w-full p-2 border rounded-md"
               aria-label="Email or Username"
-            >
+            />
           </div>
           <div class="mb-4">
             <label class="block text-sm font-medium mb-1">Password</label>
@@ -53,9 +57,13 @@
               required
               class="w-full p-2 border rounded-md"
               aria-label="Password"
-            >
+            />
           </div>
-          <div v-if="loginError" class="mb-4 text-red-500 text-sm" role="alert">
+          <div
+            v-if="loginError"
+            class="mb-4 text-red-500 text-sm"
+            role="alert"
+          >
             {{ loginError }}
           </div>
           <button
@@ -64,9 +72,25 @@
             :disabled="isLoginLoading"
           >
             <span v-if="isLoginLoading">
-              <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              <svg
+                class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  class="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  stroke-width="4"
+                ></circle>
+                <path
+                  class="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
               </svg>
               {{ loginLoadingText }}
             </span>
@@ -76,7 +100,7 @@
       </div>
 
       <div v-if="activeTab === 'register' && registerUnlocked">
-       <form @submit.prevent="handleRegisterSubmit">
+        <form @submit.prevent="handleRegisterSubmit">
           <div class="mb-4">
             <label class="block text-sm font-medium mb-1">Username</label>
             <input
@@ -84,7 +108,7 @@
               type="text"
               required
               class="w-full p-2 border rounded-md"
-            >
+            />
           </div>
           <div class="mb-4">
             <label class="block text-sm font-medium mb-1">Email</label>
@@ -93,7 +117,7 @@
               type="email"
               required
               class="w-full p-2 border rounded-md"
-            >
+            />
           </div>
           <div class="mb-4">
             <label class="block text-sm font-medium mb-1">Password</label>
@@ -103,7 +127,7 @@
               required
               minlength="3"
               class="w-full p-2 border rounded-md"
-            >
+            />
             <p class="text-xs text-gray-500 mt-1">Minimum 3 characters with at least one number</p>
           </div>
           <div class="mb-4">
@@ -113,9 +137,12 @@
               type="password"
               required
               class="w-full p-2 border rounded-md"
-            >
+            />
           </div>
-          <div v-if="registerError" class="mb-4 text-red-500 text-sm">
+          <div
+            v-if="registerError"
+            class="mb-4 text-red-500 text-sm"
+          >
             {{ registerError }}
           </div>
           <button
@@ -133,173 +160,188 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
-// Remove unused PinInput imports from ui if they were specific to a library
-// import { PinInput, PinInputInput, PinInputGroup } from '@/components/ui/pin-input'
-import PinInputDialog from '@/components/PinInputDialog.vue'; // Import the new component
-import { apiFetch } from '@/utils/api'
-import { useToast } from '@/components/ui/toast'
-const { toast } = useToast()
+  import { ref, watch, onMounted } from 'vue'
+  // Remove unused PinInput imports from ui if they were specific to a library
+  // import { PinInput, PinInputInput, PinInputGroup } from '@/components/ui/pin-input'
+  import PinInputDialog from '@/components/PinInputDialog.vue' // Import the new component
+  import { apiFetch } from '@/utils/api'
+  import { useToast } from '@/components/ui/toast'
+  import { AUTH_CONSTANTS } from '@/constants/auth'
+  const { toast } = useToast()
 
-const props = defineProps({
-  isAuthenticated: {
-    type: Boolean,
-    default: false
+  const props = defineProps({
+    isAuthenticated: {
+      type: Boolean,
+      default: false,
+    },
+  })
+
+  const emit = defineEmits(['login', 'register', 'close'])
+
+  // Active tab state
+  const activeTab = ref('login')
+
+  // Login form state
+  const loginForm = ref({
+    identifier: '',
+    password: '',
+  })
+  const loginError = ref('')
+  const isLoginLoading = ref(false)
+  const loginLoadingText = ref('Logging in...')
+
+  // Register form state
+  const registerForm = ref({
+    username: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+  })
+  const registerError = ref('')
+  const isRegisterLoading = ref(false)
+
+  // PIN Input state
+  const showPinModal = ref(false)
+  const registrationPin = ref('000000')
+  const showPinDigits = ref(false)
+
+  // Registration lock state
+  const registerUnlocked = ref(false)
+
+  // Check registration lock status
+  const checkRegisterStatus = () => {
+    const storedTime = sessionStorage.getItem('registerUnlocked')
+    if (!storedTime) {
+      registerUnlocked.value = false
+      return
+    }
+
+    const unlockTime = parseInt(storedTime, 10)
+    const currentTime = Date.now()
+    registerUnlocked.value = currentTime - unlockTime <= 3600000 // 1 hour
   }
-})
 
-const emit = defineEmits(['login', 'register', 'close'])
-
-// Active tab state
-const activeTab = ref('login')
-
-// Login form state
-const loginForm = ref({
-  identifier: '',
-  password: ''
-})
-const loginError = ref('')
-const isLoginLoading = ref(false)
-const loginLoadingText = ref('Logging in...')
-
-// Register form state
-const registerForm = ref({
-  username: '',
-  email: '',
-  password: '',
-  confirmPassword: ''
-})
-const registerError = ref('')
-const isRegisterLoading = ref(false)
-
-// PIN Input state
-const showPinModal = ref(false)
-const registrationPin = ref('000000');
-const showPinDigits = ref(false);
-
-// Registration lock state
-const registerUnlocked = ref(false)
-
-// Check registration lock status
-const checkRegisterStatus = () => {
-  const storedTime = sessionStorage.getItem('registerUnlocked')
-  if (!storedTime) {
-    registerUnlocked.value = false
-    return
+  // Handle register tab click
+  const handleRegisterTabClick = () => {
+    checkRegisterStatus() // Re-check status just in case
+    if (!registerUnlocked.value) {
+      // Only logic needed here is to show the modal
+      showPinModal.value = true
+      return
+    }
+    activeTab.value = 'register'
   }
 
-  const unlockTime = parseInt(storedTime, 10)
-  const currentTime = Date.now()
-  registerUnlocked.value = (currentTime - unlockTime) <= 3600000 // 1 hour
-}
-
-// Handle register tab click
-const handleRegisterTabClick = () => {
-  checkRegisterStatus(); // Re-check status just in case
-  if (!registerUnlocked.value) {
-    // Only logic needed here is to show the modal
-    showPinModal.value = true;
-    return
+  // Handle successful PIN entry (emitted from PinInputDialog)
+  const handlePinSuccess = (enteredPin: string) => {
+    console.log('Correct PIN entered:', enteredPin) // Optional logging
+    const currentTime = Date.now()
+    sessionStorage.setItem('registerUnlocked', currentTime.toString())
+    registerUnlocked.value = true // Update status immediately
+    showPinModal.value = false // Close the modal
+    activeTab.value = 'register' // Switch to register tab
   }
-  activeTab.value = 'register'
-}
 
-// Handle successful PIN entry (emitted from PinInputDialog)
-const handlePinSuccess = (enteredPin: string) => {
-  console.log('Correct PIN entered:', enteredPin); // Optional logging
-  const currentTime = Date.now()
-  sessionStorage.setItem('registerUnlocked', currentTime.toString())
-  registerUnlocked.value = true; // Update status immediately
-  showPinModal.value = false // Close the modal
-  activeTab.value = 'register' // Switch to register tab
-}
-
-// Handle PIN cancellation (emitted from PinInputDialog)
-const handlePinCancel = () => {
-    console.log('PIN entry cancelled');
+  // Handle PIN cancellation (emitted from PinInputDialog)
+  const handlePinCancel = () => {
+    console.log('PIN entry cancelled')
     // The v-model already handles setting showPinModal to false
     // No extra action needed unless required by specific logic
-}
-
-// Watch for authentication state changes
-watch(() => props.isAuthenticated, (newValue) => {
-  if (newValue === true) {
-    // Don't close immediately - it's now handled in handleLoginSubmit with a delay
-  }
-})
-
-const handleLoginSubmit = async () => {
-  loginError.value = ''
-  isLoginLoading.value = true
-  loginLoadingText.value = 'Logging in...'
-
-  try {
-    // Emit login event to handle API call in parent
-    await emit('login', loginForm.value.identifier, loginForm.value.password)
-
-    // Update loading text for the delay period
-    loginLoadingText.value = 'Success! Redirecting...'
-
-    // Add a 2-second delay before closing the modal
-    setTimeout(() => {
-      isLoginLoading.value = false
-      emit('close')
-    }, 2000)
-
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Login failed'
-    loginError.value = message
-    toast({
-      title: 'Login Failed',
-      description: message,
-      variant: 'destructive'
-    })
-    isLoginLoading.value = false
-  }
-}
-
-const handleRegisterSubmit = async () => {
-  registerError.value = ''
-
-  if (registerForm.value.password !== registerForm.value.confirmPassword) {
-    registerError.value = 'Passwords do not match'
-    return
   }
 
-  isRegisterLoading.value = true
+  // Watch for authentication state changes
+  watch(
+    () => props.isAuthenticated,
+    (newValue) => {
+      if (newValue === true) {
+        // Don't close immediately - it's now handled in handleLoginSubmit with a delay
+      }
+    }
+  )
 
-  try {
-    await apiFetch<void>('/api/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({
-        username: registerForm.value.username,
-        email: registerForm.value.email,
-        password: registerForm.value.password
+  const handleLoginSubmit = async () => {
+    loginError.value = ''
+    isLoginLoading.value = true
+    loginLoadingText.value = 'Logging in...'
+
+    try {
+      // Call the login API endpoint
+      const loginResponse = await apiFetch<{ token: string }>('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({
+          identifier: loginForm.value.identifier,
+          password: loginForm.value.password,
+        }),
       })
-    })
 
-    toast({
-      title: 'Registration successful',
-      description: 'You can now log in with your credentials',
-    })
+      // Store the token in localStorage
+      localStorage.setItem(AUTH_CONSTANTS.TOKEN_KEY, loginResponse.token)
 
-    activeTab.value = 'login'
-    registerForm.value = { username: '', email: '', password: '', confirmPassword: '' }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Registration failed'
-    registerError.value = message
-    toast({
-      title: 'Registration Failed',
-      description: message,
-      variant: 'destructive'
-    })
-  } finally {
-    isRegisterLoading.value = false
+      // Update loading text for the delay period
+      loginLoadingText.value = 'Success! Redirecting...'
+
+      // Emit login event to inform parent
+      emit('login', loginForm.value.identifier, loginForm.value.password)
+
+      // Add a 2-second delay before closing the modal
+      setTimeout(() => {
+        isLoginLoading.value = false
+        emit('close')
+      }, 2000)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Login failed'
+      loginError.value = message
+      toast({
+        title: 'Login Failed',
+        description: message,
+        variant: 'destructive',
+      })
+      isLoginLoading.value = false
+    }
   }
-}
 
-// Initial check on component mount
-onMounted(() => {
-  checkRegisterStatus()
-})
+  const handleRegisterSubmit = async () => {
+    registerError.value = ''
+
+    if (registerForm.value.password !== registerForm.value.confirmPassword) {
+      registerError.value = 'Passwords do not match'
+      return
+    }
+
+    isRegisterLoading.value = true
+
+    try {
+      await apiFetch<void>('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: registerForm.value.username,
+          email: registerForm.value.email,
+          password: registerForm.value.password,
+        }),
+      })
+
+      toast({
+        title: 'Registration successful',
+        description: 'You can now log in with your credentials',
+      })
+
+      activeTab.value = 'login'
+      registerForm.value = { username: '', email: '', password: '', confirmPassword: '' }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Registration failed'
+      registerError.value = message
+      toast({
+        title: 'Registration Failed',
+        description: message,
+        variant: 'destructive',
+      })
+    } finally {
+      isRegisterLoading.value = false
+    }
+  }
+
+  // Initial check on component mount
+  onMounted(() => {
+    checkRegisterStatus()
+  })
 </script>
