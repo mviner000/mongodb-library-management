@@ -55,10 +55,50 @@ pub fn get_archive_properties() -> Document {
     }
 }
 
+// Helper function to get pinned properties schema to be reused - made public
+pub fn get_pinned_properties() -> Document {
+    doc! {
+        "is_pinned": { 
+            "bsonType": "bool", 
+            "description": "Flag indicating if the document is pinned (true) or not (false)" 
+        },
+        "pinned_history": {
+            "bsonType": "array",
+            "description": "Log of pin and unpin actions",
+            "items": {
+                "bsonType": "object",
+                "required": ["action", "user_id", "timestamp"],
+                "properties": {
+                    "action": { 
+                        "bsonType": "string", 
+                        "enum": ["pin", "unpin"], 
+                        "description": "The action performed" 
+                    },
+                    "user_id": { 
+                        "bsonType": "objectId", 
+                        "description": "REF:users | ID of the user performing the action" 
+                    },
+                    "timestamp": { 
+                        "bsonType": "date", 
+                        "description": "Timestamp of the action" 
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Helper function to create archive index - made public
 pub fn create_archive_index() -> IndexModel {
     IndexModel::builder()
         .keys(doc! { "is_archive": 1 })
+        .build()
+}
+
+// Helper function to create pinned index - made public
+pub fn create_pinned_index() -> IndexModel {
+    IndexModel::builder()
+        .keys(doc! { "is_pinned": 1 })
         .build()
 }
 
@@ -69,6 +109,21 @@ pub fn merge_with_archive_properties(properties: Document) -> Document {
         merged.insert(key, value);
     }
     merged
+}
+
+// Helper function to merge document properties with pinned properties - made public
+pub fn merge_with_pinned_properties(properties: Document) -> Document {
+    let mut merged = properties;
+    for (key, value) in get_pinned_properties() {
+        merged.insert(key, value);
+    }
+    merged
+}
+
+// Helper function to merge document properties with both archive and pinned properties - made public
+pub fn merge_with_archive_and_pinned_properties(properties: Document) -> Document {
+    let with_archive = merge_with_archive_properties(properties);
+    merge_with_pinned_properties(with_archive)
 }
 
 async fn create_users_collection(db: &Database) -> Result<()> {
@@ -92,10 +147,14 @@ async fn create_users_collection(db: &Database) -> Result<()> {
 
     // Add archive index
     let archive_index = create_archive_index();
+    
+    // Add pinned index
+    let pinned_index = create_pinned_index();
 
     collection.create_index(username_index, None).await?;
     collection.create_index(email_index, None).await?;
     collection.create_index(archive_index, None).await?;
+    collection.create_index(pinned_index, None).await?;
 
     // Define base properties for this collection
     let base_properties = doc! {
@@ -122,8 +181,8 @@ async fn create_users_collection(db: &Database) -> Result<()> {
         }
     };
     
-    // Merge with archive properties
-    let properties = merge_with_archive_properties(base_properties);
+    // Merge with archive and pinned properties
+    let properties = merge_with_archive_and_pinned_properties(base_properties);
 
     // Apply validator schema using collMod
     db.run_command(
@@ -167,6 +226,8 @@ async fn create_sessions_collection(db: &Database) -> Result<()> {
             .build(),
         // Add archive index
         create_archive_index(),
+        // Add pinned index
+        create_pinned_index(),
     ];
 
     collection.create_indexes(indexes, None).await?;
@@ -199,8 +260,8 @@ async fn create_sessions_collection(db: &Database) -> Result<()> {
         }
     };
     
-    // Merge with archive properties
-    let properties = merge_with_archive_properties(base_properties);
+    // Merge with archive and pinned properties
+    let properties = merge_with_archive_and_pinned_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -351,6 +412,7 @@ fn get_default_column_widths(collection_name: &str) -> Document {
             "email": DEFAULT_COLUMN_WIDTH, 
             "password": DEFAULT_COLUMN_WIDTH,
             "is_archive": DEFAULT_COLUMN_WIDTH,
+            "is_pinned": DEFAULT_COLUMN_WIDTH,
             "created_at": DEFAULT_COLUMN_WIDTH, 
             "updated_at": DEFAULT_COLUMN_WIDTH
         },
@@ -360,6 +422,7 @@ fn get_default_column_widths(collection_name: &str) -> Document {
             "expires_at": DEFAULT_COLUMN_WIDTH,
             "is_valid": DEFAULT_COLUMN_WIDTH,
             "is_archive": DEFAULT_COLUMN_WIDTH,
+            "is_pinned": DEFAULT_COLUMN_WIDTH,
             "created_at": DEFAULT_COLUMN_WIDTH, 
             "label": DEFAULT_COLUMN_WIDTH
         },
@@ -384,7 +447,7 @@ fn get_default_sort_field(collection_name: &str) -> &str {
 
 // Helper function to get field names for a collection - reduced to essential collections
 fn get_field_names_for_collection(collection_name: &str) -> Vec<&str> {
-    // Add is_archive to all collection field lists
+    // Add is_archive and is_pinned to all collection field lists
     let mut fields = match collection_name {
         "users" => vec![
             "username", "email", "password", "created_at", "updated_at"
@@ -395,8 +458,9 @@ fn get_field_names_for_collection(collection_name: &str) -> Vec<&str> {
         _ => vec!["created_at", "updated_at"] // Fallback for unknown collections
     };
     
-    // Add is_archive field to each collection's fields
+    // Add is_archive and is_pinned fields to each collection's fields
     fields.push("is_archive");
+    fields.push("is_pinned");
     fields
 }
 // metadata for collections ends here

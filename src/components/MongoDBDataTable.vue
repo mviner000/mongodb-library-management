@@ -28,6 +28,7 @@
     PaginationNext,
     PaginationPrev,
   } from '@/components/ui/pagination' // [cite: 79]
+  import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
   import { ScrollArea } from '@/components/ui/scroll-area' // [cite: 40]
   // Remove toast import if not used directly in setup, it's in the store
   // import { useToast } from '@/components/ui/toast/use-toast';
@@ -119,7 +120,7 @@
   }) // [cite: 9]
   const selectedCell = ref<{ colIndex: number; rowNumber: number } | null>(null) // [cite: 2]
   const timeoutId = ref<number | null>(null) // For error message timeout [cite: 1] - Keep or remove based on preference
-
+  const showPinTooltip = ref(false)
   // Props
   const props = defineProps<{
     selectedCollection?: string
@@ -522,6 +523,25 @@
   onBeforeUnmount(() => {
     window.removeEventListener('click', closeContextMenu)
   })
+  const isSelectedArchived = computed(() => {
+    console.log('Computing isSelectedArchived')
+
+    if (!selectedCellInfo.value) {
+      console.log('No selectedCellInfo, returning false')
+      return false
+    }
+
+    const rowIndex = selectedCellInfo.value.rowIndex
+    console.log('Selected row index:', rowIndex)
+
+    const document = paginatedDocuments.value[rowIndex]
+    console.log('Selected document:', document)
+
+    const isArchived = document?.is_archive === true
+    console.log('Is document archived:', isArchived)
+
+    return isArchived
+  })
 </script>
 
 <template>
@@ -905,10 +925,27 @@
               @click="closeContextMenu"
             >
               <div
-                class="flex items-center px-3 py-1.5 text-sm hover:bg-gray-100 rounded-sm cursor-pointer"
+                class="flex items-center px-3 py-1.5 text-sm rounded-sm relative tooltip-container"
+                :class="[
+                  isSelectedArchived
+                    ? 'text-gray-400 cursor-not-allowed'
+                    : 'hover:bg-gray-100 cursor-pointer text-gray-700',
+                ]"
                 @click="pinCell"
+                @mouseenter="isSelectedArchived && (showPinTooltip = true)"
+                @mouseleave="showPinTooltip = false"
               >
-                📌 Pin
+                <span>📌 Pin the item</span>
+                <!-- Custom tooltip -->
+                <div
+                  v-if="isSelectedArchived && showPinTooltip"
+                  class="custom-tooltip absolute bg-gray-800 text-white text-xs rounded py-1 px-2 left-0 bottom-full mb-1 whitespace-nowrap pointer-events-none z-50"
+                >
+                  You cannot pin an archived item
+                  <div
+                    class="tooltip-arrow absolute top-full left-4 w-2 h-2 bg-gray-800 transform rotate-45"
+                  ></div>
+                </div>
               </div>
               <div
                 class="flex items-center px-3 py-1.5 text-sm hover:bg-gray-100 rounded-sm cursor-pointer"
@@ -1156,6 +1193,34 @@
 
 <style scoped>
   /* Context Menu */
+  .tooltip-container {
+    position: relative;
+  }
+
+  .custom-tooltip {
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    animation: fadeIn 0.2s ease-in-out;
+  }
+
+  .tooltip-arrow {
+    position: absolute;
+    top: 100%;
+    left: 10px;
+    margin-top: -4px;
+    width: 8px;
+    height: 8px;
+    transform: rotate(45deg);
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
   .excel-cell-context-selected {
     outline: 2px solid #217346;
     outline-offset: -2px;

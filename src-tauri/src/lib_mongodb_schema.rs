@@ -7,7 +7,11 @@ use mongodb::{
 };
 use mongodb::bson::{doc, Document};
 use anyhow::Result;
-use crate::mongodb_schema::{create_archive_index, merge_with_archive_properties};
+use crate::mongodb_schema::{
+    create_archive_index, 
+    create_pinned_index,
+    merge_with_archive_and_pinned_properties
+};
 
 // Library-specific collection for school accounts
 pub async fn create_lib_school_accounts_collection(db: &Database) -> Result<()> {
@@ -28,6 +32,7 @@ pub async fn create_lib_school_accounts_collection(db: &Database) -> Result<()> 
                 .build()))
             .build(),
         create_archive_index(),
+        create_pinned_index(),
     ];
     
     collection.create_indexes(indexes, None).await?;
@@ -50,8 +55,8 @@ pub async fn create_lib_school_accounts_collection(db: &Database) -> Result<()> 
         "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
     };
     
-    // Merge with archive properties
-    let properties = merge_with_archive_properties(base_properties);
+    // Merge with both archive and pinned properties
+    let properties = merge_with_archive_and_pinned_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -86,6 +91,7 @@ pub async fn create_lib_attendance_collection(db: &Database) -> Result<()> {
             .keys(doc! { "time_in_date": 1 })
             .build(),
         create_archive_index(),
+        create_pinned_index(),
     ];
     
     collection.create_indexes(indexes, None).await?;
@@ -101,8 +107,8 @@ pub async fn create_lib_attendance_collection(db: &Database) -> Result<()> {
         "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
     };
     
-    // Merge with archive properties
-    let properties = merge_with_archive_properties(base_properties);
+    // Merge with both archive and pinned properties
+    let properties = merge_with_archive_and_pinned_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -137,6 +143,7 @@ pub async fn create_lib_purposes_collection(db: &Database) -> Result<()> {
                 .build()))
             .build(),
         create_archive_index(),
+        create_pinned_index(),
     ];
     
     collection.create_indexes(indexes, None).await?;
@@ -150,8 +157,8 @@ pub async fn create_lib_purposes_collection(db: &Database) -> Result<()> {
         "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
     };
     
-    // Merge with archive properties
-    let properties = merge_with_archive_properties(base_properties);
+    // Merge with both archive and pinned properties
+    let properties = merge_with_archive_and_pinned_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -186,6 +193,7 @@ pub async fn create_lib_semesters_collection(db: &Database) -> Result<()> {
                 .build()))
             .build(),
         create_archive_index(),
+        create_pinned_index(),
     ];
     
     collection.create_indexes(indexes, None).await?;
@@ -198,8 +206,8 @@ pub async fn create_lib_semesters_collection(db: &Database) -> Result<()> {
         "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
     };
     
-    // Merge with archive properties
-    let properties = merge_with_archive_properties(base_properties);
+    // Merge with both archive and pinned properties
+    let properties = merge_with_archive_and_pinned_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -231,6 +239,7 @@ pub async fn create_lib_settings_styles_collection(db: &Database) -> Result<()> 
             .keys(doc! { "component_name": 1 })
             .build(),
         create_archive_index(),
+        create_pinned_index(),
     ];
     
     collection.create_indexes(indexes, None).await?;
@@ -244,8 +253,8 @@ pub async fn create_lib_settings_styles_collection(db: &Database) -> Result<()> 
         "updated_at": { "bsonType": "date", "description": "Last update timestamp (required)" }
     };
     
-    // Merge with archive properties
-    let properties = merge_with_archive_properties(base_properties);
+    // Merge with both archive and pinned properties
+    let properties = merge_with_archive_and_pinned_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -286,6 +295,7 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "is_active": default_column_width,
             "last_updated_semester_id": default_column_width,
             "is_archive": default_column_width,
+            "is_pinned": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
@@ -296,6 +306,7 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "classification": default_column_width,
             "purpose_label": default_column_width,
             "is_archive": default_column_width,
+            "is_pinned": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
@@ -304,6 +315,7 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "icon_name": default_column_width,
             "is_deleted": default_column_width,
             "is_archive": default_column_width,
+            "is_pinned": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
@@ -311,6 +323,7 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "label": default_column_width,
             "is_active": default_column_width,
             "is_archive": default_column_width,
+            "is_pinned": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
@@ -319,6 +332,7 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "tailwind_classes": default_column_width,
             "label": default_column_width,
             "is_archive": default_column_width,
+            "is_pinned": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
