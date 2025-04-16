@@ -36,6 +36,7 @@
   import TableActions from './mongodbtable/TableActions.vue' // [cite: 57]
   import StickyTableActions from './mongodbtable/StickyTableActions.vue' // [cite: 59]
   import MongoDBDataTableNavbar from './MongoDBDataTableNavbar.vue' // [cite: 1]
+  import StickyLeftSidebar from './StickyLeftSidebar.vue'
   // Remove FooterTabsBar import if not used in old template
   // import FooterTabsBar from './FooterTabsBar.vue';
 
@@ -103,6 +104,8 @@
   const isSplit = inject<Ref<boolean>>('isSplit')!
   const scrollContainer = ref<HTMLElement | null>(null) // [cite: 2]
   // const filterQuery = ref('{}'); // Kept local filter state
+
+  const isSidebarOpen = ref(false)
   const searchQuery = ref<Record<string, string>>({}) // [cite: 41]
   const resizingState = ref({
     isResizing: false,
@@ -602,187 +605,456 @@
 </script>
 
 <template>
-  <MongoDBDataTableNavbar
-    :isSplitActive="isSplit"
-    class="sticky top-0 z-50"
-  />
-  <div class="excel-container w-full">
-    <div
-      v-if="errorMessage"
-      class="fixed top-4 left-4 right-4 z-[9999] mx-4 my-4 p-4 bg-red-100 text-red-700 rounded-lg shadow-xl border-2 border-red-300 break-words"
-    >
-      {{ errorMessage }}
-      <Button
-        @click="closeErrorManual"
-        variant="ghost"
-        size="sm"
-        class="absolute right-3 top-3 p-1 h-6 w-6 text-red-700 hover:bg-red-200"
-      >
-        <Cross2Icon class="h-3 w-3" />
-      </Button>
-    </div>
-
-    <div
-      v-if="isLoading"
-      class="flex justify-center my-8"
-    >
-      <ReloadIcon class="h-8 w-8 animate-spin text-gray-500" />
-    </div>
-
-    <div
-      ref="scrollContainer"
-      class="w-full overflow-auto table-scroll-container"
-    >
-      <ExcelCellReference
-        :selected-cell="selectedCell"
-        :selected-rows="selectedRows"
-        :collection-name="collectionName"
-        :documents="documents"
-        :current-page="currentPage"
-        :page-size="pageSize"
-        :current-view="currentView"
-        @document-deleted="fetchDocuments"
-        @reset-selection="resetSelection"
-        @delete-start="handleDeleteStart"
-        @delete-end="handleDeleteEnd"
-        @view-change="handleViewChange"
+  <!-- MongoDBDataTable main div -->
+  <div
+    :class="isSidebarOpen ? 'ml-[280px]' : 'ml-0'"
+    class="transition-all duration-300 ease-in-out"
+  >
+    <MongoDBDataTableNavbar
+      :isSplitActive="isSplit"
+      class="sticky top-0 z-50"
+    />
+    <div class="excel-container w-full">
+      <StickyLeftSidebar
+        :isOpen="isSidebarOpen"
+        @toggle="isSidebarOpen = !isSidebarOpen"
       />
-      <table
-        class="mt-10 excel-table"
-        :style="{ width: `${totalTableWidth}px` }"
+      <div
+        v-if="errorMessage"
+        class="fixed top-4 left-4 right-4 z-[9999] mx-4 my-4 p-4 bg-red-100 text-red-700 rounded-lg shadow-xl border-2 border-red-300 break-words"
       >
-        <TableHeader>
-          <TableRow class="excel-header-row">
-            <TableHead
-              class="excel-column-checkbox-selector"
-              :style="{
-                width: '40px',
-                minWidth: '40px',
-                maxWidth: '40px',
-              }"
-            >
-              <input
-                type="checkbox"
-                :checked="allSelected"
-                @change="allSelected = !allSelected"
-                :disabled="documents.length === 0"
-                class="excel-checkbox"
-              />
-            </TableHead>
+        {{ errorMessage }}
+        <Button
+          @click="closeErrorManual"
+          variant="ghost"
+          size="sm"
+          class="absolute right-3 top-3 p-1 h-6 w-6 text-red-700 hover:bg-red-200"
+        >
+          <Cross2Icon class="h-3 w-3" />
+        </Button>
+      </div>
 
-            <TableHead
-              class="excel-column-checkbox"
-              :style="{
-                width: '30px',
-                minWidth: '30px',
-                maxWidth: '30px',
-              }"
-            >
-              @
-            </TableHead>
-            <TableHead
-              v-for="(letter, index) in columnLetters"
-              :key="`letter-${index}`"
-              class="excel-column-letter relative"
-              :style="{
-                width:
-                  alphaResizingState.isResizing && alphaResizingState.columnIndex === index
-                    ? `${alphaResizingState.currentWidth}px`
-                    : `${columnWidths[tableHeaders[index]] || 200}px`,
-              }"
-            >
-              <div class="flex items-center justify-center">
-                <span class="excel-letter">{{ letter }}</span>
-                <div
-                  class="excel-resizer absolute right-0 top-0"
-                  :class="[
+      <div
+        v-if="isLoading"
+        class="flex justify-center my-8"
+      >
+        <ReloadIcon class="h-8 w-8 animate-spin text-gray-500" />
+      </div>
+
+      <div
+        ref="scrollContainer"
+        class="w-full overflow-auto table-scroll-container"
+      >
+        <ExcelCellReference
+          :is-sidebar-open="isSidebarOpen"
+          :selected-cell="selectedCell"
+          :selected-rows="selectedRows"
+          :collection-name="collectionName"
+          :documents="documents"
+          :current-page="currentPage"
+          :page-size="pageSize"
+          :current-view="currentView"
+          @document-deleted="fetchDocuments"
+          @reset-selection="resetSelection"
+          @delete-start="handleDeleteStart"
+          @delete-end="handleDeleteEnd"
+          @view-change="handleViewChange"
+        />
+        <table
+          class="mt-10 excel-table"
+          :style="{ width: `${totalTableWidth}px` }"
+        >
+          <TableHeader>
+            <TableRow class="excel-header-row">
+              <TableHead
+                class="excel-column-checkbox-selector"
+                :style="{
+                  width: '40px',
+                  minWidth: '40px',
+                  maxWidth: '40px',
+                }"
+              >
+                <input
+                  type="checkbox"
+                  :checked="allSelected"
+                  @change="allSelected = !allSelected"
+                  :disabled="documents.length === 0"
+                  class="excel-checkbox"
+                />
+              </TableHead>
+
+              <TableHead
+                class="excel-column-checkbox"
+                :style="{
+                  width: '30px',
+                  minWidth: '30px',
+                  maxWidth: '30px',
+                }"
+              >
+                @
+              </TableHead>
+              <TableHead
+                v-for="(letter, index) in columnLetters"
+                :key="`letter-${index}`"
+                class="excel-column-letter relative"
+                :style="{
+                  width:
                     alphaResizingState.isResizing && alphaResizingState.columnIndex === index
-                      ? 'excel-resizer-active'
-                      : '',
-                  ]"
-                  @mousedown="startAlphaResize(index, $event)"
-                  @dblclick="resetAlphaColumnWidth(index)"
-                ></div>
-              </div>
-            </TableHead>
-            <TableHead class="excel-column-letter excel-actions-header w-24"> </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableHeader>
-          <TableRow>
-            <TableHead
-              class="excel-column-checkbox-selector"
-              :style="{
-                width: '40px',
-                minWidth: '40px',
-                maxWidth: '40px',
-              }"
-            >
-              ***
-            </TableHead>
+                      ? `${alphaResizingState.currentWidth}px`
+                      : `${columnWidths[tableHeaders[index]] || 200}px`,
+                }"
+              >
+                <div class="flex items-center justify-center">
+                  <span class="excel-letter">{{ letter }}</span>
+                  <div
+                    class="excel-resizer absolute right-0 top-0"
+                    :class="[
+                      alphaResizingState.isResizing && alphaResizingState.columnIndex === index
+                        ? 'excel-resizer-active'
+                        : '',
+                    ]"
+                    @mousedown="startAlphaResize(index, $event)"
+                    @dblclick="resetAlphaColumnWidth(index)"
+                  ></div>
+                </div>
+              </TableHead>
+              <TableHead class="excel-column-letter excel-actions-header w-24"> </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableHeader>
+            <TableRow>
+              <TableHead
+                class="excel-column-checkbox-selector"
+                :style="{
+                  width: '40px',
+                  minWidth: '40px',
+                  maxWidth: '40px',
+                }"
+              >
+                ***
+              </TableHead>
 
-            <TableHead
-              class="excel-row-number-header"
-              :style="{
-                width: numberColumnWidth,
-                minWidth: numberColumnWidth,
-                maxWidth: numberColumnWidth,
-              }"
-            >
-              &-
-            </TableHead>
-            <TableHead
-              v-for="header in tableHeaders"
-              :key="header"
-              class="excel-column-header font-bold text-black relative"
-              :class="{ 'error-column-header': header === errorColumn && isAdding }"
-              :style="{
-                width:
-                  resizingState.isResizing && resizingState.header === header
-                    ? `${resizingState.currentWidth}px`
-                    : `${columnWidths[header] || 200}px`,
-              }"
-            >
-              <div class="flex items-center justify-between">
-                <span>
-                  {{ header }}
-                  <span
-                    v-if="isFieldRequired(header)"
-                    class="text-red-500"
-                    >*</span
-                  >
-                </span>
-                <div
-                  class="excel-resizer absolute right-0 top-0"
-                  :class="[
+              <TableHead
+                class="excel-row-number-header"
+                :style="{
+                  width: numberColumnWidth,
+                  minWidth: numberColumnWidth,
+                  maxWidth: numberColumnWidth,
+                }"
+              >
+                &-
+              </TableHead>
+              <TableHead
+                v-for="header in tableHeaders"
+                :key="header"
+                class="excel-column-header font-bold text-black relative"
+                :class="{ 'error-column-header': header === errorColumn && isAdding }"
+                :style="{
+                  width:
                     resizingState.isResizing && resizingState.header === header
-                      ? 'excel-resizer-active'
-                      : '',
+                      ? `${resizingState.currentWidth}px`
+                      : `${columnWidths[header] || 200}px`,
+                }"
+              >
+                <div class="flex items-center justify-between">
+                  <span>
+                    {{ header }}
+                    <span
+                      v-if="isFieldRequired(header)"
+                      class="text-red-500"
+                      >*</span
+                    >
+                  </span>
+                  <div
+                    class="excel-resizer absolute right-0 top-0"
+                    :class="[
+                      resizingState.isResizing && resizingState.header === header
+                        ? 'excel-resizer-active'
+                        : '',
+                    ]"
+                    @mousedown="startResize(header, $event)"
+                    @dblclick="resetColumnWidth(header)"
+                  ></div>
+                </div>
+              </TableHead>
+              <TableHead
+                class="excel-column-header excel-actions-header select-none"
+                :style="{ width: '30px' }"
+              >
+                Actions
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <template v-if="documents.length > 0">
+              <TableRow
+                v-for="(doc, rowIndex) in paginatedDocuments"
+                :key="doc._id.$oid"
+                class="excel-data-row"
+                :class="{
+                  'bg-red-100 border-2 border-red-500 text-red-800':
+                    doc._id.$oid === pendingDeleteId,
+                  'selected-row bg-blue-100':
+                    selectedRows.has(doc._id.$oid) && doc._id.$oid !== pendingDeleteId,
+                }"
+              >
+                <TableCell
+                  class="excel-column-checkbox-selector"
+                  :style="{
+                    width: '40px',
+                    minWidth: '40px',
+                    maxWidth: '40px',
+                  }"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="selectedRows.has(doc._id.$oid)"
+                    @change="toggleRow(doc._id.$oid)"
+                    class="excel-checkbox"
+                  />
+                </TableCell>
+                <TableCell
+                  class="excel-row-number"
+                  :style="{
+                    width: numberColumnWidth,
+                    minWidth: numberColumnWidth,
+                    maxWidth: numberColumnWidth,
+                  }"
+                >
+                  <div
+                    class="relative inline-block w-full h-full cursor-pointer"
+                    @click.stop="togglePinStatus(doc._id.$oid, doc.is_pinned)"
+                    :class="{ 'hover:bg-gray-100': !doc.is_archive }"
+                    :title="
+                      doc.is_archive
+                        ? 'Cannot pin/unpin archived items'
+                        : doc.is_pinned
+                          ? 'Click to unpin'
+                          : 'Click to pin'
+                    "
+                  >
+                    <span
+                      v-if="doc.is_pinned"
+                      class="text-xl absolute top-1 left-[5px] -translate-y-1/2"
+                    >
+                      📌
+                    </span>
+                    <span class="">{{ (currentPage - 1) * pageSize + rowIndex + 1 }}</span>
+                  </div>
+                </TableCell>
+                <TableCell
+                  v-for="header in tableHeaders"
+                  :key="`${doc._id.$oid}-${header}`"
+                  class="excel-cell"
+                  :class="{
+                    'error-column-cell': header === errorColumn,
+                    'excel-cell-selected':
+                      editingCell?.rowIndex === rowIndex && editingCell?.header === header,
+                    'excel-cell-context-selected':
+                      selectedCellInfo?.rowIndex === rowIndex &&
+                      selectedCellInfo?.header === header,
+                  }"
+                  @contextmenu.prevent="handleRightClick(rowIndex, header, $event)"
+                >
+                  <div class="h-full">
+                    <div
+                      v-if="editingCell?.rowIndex === rowIndex && editingCell?.header === header"
+                      class="h-full"
+                    >
+                      <div
+                        v-if="getSchemaInfo(header).bsonType === 'bool'"
+                        class="flex items-center justify-center h-full p-2"
+                      >
+                        <input
+                          type="checkbox"
+                          v-model="editValue"
+                          @change="saveEdit"
+                          class="excel-checkbox"
+                        />
+                      </div>
+                      <div
+                        v-else-if="isReferenceField(header)"
+                        class="p-1"
+                      >
+                        <Select
+                          v-model="editValue"
+                          @update:modelValue="saveEdit"
+                          class="excel-select"
+                        >
+                          <SelectTrigger>
+                            <SelectValue
+                              :placeholder="`Select ${getReferencedCollection(header)}`"
+                              :model-value="editValue"
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <ScrollArea class="h-48">
+                              <div class="p-1">
+                                <Input
+                                  v-model="searchQuery[header]"
+                                  placeholder="Search..."
+                                  class="mb-2 excel-input"
+                                />
+                                <div
+                                  v-if="loadingReferences[getReferencedCollection(header)!]"
+                                  class="text-center p-2"
+                                >
+                                  <ReloadIcon class="h-4 w-4 animate-spin" />
+                                </div>
+                                <div v-else-if="filteredOptions(header).length">
+                                  <SelectItem
+                                    v-for="option in filteredOptions(header)"
+                                    :key="option.id"
+                                    :value="option.id"
+                                  >
+                                    {{ option.label }}
+                                  </SelectItem>
+                                </div>
+                                <div
+                                  v-else
+                                  class="text-sm text-gray-500 px-2 py-1"
+                                >
+                                  No options found
+                                </div>
+                              </div>
+                            </ScrollArea>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Input
+                        v-else-if="getSchemaInfo(header).bsonType === 'date'"
+                        type="datetime-local"
+                        v-model="editValue"
+                        @blur="handleEditBlur"
+                        class="excel-input excel-date-input"
+                      />
+                      <textarea
+                        v-else
+                        v-model="editValue"
+                        @blur="handleEditBlur"
+                        @keyup.ctrl.enter="saveEdit"
+                        @keyup.esc="cancelEdit"
+                        class="excel-textarea"
+                        rows="1"
+                      ></textarea>
+                    </div>
+                    <div
+                      v-else
+                      class="excel-cell-content"
+                      :class="{
+                        'excel-cell-editable': !['_id', 'created_at', 'updated_at'].includes(
+                          header
+                        ),
+                        'excel-cell-readonly': ['_id', 'created_at', 'updated_at'].includes(header),
+                      }"
+                      @click="handleCellClick(rowIndex, header, doc[header])"
+                    >
+                      <div
+                        v-if="getSchemaInfo(header).bsonType === 'bool'"
+                        class="flex justify-center"
+                      >
+                        <input
+                          type="checkbox"
+                          :checked="doc[header]"
+                          disabled
+                          class="excel-checkbox"
+                        />
+                      </div>
+                      <div
+                        v-else-if="isReferenceField(header)"
+                        class="excel-reference-value"
+                      >
+                        <span v-if="loadingReferences[getReferencedCollection(header)!]">...</span>
+                        <span v-else>{{
+                          getReferenceLabel(header, doc[header]) || doc[header]
+                        }}</span>
+                      </div>
+                      <template v-else-if="['created_at', 'updated_at'].includes(header)">
+                        <span class="excel-timestamp">
+                          {{ formatSchemaValue(doc[header], getSchemaInfo(header).bsonType) }}
+                        </span>
+                      </template>
+                      <template v-else-if="header === '_id'">
+                        <span>{{ doc[header]?.$oid || doc[header] }}</span>
+                      </template>
+                      <template v-else>
+                        {{ formatSchemaValue(doc[header], getSchemaInfo(header).bsonType) }}
+                      </template>
+                    </div>
+                  </div>
+                </TableCell>
+                <TableActions
+                  :collection-name="collectionName"
+                  :document-id="doc._id.$oid"
+                  :row-number="(currentPage - 1) * pageSize + rowIndex + 1"
+                  @deleted="fetchDocuments"
+                  @delete-start="handleDeleteStart"
+                  @delete-end="handleDeleteEnd"
+                />
+                <StickyTableActions
+                  :collection-name="collectionName"
+                  :document-id="doc._id.$oid"
+                  :row-number="(currentPage - 1) * pageSize + rowIndex + 1"
+                  :target-ref="scrollContainer"
+                  :is-last-row="rowIndex === paginatedDocuments.length - 1"
+                  :is-single-row="paginatedDocuments.length === 1"
+                  @deleted="fetchDocuments"
+                  @delete-start="handleDeleteStart"
+                  @delete-end="handleDeleteEnd"
+                />
+              </TableRow>
+
+              <!-- Context Menu -->
+              <div
+                v-if="showContextMenu"
+                class="fixed z-50 bg-white shadow-lg border rounded-md p-1 min-w-[120px] context-menu"
+                :style="{
+                  left: `${contextMenuPosition.x}px`,
+                  top: `${contextMenuPosition.y}px`,
+                }"
+                @click="closeContextMenu"
+              >
+                <div
+                  class="flex items-center px-3 py-1.5 text-sm rounded-sm relative tooltip-container"
+                  :class="[
+                    isSelectedArchived
+                      ? 'text-gray-400 cursor-not-allowed'
+                      : 'hover:bg-gray-100 cursor-pointer text-gray-700',
                   ]"
-                  @mousedown="startResize(header, $event)"
-                  @dblclick="resetColumnWidth(header)"
-                ></div>
+                  @click="pinCell"
+                  @mouseenter="isSelectedArchived && (showPinTooltip = true)"
+                  @mouseleave="showPinTooltip = false"
+                >
+                  <span>
+                    <template v-if="selectedDocumentIsPinned">📌 Unpin this item</template>
+                    <template v-else>📌 Pin this item</template>
+                  </span>
+                  <!-- Custom tooltip -->
+                  <div
+                    v-if="isSelectedArchived && showPinTooltip"
+                    class="custom-tooltip absolute bg-gray-800 text-white text-xs rounded py-1 px-2 left-0 bottom-full mb-1 whitespace-nowrap pointer-events-none z-50"
+                  >
+                    You cannot pin an archived item
+                    <div
+                      class="tooltip-arrow absolute top-full left-4 w-2 h-2 bg-gray-800 transform rotate-45"
+                    ></div>
+                  </div>
+                </div>
+                <div
+                  class="flex items-center px-3 py-1.5 text-sm hover:bg-gray-100 rounded-sm cursor-pointer"
+                  @click="bookmarkCell"
+                >
+                  🔖 Bookmark
+                </div>
               </div>
-            </TableHead>
-            <TableHead
-              class="excel-column-header excel-actions-header select-none"
-              :style="{ width: '30px' }"
-            >
-              Actions
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <template v-if="documents.length > 0">
+
+              <!-- End of Context Menu -->
+            </template>
+
             <TableRow
-              v-for="(doc, rowIndex) in paginatedDocuments"
-              :key="doc._id.$oid"
-              class="excel-data-row"
-              :class="{
-                'bg-red-100 border-2 border-red-500 text-red-800': doc._id.$oid === pendingDeleteId,
-                'selected-row bg-blue-100':
-                  selectedRows.has(doc._id.$oid) && doc._id.$oid !== pendingDeleteId,
-              }"
+              v-if="isAdding"
+              class="excel-new-row"
+              :class="['excel-new-row', { 'excel-new-row-error': addingRowError }]"
             >
               <TableCell
                 class="excel-column-checkbox-selector"
@@ -794,475 +1066,221 @@
               >
                 <input
                   type="checkbox"
-                  :checked="selectedRows.has(doc._id.$oid)"
-                  @change="toggleRow(doc._id.$oid)"
+                  disabled
                   class="excel-checkbox"
                 />
               </TableCell>
-              <TableCell
-                class="excel-row-number"
-                :style="{
-                  width: numberColumnWidth,
-                  minWidth: numberColumnWidth,
-                  maxWidth: numberColumnWidth,
-                }"
-              >
-                <div
-                  class="relative inline-block w-full h-full cursor-pointer"
-                  @click.stop="togglePinStatus(doc._id.$oid, doc.is_pinned)"
-                  :class="{ 'hover:bg-gray-100': !doc.is_archive }"
-                  :title="
-                    doc.is_archive
-                      ? 'Cannot pin/unpin archived items'
-                      : doc.is_pinned
-                        ? 'Click to unpin'
-                        : 'Click to pin'
-                  "
-                >
-                  <span
-                    v-if="doc.is_pinned"
-                    class="text-xl absolute top-1 left-[5px] -translate-y-1/2"
-                  >
-                    📌
-                  </span>
-                  <span class="">{{ (currentPage - 1) * pageSize + rowIndex + 1 }}</span>
-                </div>
-              </TableCell>
+              <TableCell class="excel-row-number"> {{ documents.length + 1 }} </TableCell>
               <TableCell
                 v-for="header in tableHeaders"
-                :key="`${doc._id.$oid}-${header}`"
+                :key="`new-${header}`"
                 class="excel-cell"
-                :class="{
-                  'error-column-cell': header === errorColumn,
-                  'excel-cell-selected':
-                    editingCell?.rowIndex === rowIndex && editingCell?.header === header,
-                  'excel-cell-context-selected':
-                    selectedCellInfo?.rowIndex === rowIndex && selectedCellInfo?.header === header,
-                }"
-                @contextmenu.prevent="handleRightClick(rowIndex, header, $event)"
+                :class="{ 'error-column-cell': header === errorColumn }"
               >
-                <div class="h-full">
-                  <div
-                    v-if="editingCell?.rowIndex === rowIndex && editingCell?.header === header"
-                    class="h-full"
-                  >
-                    <div
-                      v-if="getSchemaInfo(header).bsonType === 'bool'"
-                      class="flex items-center justify-center h-full p-2"
-                    >
-                      <input
-                        type="checkbox"
-                        v-model="editValue"
-                        @change="saveEdit"
-                        class="excel-checkbox"
-                      />
-                    </div>
-                    <div
-                      v-else-if="isReferenceField(header)"
-                      class="p-1"
-                    >
-                      <Select
-                        v-model="editValue"
-                        @update:modelValue="saveEdit"
-                        class="excel-select"
-                      >
-                        <SelectTrigger>
-                          <SelectValue
-                            :placeholder="`Select ${getReferencedCollection(header)}`"
-                            :model-value="editValue"
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <ScrollArea class="h-48">
-                            <div class="p-1">
-                              <Input
-                                v-model="searchQuery[header]"
-                                placeholder="Search..."
-                                class="mb-2 excel-input"
-                              />
-                              <div
-                                v-if="loadingReferences[getReferencedCollection(header)!]"
-                                class="text-center p-2"
-                              >
-                                <ReloadIcon class="h-4 w-4 animate-spin" />
-                              </div>
-                              <div v-else-if="filteredOptions(header).length">
-                                <SelectItem
-                                  v-for="option in filteredOptions(header)"
-                                  :key="option.id"
-                                  :value="option.id"
-                                >
-                                  {{ option.label }}
-                                </SelectItem>
-                              </div>
-                              <div
-                                v-else
-                                class="text-sm text-gray-500 px-2 py-1"
-                              >
-                                No options found
-                              </div>
-                            </div>
-                          </ScrollArea>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <Input
-                      v-else-if="getSchemaInfo(header).bsonType === 'date'"
-                      type="datetime-local"
-                      v-model="editValue"
-                      @blur="handleEditBlur"
-                      class="excel-input excel-date-input"
-                    />
-                    <textarea
-                      v-else
-                      v-model="editValue"
-                      @blur="handleEditBlur"
-                      @keyup.ctrl.enter="saveEdit"
-                      @keyup.esc="cancelEdit"
-                      class="excel-textarea"
-                      rows="1"
-                    ></textarea>
-                  </div>
-                  <div
-                    v-else
-                    class="excel-cell-content"
-                    :class="{
-                      'excel-cell-editable': !['_id', 'created_at', 'updated_at'].includes(header),
-                      'excel-cell-readonly': ['_id', 'created_at', 'updated_at'].includes(header),
-                    }"
-                    @click="handleCellClick(rowIndex, header, doc[header])"
-                  >
-                    <div
-                      v-if="getSchemaInfo(header).bsonType === 'bool'"
-                      class="flex justify-center"
-                    >
-                      <input
-                        type="checkbox"
-                        :checked="doc[header]"
-                        disabled
-                        class="excel-checkbox"
-                      />
-                    </div>
-                    <div
-                      v-else-if="isReferenceField(header)"
-                      class="excel-reference-value"
-                    >
-                      <span v-if="loadingReferences[getReferencedCollection(header)!]">...</span>
-                      <span v-else>{{
-                        getReferenceLabel(header, doc[header]) || doc[header]
-                      }}</span>
-                    </div>
-                    <template v-else-if="['created_at', 'updated_at'].includes(header)">
-                      <span class="excel-timestamp">
-                        {{ formatSchemaValue(doc[header], getSchemaInfo(header).bsonType) }}
-                      </span>
-                    </template>
-                    <template v-else-if="header === '_id'">
-                      <span>{{ doc[header]?.$oid || doc[header] }}</span>
-                    </template>
-                    <template v-else>
-                      {{ formatSchemaValue(doc[header], getSchemaInfo(header).bsonType) }}
-                    </template>
-                  </div>
+                <span
+                  v-if="['created_at', 'updated_at'].includes(header)"
+                  class="excel-timestamp"
+                >
+                  (auto-generated)
+                </span>
+
+                <div
+                  v-else-if="header !== '_id' && getSchemaInfo(header).bsonType === 'bool'"
+                  class="flex items-center justify-center"
+                >
+                  <input
+                    type="checkbox"
+                    v-model="newDocument[header]"
+                    class="excel-checkbox"
+                  />
                 </div>
+                <div
+                  v-else-if="header !== '_id' && isReferenceField(header)"
+                  class="h-8"
+                >
+                  <Select
+                    v-model="newDocument[header]"
+                    class="excel-select"
+                  >
+                    <SelectTrigger class="h-8">
+                      <SelectValue :placeholder="`Select`" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <div
+                        v-if="loadingReferences[getReferencedCollection(header)!]"
+                        class="p-2"
+                      >
+                        <ReloadIcon class="h-4 w-4 animate-spin mx-auto" />
+                      </div>
+                      <ScrollArea
+                        v-else
+                        class="h-48"
+                      >
+                        <Input
+                          v-model="searchQuery[header]"
+                          placeholder="Search..."
+                          class="mb-1 mx-1 excel-input"
+                        />
+                        <SelectItem
+                          v-for="option in filteredOptions(header)"
+                          :key="option.id"
+                          :value="option.id"
+                        >
+                          {{ option.label }}
+                        </SelectItem>
+                      </ScrollArea>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Input
+                  v-else-if="header !== '_id'"
+                  v-model="newDocument[header]"
+                  :type="getSchemaInfo(header).bsonType === 'date' ? 'datetime-local' : 'text'"
+                  class="excel-input"
+                  :class="{ 'ring-2 ring-red-500': header === errorColumn }"
+                />
+                <span
+                  v-else
+                  class="excel-auto-id"
+                  >(auto)</span
+                >
               </TableCell>
-              <TableActions
-                :collection-name="collectionName"
-                :document-id="doc._id.$oid"
-                :row-number="(currentPage - 1) * pageSize + rowIndex + 1"
-                @deleted="fetchDocuments"
-                @delete-start="handleDeleteStart"
-                @delete-end="handleDeleteEnd"
-              />
-              <StickyTableActions
-                :collection-name="collectionName"
-                :document-id="doc._id.$oid"
-                :row-number="(currentPage - 1) * pageSize + rowIndex + 1"
-                :target-ref="scrollContainer"
-                :is-last-row="rowIndex === paginatedDocuments.length - 1"
-                :is-single-row="paginatedDocuments.length === 1"
-                @deleted="fetchDocuments"
-                @delete-start="handleDeleteStart"
-                @delete-end="handleDeleteEnd"
-              />
+              <TableCell class="excel-cell text-center">
+                <Button
+                  variant="ghost"
+                  @click="saveNewDocument"
+                  size="sm"
+                  class="px-0 -ml-1"
+                  :disabled="isSaving"
+                >
+                  <ReloadIcon
+                    v-if="isSaving"
+                    class="h-4 w-4 animate-spin"
+                  />
+                  <span v-else>💾</span>
+                </Button>
+              </TableCell>
             </TableRow>
 
-            <!-- Context Menu -->
-            <div
-              v-if="showContextMenu"
-              class="fixed z-50 bg-white shadow-lg border rounded-md p-1 min-w-[120px] context-menu"
-              :style="{
-                left: `${contextMenuPosition.x}px`,
-                top: `${contextMenuPosition.y}px`,
-              }"
-              @click="closeContextMenu"
+            <TableRow
+              v-if="!isAdding"
+              class="excel-add-row"
+              @click="startAdding"
             >
-              <div
-                class="flex items-center px-3 py-1.5 text-sm rounded-sm relative tooltip-container"
-                :class="[
-                  isSelectedArchived
-                    ? 'text-gray-400 cursor-not-allowed'
-                    : 'hover:bg-gray-100 cursor-pointer text-gray-700',
-                ]"
-                @click="pinCell"
-                @mouseenter="isSelectedArchived && (showPinTooltip = true)"
-                @mouseleave="showPinTooltip = false"
+              <TableCell
+                :colspan="tableHeaders.length + 3"
+                class="excel-add-cell"
               >
-                <span>
-                  <template v-if="selectedDocumentIsPinned">📌 Unpin this item</template>
-                  <template v-else>📌 Pin this item</template>
-                </span>
-                <!-- Custom tooltip -->
-                <div
-                  v-if="isSelectedArchived && showPinTooltip"
-                  class="custom-tooltip absolute bg-gray-800 text-white text-xs rounded py-1 px-2 left-0 bottom-full mb-1 whitespace-nowrap pointer-events-none z-50"
-                >
-                  You cannot pin an archived item
-                  <div
-                    class="tooltip-arrow absolute top-full left-4 w-2 h-2 bg-gray-800 transform rotate-45"
-                  ></div>
+                <div class="inline-flex items-center gap-2 excel-add-button">
+                  <PlusCircledIcon class="h-4 w-4" />
+                  <span class="text-sm">
+                    {{ documents.length === 0 ? 'Add first document' : 'Add new document' }}
+                  </span>
                 </div>
-              </div>
-              <div
-                class="flex items-center px-3 py-1.5 text-sm hover:bg-gray-100 rounded-sm cursor-pointer"
-                @click="bookmarkCell"
-              >
-                🔖 Bookmark
-              </div>
-            </div>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </table>
 
-            <!-- End of Context Menu -->
-          </template>
-
-          <TableRow
-            v-if="isAdding"
-            class="excel-new-row"
-            :class="['excel-new-row', { 'excel-new-row-error': addingRowError }]"
+        <div
+          v-if="isAdding"
+          class="sticky top-2 left-2 z-20 p-3 shadow-lg flex items-center space-x-2 w-auto rounded-md bg-green-50"
+        >
+          <Button
+            @click="saveNewDocument"
+            size="sm"
+            class="bg-green-600 hover:bg-green-700 text-white"
+            :disabled="isSaving"
           >
-            <TableCell
-              class="excel-column-checkbox-selector"
-              :style="{
-                width: '40px',
-                minWidth: '40px',
-                maxWidth: '40px',
-              }"
-            >
-              <input
-                type="checkbox"
-                disabled
-                class="excel-checkbox"
-              />
-            </TableCell>
-            <TableCell class="excel-row-number"> {{ documents.length + 1 }} </TableCell>
-            <TableCell
-              v-for="header in tableHeaders"
-              :key="`new-${header}`"
-              class="excel-cell"
-              :class="{ 'error-column-cell': header === errorColumn }"
-            >
-              <span
-                v-if="['created_at', 'updated_at'].includes(header)"
-                class="excel-timestamp"
-              >
-                (auto-generated)
-              </span>
-
-              <div
-                v-else-if="header !== '_id' && getSchemaInfo(header).bsonType === 'bool'"
-                class="flex items-center justify-center"
-              >
-                <input
-                  type="checkbox"
-                  v-model="newDocument[header]"
-                  class="excel-checkbox"
-                />
-              </div>
-              <div
-                v-else-if="header !== '_id' && isReferenceField(header)"
-                class="h-8"
-              >
-                <Select
-                  v-model="newDocument[header]"
-                  class="excel-select"
-                >
-                  <SelectTrigger class="h-8">
-                    <SelectValue :placeholder="`Select`" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <div
-                      v-if="loadingReferences[getReferencedCollection(header)!]"
-                      class="p-2"
-                    >
-                      <ReloadIcon class="h-4 w-4 animate-spin mx-auto" />
-                    </div>
-                    <ScrollArea
-                      v-else
-                      class="h-48"
-                    >
-                      <Input
-                        v-model="searchQuery[header]"
-                        placeholder="Search..."
-                        class="mb-1 mx-1 excel-input"
-                      />
-                      <SelectItem
-                        v-for="option in filteredOptions(header)"
-                        :key="option.id"
-                        :value="option.id"
-                      >
-                        {{ option.label }}
-                      </SelectItem>
-                    </ScrollArea>
-                  </SelectContent>
-                </Select>
-              </div>
-              <Input
-                v-else-if="header !== '_id'"
-                v-model="newDocument[header]"
-                :type="getSchemaInfo(header).bsonType === 'date' ? 'datetime-local' : 'text'"
-                class="excel-input"
-                :class="{ 'ring-2 ring-red-500': header === errorColumn }"
-              />
-              <span
-                v-else
-                class="excel-auto-id"
-                >(auto)</span
-              >
-            </TableCell>
-            <TableCell class="excel-cell text-center">
-              <Button
-                variant="ghost"
-                @click="saveNewDocument"
-                size="sm"
-                class="px-0 -ml-1"
-                :disabled="isSaving"
-              >
-                <ReloadIcon
-                  v-if="isSaving"
-                  class="h-4 w-4 animate-spin"
-                />
-                <span v-else>💾</span>
-              </Button>
-            </TableCell>
-          </TableRow>
-
-          <TableRow
-            v-if="!isAdding"
-            class="excel-add-row"
-            @click="startAdding"
+            <ReloadIcon
+              v-if="isSaving"
+              class="w-4 h-4 animate-spin"
+            />
+            <PlusCircledIcon
+              v-else
+              class="w-4 h-4 mr-1"
+            />
+            Save
+          </Button>
+          <Button
+            @click="cancelAdding"
+            variant="outline"
+            size="sm"
+            class="border-green-600 text-green-700 hover:bg-green-100"
+            :disabled="isSaving"
           >
-            <TableCell
-              :colspan="tableHeaders.length + 3"
-              class="excel-add-cell"
-            >
-              <div class="inline-flex items-center gap-2 excel-add-button">
-                <PlusCircledIcon class="h-4 w-4" />
-                <span class="text-sm">
-                  {{ documents.length === 0 ? 'Add first document' : 'Add new document' }}
-                </span>
-              </div>
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </table>
+            <Cross2Icon class="w-4 h-4 mr-1" /> Cancel
+          </Button>
+        </div>
 
-      <div
-        v-if="isAdding"
-        class="sticky top-2 left-2 z-20 p-3 shadow-lg flex items-center space-x-2 w-auto rounded-md bg-green-50"
-      >
-        <Button
-          @click="saveNewDocument"
-          size="sm"
-          class="bg-green-600 hover:bg-green-700 text-white"
-          :disabled="isSaving"
+        <div
+          v-if="totalPages > 1"
+          class="excel-pagination"
         >
-          <ReloadIcon
-            v-if="isSaving"
-            class="w-4 h-4 animate-spin"
-          />
-          <PlusCircledIcon
-            v-else
-            class="w-4 h-4 mr-1"
-          />
-          Save
-        </Button>
-        <Button
-          @click="cancelAdding"
-          variant="outline"
-          size="sm"
-          class="border-green-600 text-green-700 hover:bg-green-100"
-          :disabled="isSaving"
-        >
-          <Cross2Icon class="w-4 h-4 mr-1" /> Cancel
-        </Button>
-      </div>
+          <Pagination
+            :page="currentPage"
+            :itemsPerPage="pageSize"
+            :total="documents.length"
+            @update:page="onPageChange"
+            :siblingCount="1"
+          >
+            <PaginationList>
+              <PaginationListItem :value="1">
+                <PaginationFirst
+                  :disabled="currentPage === 1"
+                  @click="setPage(1)"
+                  class="excel-pagination-button"
+                />
+              </PaginationListItem>
+              <PaginationListItem :value="Math.max(1, currentPage - 1)">
+                <PaginationPrev
+                  :disabled="currentPage === 1"
+                  @click="setPage(currentPage - 1)"
+                  class="excel-pagination-button"
+                />
+              </PaginationListItem>
+              <PaginationListItem :value="Math.min(totalPages, currentPage + 1)">
+                <PaginationNext
+                  :disabled="currentPage === totalPages"
+                  @click="setPage(currentPage + 1)"
+                  class="excel-pagination-button"
+                />
+              </PaginationListItem>
+              <PaginationListItem :value="totalPages">
+                <PaginationLast
+                  :disabled="currentPage === totalPages"
+                  @click="setPage(totalPages)"
+                  class="excel-pagination-button"
+                />
+              </PaginationListItem>
+            </PaginationList>
+          </Pagination>
+        </div>
 
-      <div
-        v-if="totalPages > 1"
-        class="excel-pagination"
-      >
-        <Pagination
-          :page="currentPage"
-          :itemsPerPage="pageSize"
-          :total="documents.length"
-          @update:page="onPageChange"
-          :siblingCount="1"
+        <div
+          v-if="!isAdding"
+          class="excel-footer"
         >
-          <PaginationList>
-            <PaginationListItem :value="1">
-              <PaginationFirst
-                :disabled="currentPage === 1"
-                @click="setPage(1)"
-                class="excel-pagination-button"
-              />
-            </PaginationListItem>
-            <PaginationListItem :value="Math.max(1, currentPage - 1)">
-              <PaginationPrev
-                :disabled="currentPage === 1"
-                @click="setPage(currentPage - 1)"
-                class="excel-pagination-button"
-              />
-            </PaginationListItem>
-            <PaginationListItem :value="Math.min(totalPages, currentPage + 1)">
-              <PaginationNext
-                :disabled="currentPage === totalPages"
-                @click="setPage(currentPage + 1)"
-                class="excel-pagination-button"
-              />
-            </PaginationListItem>
-            <PaginationListItem :value="totalPages">
-              <PaginationLast
-                :disabled="currentPage === totalPages"
-                @click="setPage(totalPages)"
-                class="excel-pagination-button"
-              />
-            </PaginationListItem>
-          </PaginationList>
-        </Pagination>
-      </div>
+          <span class="excel-page-size-label">Rows per page:</span>
+          <Select
+            :modelValue="String(pageSize)"
+            @update:modelValue="(val) => setPageSize(Number(val))"
+            class="excel-page-size-select"
+          >
+            <SelectTrigger class="w-16"> <SelectValue /> </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="5">5</SelectItem> <SelectItem value="10">10</SelectItem>
+              <SelectItem value="20">20</SelectItem> <SelectItem value="50">50</SelectItem>
+              <SelectItem value="100">100</SelectItem>
+            </SelectContent>
+          </Select>
 
-      <div
-        v-if="!isAdding"
-        class="excel-footer"
-      >
-        <span class="excel-page-size-label">Rows per page:</span>
-        <Select
-          :modelValue="String(pageSize)"
-          @update:modelValue="(val) => setPageSize(Number(val))"
-          class="excel-page-size-select"
-        >
-          <SelectTrigger class="w-16"> <SelectValue /> </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="5">5</SelectItem> <SelectItem value="10">10</SelectItem>
-            <SelectItem value="20">20</SelectItem> <SelectItem value="50">50</SelectItem>
-            <SelectItem value="100">100</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <span class="excel-status-info">
-          Showing {{ paginatedDocuments.length ? (currentPage - 1) * pageSize + 1 : 0 }} to
-          {{ (currentPage - 1) * pageSize + paginatedDocuments.length }} of
-          {{ documents.length }} entries
-        </span>
+          <span class="excel-status-info">
+            Showing {{ paginatedDocuments.length ? (currentPage - 1) * pageSize + 1 : 0 }} to
+            {{ (currentPage - 1) * pageSize + paginatedDocuments.length }} of
+            {{ documents.length }} entries
+          </span>
+        </div>
       </div>
     </div>
   </div>

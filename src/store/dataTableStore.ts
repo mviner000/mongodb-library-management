@@ -283,6 +283,9 @@ export const useDataTableStore = defineStore('dataTable', () => {
         case 'empty-or-recovered':
           endpoint = `${API_BASE}/collections/${collectionName.value}/empty-or-recovered`
           break
+        case 'pins':
+          endpoint = `${API_BASE}/collections/${collectionName.value}/pins`
+          break
         case 'all':
         default:
           endpoint = `${API_BASE}/collections/${collectionName.value}/documents`
