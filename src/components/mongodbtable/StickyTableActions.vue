@@ -14,7 +14,9 @@ const props = defineProps<{
   collectionName: string;
   documentId: string;
   rowNumber: number;
-  targetRef?: HTMLElement | null; // Keep targetRef prop
+  targetRef?: HTMLElement | null;  
+  isLastRow: boolean;
+  isSingleRow: boolean; 
 }>();
 
 // Keep emits, they will be forwarded from the child
@@ -82,24 +84,28 @@ onUnmounted(() => {
 <template>
     <div
       v-if="showBoom"
-      class="bg-white fixed right-0 top-1/2 transform -translate-y-1/2 bg-transparent boom-sidebar z-20"
+      class="bg-white pb-0 fixed right-0 transform -translate-y-1/2 bg-transparent boom-sidebar z-10"
     ></div>
-
+<div class="h-1">
     <TableCell
       v-if="showBoom"
-      class="border-[1px] pb-3 fixed right-0 select-none z-20"
+      class="pb-0 mb-0 border-t-[1px] fixed right-0 select-none z-20"
+      :class="{
+        'border-b-[1px]': isSingleRow || isLastRow
+      }"
+
     >
     <Button
       variant="ghost"
       size="sm"
-      class="excel-delete-button mt-1"
+      class="-top-1 excel-delete-button  -pb-0 -mb-[10px]"
       @click="triggerDelete"  
       :disabled="false" 
     >
         <TrashIcon class="h-4 w-4" />
       </Button>
     </TableCell>
-
+  </div>
     <DeleteDocumentAction
       ref="deleteActionRef"
       :collection-name="props.collectionName"
