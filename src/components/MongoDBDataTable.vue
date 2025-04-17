@@ -619,6 +619,59 @@
       console.error('Error toggling pin status:', error)
     }
   }
+
+  // --- New Computed Property ---
+  const pinnedDocuments = computed(() => {
+    if (!user.value) return []
+    return documents.value.filter((doc) => doc.pinned_by?.includes(user.value?.id))
+  })
+
+  // --- New Watcher ---
+  watch(
+    pinnedDocuments,
+    (newPinnedDocs) => {
+      console.log('Pinned Documents:', JSON.parse(JSON.stringify(newPinnedDocs)))
+    },
+    { immediate: true, deep: true }
+  )
+
+  const highlightedDocumentId = ref<string | null>(null)
+  let highlightTimeout: ReturnType<typeof setTimeout> | null = null
+
+  const handleDocumentNavigation = (docId: string) => {
+    // Clear existing timeout if any
+    if (highlightTimeout) clearTimeout(highlightTimeout)
+
+    // Find document index in full dataset
+    const index = documents.value.findIndex((doc) => doc._id.$oid === docId)
+    if (index === -1) return
+
+    // Calculate and set correct page
+    const page = Math.ceil((index + 1) / pageSize.value)
+    setPage(page)
+
+    // Set highlight and auto-clear after 3s
+    highlightedDocumentId.value = docId
+    highlightTimeout = setTimeout(() => {
+      highlightedDocumentId.value = null
+    }, 2000)
+
+    // Scroll to row after DOM update
+    nextTick(() => {
+      const row = scrollContainer.value?.querySelector(`[data-document-id="${docId}"]`)
+      if (row) {
+        row.scrollIntoView({
+          behavior: 'smooth',
+          block: 'nearest',
+          inline: 'nearest',
+        })
+
+        // Add visual pulse effect
+        row.classList.add('highlight-pulse')
+        setTimeout(() => row.classList.remove('highlight-pulse'), 1000)
+      }
+    })
+  }
 </script>
 
 <template>
@@ -634,7 +687,9 @@
     <div class="excel-container w-full">
       <StickyLeftSidebar
         :isOpen="isSidebarOpen"
+        :pinnedDocuments="pinnedDocuments"
         @toggle="isSidebarOpen = !isSidebarOpen"
+        @navigate="handleDocumentNavigation"
       />
       <div
         v-if="errorMessage"
@@ -807,8 +862,10 @@
               <TableRow
                 v-for="(doc, rowIndex) in paginatedDocuments"
                 :key="doc._id.$oid"
+                :data-document-id="doc._id.$oid"
                 class="excel-data-row"
                 :class="{
+                  'highlight-row': highlightedDocumentId === doc._id.$oid,
                   'bg-red-100 border-2 border-red-500 text-red-800':
                     doc._id.$oid === pendingDeleteId,
                   'selected-row bg-blue-100':
@@ -1306,6 +1363,42 @@
 </template>
 
 <style scoped>
+  .highlight-row {
+    position: relative;
+    animation: highlight-fade 2s forwards;
+    box-shadow: 0 0 0 2px #fde047; /* Outline yellow */
+    outline: 2px solid #fde047; /* Same as box shadow */
+    background-color: #fff9c4; /* Lighter yellow background */
+  }
+
+  @keyframes highlight-fade {
+    0% {
+      box-shadow: 0 0 0 3px #fde047;
+    }
+    70% {
+      box-shadow: 0 0 0 3px #fde047;
+    }
+    100% {
+      box-shadow: 0 0 0 3px transparent;
+    }
+  }
+
+  .highlight-pulse {
+    animation: pulse-highlight 1s ease-in-out;
+  }
+
+  @keyframes pulse-highlight {
+    0% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.02);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
   /* Context Menu */
   .tooltip-container {
     position: relative;

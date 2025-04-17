@@ -141,8 +141,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     await preloadReferenceOptions() // Preload references needed by the schema
   }
 
-  // dataTableStore.ts
-
   const pinDocument = async (documentId: string) => {
     if (!collectionName.value) {
       console.warn('pinDocument: No collection name provided')
