@@ -28,7 +28,7 @@
     PaginationNext,
     PaginationPrev,
   } from '@/components/ui/pagination' // [cite: 79]
-  import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+
   import { ScrollArea } from '@/components/ui/scroll-area' // [cite: 40]
   // Remove toast import if not used directly in setup, it's in the store
   // import { useToast } from '@/components/ui/toast/use-toast';
@@ -37,6 +37,8 @@
   import StickyTableActions from './mongodbtable/StickyTableActions.vue' // [cite: 59]
   import MongoDBDataTableNavbar from './MongoDBDataTableNavbar.vue' // [cite: 1]
   import StickyLeftSidebar from './StickyLeftSidebar.vue'
+  import { useUserStore } from '@/store/useUserStore'
+  import UserLogger from './UserLogger.vue'
   // Remove FooterTabsBar import if not used in old template
   // import FooterTabsBar from './FooterTabsBar.vue';
 
@@ -97,6 +99,9 @@
     getReferencedCollection,
     // fetchSchema, // Optional direct access
   } = dataTableStore
+
+  const userStore = useUserStore()
+  const { user } = storeToRefs(userStore)
 
   // Local component state
   const route = useRoute()
@@ -260,6 +265,14 @@
   // --- Lifecycle Hooks ---
   onMounted(async () => {
     console.log('MongoDBDataTable mounted (Pinia + Old Style).')
+
+    // Add user ID logging
+    if (user.value) {
+      console.log('User ID:', user.value.id)
+    } else {
+      console.log('User not authenticated')
+    }
+
     await fetchCollections()
     const routeName = Array.isArray(route.params.name) ? route.params.name[0] : route.params.name
     const initialCollection = routeName || props.selectedCollection
@@ -505,6 +518,7 @@
     selectedCellInfo.value = null
   }
 
+  // Fixed pinCell function
   const pinCell = async () => {
     console.log('pinCell: Function called')
 
@@ -518,6 +532,12 @@
       return
     }
 
+    // Add check for null user
+    if (!user.value) {
+      console.warn('pinCell: User not authenticated')
+      return
+    }
+
     const rowIndex = selectedCellInfo.value.rowIndex
     console.log(`pinCell: Selected row index: ${rowIndex}`)
 
@@ -527,12 +547,13 @@
       return
     }
 
+    const isPinned = doc.pinned_by?.includes(user.value.id)
     console.log(
-      `pinCell: Document ID: ${doc._id.$oid}, Current pin state: ${doc.is_pinned ? 'pinned' : 'unpinned'}`
+      `pinCell: Document ID: ${doc._id.$oid}, Current pin state: ${isPinned ? 'pinned' : 'unpinned'}`
     )
 
     try {
-      if (doc.is_pinned) {
+      if (isPinned) {
         console.log(`pinCell: Document is currently pinned, attempting to unpin`)
         await dataTableStore.unpinDocument(doc._id.$oid)
         console.log(`pinCell: Unpin operation completed`)
@@ -586,9 +607,10 @@
 
   const selectedDocumentIsPinned = computed(() => {
     if (!selectedCellInfo.value) return false
-    const rowIndex = selectedCellInfo.value.rowIndex
-    const document = paginatedDocuments.value[rowIndex]
-    return document?.is_pinned === true
+    if (!user.value) return false // Add this check for null user
+
+    const doc = paginatedDocuments.value[selectedCellInfo.value.rowIndex]
+    return doc?.pinned_by?.includes(user.value.id)
   })
 
   const togglePinStatus = async (docId: string, currentPinStatus: boolean): Promise<void> => {
@@ -605,6 +627,7 @@
 </script>
 
 <template>
+  <UserLogger />
   <!-- MongoDBDataTable main div -->
   <div
     :class="isSidebarOpen ? 'ml-[280px]' : 'ml-0'"
@@ -823,18 +846,20 @@
                 >
                   <div
                     class="relative inline-block w-full h-full cursor-pointer"
-                    @click.stop="togglePinStatus(doc._id.$oid, doc.is_pinned)"
+                    @click.stop="
+                      togglePinStatus(doc._id.$oid, user && doc.pinned_by?.includes(user.id))
+                    "
                     :class="{ 'hover:bg-gray-100': !doc.is_archive }"
                     :title="
                       doc.is_archive
                         ? 'Cannot pin/unpin archived items'
-                        : doc.is_pinned
+                        : user && doc.pinned_by?.includes(user.id)
                           ? 'Click to unpin'
                           : 'Click to pin'
                     "
                   >
                     <span
-                      v-if="doc.is_pinned"
+                      v-if="user && doc.pinned_by?.includes(user.id)"
                       class="text-xl absolute top-1 left-[5px] -translate-y-1/2"
                     >
                       📌

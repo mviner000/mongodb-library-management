@@ -4,6 +4,7 @@ import { ref, computed } from 'vue'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { getApiBaseUrl } from '@/utils/api'
 import { documentService } from '@/services/documentService'
+import { useUserStore } from '@/store/useUserStore'
 const API_BASE = getApiBaseUrl()
 
 // Define the structure of a document (adjust based on your actual data)
@@ -140,6 +141,8 @@ export const useDataTableStore = defineStore('dataTable', () => {
     await preloadReferenceOptions() // Preload references needed by the schema
   }
 
+  // dataTableStore.ts
+
   const pinDocument = async (documentId: string) => {
     if (!collectionName.value) {
       console.warn('pinDocument: No collection name provided')
@@ -162,8 +165,16 @@ export const useDataTableStore = defineStore('dataTable', () => {
         console.log(`pinDocument: Document index in array: ${index}`)
 
         if (index !== -1) {
-          console.log(`pinDocument: Updating document in local state, setting is_pinned=true`)
-          documents.value[index].is_pinned = true
+          console.log(
+            `pinDocument: Updating document in local state, adding user to pinned_by array`
+          )
+          // Get the user store instance
+          const userStoreInstance = useUserStore()
+          // Access user directly without .value
+          const userId = userStoreInstance?.user?.id || 'unknown'
+
+          if (!documents.value[index].pinned_by) documents.value[index].pinned_by = []
+          documents.value[index].pinned_by.push(userId)
         } else {
           console.warn(`pinDocument: Document with ID ${documentId} not found in local state`)
         }
@@ -203,8 +214,19 @@ export const useDataTableStore = defineStore('dataTable', () => {
         console.log(`unpinDocument: Document index in array: ${index}`)
 
         if (index !== -1) {
-          console.log(`unpinDocument: Updating document in local state, setting is_pinned=false`)
-          documents.value[index].is_pinned = false
+          console.log(
+            `unpinDocument: Updating document in local state, removing user from pinned_by array`
+          )
+          // Get the user store instance
+          const userStoreInstance = useUserStore()
+          // Access user directly without .value
+          const userId = userStoreInstance?.user?.id || 'unknown'
+
+          if (documents.value[index].pinned_by) {
+            documents.value[index].pinned_by = documents.value[index].pinned_by.filter(
+              (id: string) => id !== userId
+            )
+          }
         } else {
           console.warn(`unpinDocument: Document with ID ${documentId} not found in local state`)
         }

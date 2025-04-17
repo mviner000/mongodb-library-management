@@ -136,6 +136,7 @@ pub async fn auth_get_me_handler(
     (StatusCode::OK, Json(ApiResponse {
         success: true,
         data: Some(UserResponse {
+            id: user_id.to_string(),     // Convert ObjectId to string and include it
             username: user.get_str("username").unwrap_or_default().to_string(),
             email: user.get_str("email").unwrap_or_default().to_string(),
         }),

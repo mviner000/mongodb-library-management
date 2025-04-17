@@ -295,7 +295,6 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "is_active": default_column_width,
             "last_updated_semester_id": default_column_width,
             "is_archive": default_column_width,
-            "is_pinned": default_column_width,
             "pinned_by": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
@@ -307,7 +306,6 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "classification": default_column_width,
             "purpose_label": default_column_width,
             "is_archive": default_column_width,
-            "is_pinned": default_column_width,
             "pinned_by": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
@@ -317,7 +315,6 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "icon_name": default_column_width,
             "is_deleted": default_column_width,
             "is_archive": default_column_width,
-            "is_pinned": default_column_width,
             "pinned_by": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
@@ -326,7 +323,6 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "label": default_column_width,
             "is_active": default_column_width,
             "is_archive": default_column_width,
-            "is_pinned": default_column_width,
             "pinned_by": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
@@ -336,7 +332,6 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "tailwind_classes": default_column_width,
             "label": default_column_width,
             "is_archive": default_column_width,
-            "is_pinned": default_column_width,
             "pinned_by": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width

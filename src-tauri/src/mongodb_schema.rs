@@ -58,37 +58,24 @@ pub fn get_archive_properties() -> Document {
 // Helper function to get pinned properties schema to be reused - made public
 pub fn get_pinned_properties() -> Document {
     doc! {
-        "is_pinned": { 
-            "bsonType": "bool", 
-            "description": "Flag indicating if the document is pinned (true) or not (false)" 
-        },
         "pinned_by": {
             "bsonType": "array",
-            "description": "Array of strings representing who pinned this document",
-            "items": {
-                "bsonType": "string"
-            }
+            "description": "Array of user IDs who pinned this document",
+            "items": { "bsonType": "string" }
         },
         "pinned_history": {
             "bsonType": "array",
-            "description": "Log of pin and unpin actions",
+            "description": "Log of pin/unpin actions",
             "items": {
                 "bsonType": "object",
                 "required": ["action", "user_id", "timestamp"],
                 "properties": {
                     "action": { 
                         "bsonType": "string", 
-                        "enum": ["pin", "unpin"], 
-                        "description": "The action performed" 
+                        "enum": ["pin", "unpin"] 
                     },
-                    "user_id": { 
-                        "bsonType": "objectId", 
-                        "description": "REF:users | ID of the user performing the action" 
-                    },
-                    "timestamp": { 
-                        "bsonType": "date", 
-                        "description": "Timestamp of the action" 
-                    }
+                    "user_id": { "bsonType": "string" },
+                    "timestamp": { "bsonType": "date" }
                 }
             }
         }
@@ -105,7 +92,7 @@ pub fn create_archive_index() -> IndexModel {
 // Helper function to create pinned index - made public
 pub fn create_pinned_index() -> IndexModel {
     IndexModel::builder()
-        .keys(doc! { "is_pinned": 1 })
+        .keys(doc! { "pinned_by": 1 })
         .build()
 }
 
@@ -419,7 +406,6 @@ fn get_default_column_widths(collection_name: &str) -> Document {
             "email": DEFAULT_COLUMN_WIDTH, 
             "password": DEFAULT_COLUMN_WIDTH,
             "is_archive": DEFAULT_COLUMN_WIDTH,
-            "is_pinned": DEFAULT_COLUMN_WIDTH,
             "pinned_by": DEFAULT_COLUMN_WIDTH,
             "created_at": DEFAULT_COLUMN_WIDTH, 
             "updated_at": DEFAULT_COLUMN_WIDTH
@@ -430,7 +416,6 @@ fn get_default_column_widths(collection_name: &str) -> Document {
             "expires_at": DEFAULT_COLUMN_WIDTH,
             "is_valid": DEFAULT_COLUMN_WIDTH,
             "is_archive": DEFAULT_COLUMN_WIDTH,
-            "is_pinned": DEFAULT_COLUMN_WIDTH,
             "pinned_by": DEFAULT_COLUMN_WIDTH,
             "created_at": DEFAULT_COLUMN_WIDTH, 
             "label": DEFAULT_COLUMN_WIDTH
@@ -456,7 +441,7 @@ fn get_default_sort_field(collection_name: &str) -> &str {
 
 // Helper function to get field names for a collection - reduced to essential collections
 fn get_field_names_for_collection(collection_name: &str) -> Vec<&str> {
-    // Add is_archive and is_pinned to all collection field lists
+    // Add is_archive and pinned_by to all collection field lists
     let mut fields = match collection_name {
         "users" => vec![
             "username", "email", "password", "created_at", "updated_at"
@@ -467,9 +452,8 @@ fn get_field_names_for_collection(collection_name: &str) -> Vec<&str> {
         _ => vec!["created_at", "updated_at"] // Fallback for unknown collections
     };
     
-    // Add is_archive, is_pinned, and pinned_by fields to each collection's fields
+    // Add is_archive, and pinned_by fields to each collection's fields
     fields.push("is_archive");
-    fields.push("is_pinned");
     fields.push("pinned_by");
     fields
 }

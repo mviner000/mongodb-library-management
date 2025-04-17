@@ -56,6 +56,8 @@ export const documentService = {
     return response.json()
   },
 
+  // documentService.ts
+
   async pinDocument(collectionName: string, documentId: string) {
     console.log(
       `documentService.pinDocument: Starting API call for ${collectionName}/${documentId}`

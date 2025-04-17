@@ -14,6 +14,7 @@ use mongodb::{
     bson::{doc, Document, oid::ObjectId}, 
     Cursor
 };
+use mongodb::options::{FindOneAndUpdateOptions, ReturnDocument};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -287,7 +288,33 @@ pub async fn find_pinned_documents_handler(
     State(state): State<Arc<Mutex<ApiServerState>>>,
     Path(collection_name): Path<String>,
     Query(params): Query<HashMap<String, String>>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
 ) -> impl IntoResponse {
+    // Validate auth token and get user_id
+    let user_id = match async {
+        let state_guard = state.lock().await;
+        let session_manager_mutex = &state_guard.session_manager;
+        let session_manager = session_manager_mutex.lock().await;
+        
+        let token = auth.token();
+        
+        if session_manager.validate_session(token).await {
+            // If session is valid, get the user ID
+            match session_manager.get_user_id(token).await {
+                Some(user_id) => Ok(user_id),
+                None => Err("Session valid but user ID not found".to_string())
+            }
+        } else {
+            Err("Invalid or expired session".to_string())
+        }
+    }.await {
+        Ok(id) => id,
+        Err(e) => return error_response::<Vec<Document>>(
+            StatusCode::UNAUTHORIZED,
+            format!("Authentication failed: {}", e)
+        ),
+    };
+    
     let mongodb_state = &state.lock().await.mongodb_state;
     
     let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
@@ -300,8 +327,8 @@ pub async fn find_pinned_documents_handler(
         ),
     };
     
-    // Filter for pinned documents
-    filter.insert("is_pinned", true);
+    // Filter for documents pinned by this user
+    filter.insert("pinned_by", user_id);
     
     match get_database(mongodb_state).await {
         Ok(db) => {
@@ -983,7 +1010,6 @@ pub async fn pin_document_handler(
     Path((collection_name, id)): Path<(String, String)>,
     TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
 ) -> impl IntoResponse {
-    // Log the call
     tracing::debug!(
         "pin_document_handler called: collection={}, document_id={}", 
         collection_name, id
@@ -993,50 +1019,43 @@ pub async fn pin_document_handler(
     let state = state.lock().await;
     let session_manager = &state.session_manager;
     
-    // Validate session
     let valid = session_manager.lock().await.validate_session(token).await;
     if !valid {
         tracing::warn!("pin_document_handler: Invalid session token");
-        return error_response::<()>(StatusCode::UNAUTHORIZED, "Invalid session".into());
+        return error_response::<Document>(StatusCode::UNAUTHORIZED, "Invalid session".into());
     }
 
-    // Get user ID from session
     let user_id = match session_manager.lock().await.get_user_id(token).await {
-        Some(id) => {
-            tracing::debug!("pin_document_handler: Found user_id={}", id);
-            id
-        },
+        Some(id) => id,
         None => {
             tracing::warn!("pin_document_handler: Session expired");
-            return error_response::<()>(StatusCode::UNAUTHORIZED, "Session expired".into());
+            return error_response::<Document>(StatusCode::UNAUTHORIZED, "Session expired".into());
         }
     };
 
-    // Convert to ObjectId
     let user_oid = match ObjectId::parse_str(&user_id) {
         Ok(oid) => oid,
         Err(e) => {
             tracing::error!("pin_document_handler: Invalid user ID format: {}", e);
-            return error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, "Invalid user ID format".into());
+            return error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, "Invalid user ID format".into());
         }
     };
 
     match get_database(&state.mongodb_state).await {
         Ok(db) => {
-            // Check if the collection supports pinning
             let schema = match get_collection_schema_internal(&db, &collection_name).await {
                 Ok(s) => s,
                 Err(e) => {
-                    tracing::error!("pin_document_handler: Failed to get schema for collection {}: {}", collection_name, e);
-                    return error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e);
+                    tracing::error!("pin_document_handler: Failed to get schema: {}", e);
+                    return error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, e);
                 }
             };
 
             if !schema_has_pinned_property(&schema) {
-                tracing::warn!("pin_document_handler: Collection {} doesn't support pinning", collection_name);
-                return error_response::<()>(
+                tracing::warn!("pin_document_handler: Collection doesn't support pinning");
+                return error_response::<Document>(
                     StatusCode::BAD_REQUEST,
-                    "This collection does not support pinning.".into(),
+                    "Collection does not support pinning".into(),
                 );
             }
 
@@ -1045,81 +1064,72 @@ pub async fn pin_document_handler(
                 Ok(oid) => oid,
                 Err(e) => {
                     tracing::warn!("pin_document_handler: Invalid document ID: {}", e);
-                    return error_response::<()>(StatusCode::BAD_REQUEST, format!("Invalid document ID: {}", e));
+                    return error_response::<Document>(StatusCode::BAD_REQUEST, format!("Invalid document ID: {}", e));
                 }
             };
 
-            // First, check if document exists and its current pinned status
+            let now = mongodb::bson::DateTime::now();
             let filter = doc! {
-                "_id": doc_id
+                "_id": doc_id,
+                "pinned_by": { "$ne": &user_id }  // Use a reference here
             };
-            
-            match collection.find_one(filter.clone(), None).await {
-                Ok(Some(doc)) => {
-                    // Check if document is already pinned
-                    if let Ok(is_pinned) = doc.get_bool("is_pinned") {
-                        if is_pinned {
-                            tracing::info!("pin_document_handler: Document {} is already pinned", id);
-                            return (StatusCode::OK, Json(ApiResponse {
-                                success: true,
-                                data: Some(()),
-                                error: None,
-                            }));
-                        }
+            let update = doc! {
+                "$addToSet": { "pinned_by": &user_id },
+                "$push": {
+                    "pinned_history": {
+                        "action": "pin",
+                        "user_id": &user_id, // Store the user_id string
+                        "timestamp": now
                     }
-                    
-                    // Document exists but is not pinned, proceed with update
-                    let now = mongodb::bson::DateTime::now();
-                    let update = doc! {
-                        "$set": {
-                            "is_pinned": true,
-                            "updated_at": now,
-                        },
-                        "$push": {
-                            "pinned_history": {
-                                "action": "pin",
-                                "user_id": user_oid,
-                                "timestamp": now
-                            },
-                            "pinned_by": user_id  // Add user ID to pinned_by array
-                        }
-                    };
+                },
+                "$set": { "updated_at": now }
+            };            
+            
+            let options = FindOneAndUpdateOptions::builder()
+                .return_document(ReturnDocument::After)
+                .build();
 
-                    tracing::debug!("pin_document_handler: Update operation: {:?}", update);
-
-                    match collection.update_one(filter, update, None).await {
-                        Ok(result) => {
-                            tracing::debug!(
-                                "pin_document_handler: Update result - matched: {}, modified: {}", 
-                                result.matched_count, result.modified_count
-                            );
-                            
-                            tracing::info!("pin_document_handler: Successfully pinned document {}", id);
+                match collection.find_one_and_update(filter, update, options).await {
+                    Ok(Some(mut updated_doc)) => {
+                        format_date_fields(&mut updated_doc);
+                        tracing::info!("Successfully pinned document {}", id);
+                        let response = Json(ApiResponse {
+                            success: true,
+                            data: Some(updated_doc),
+                            error: None,
+                        });
+                        tracing::info!("Response: {:?}", response); // Log the success response
+                        (StatusCode::OK, response)
+                    },
+                Ok(None) => {
+                    match collection.find_one(doc! { "_id": doc_id }, None).await {
+                        Ok(Some(mut existing_doc)) => {
+                            format_date_fields(&mut existing_doc);
                             (StatusCode::OK, Json(ApiResponse {
                                 success: true,
-                                data: Some(()),
+                                data: Some(existing_doc),
                                 error: None,
                             }))
                         },
-                        Err(e) => {
-                            tracing::error!("pin_document_handler: Database error while updating: {}", e);
-                            error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                        Ok(None) => {
+                            tracing::warn!("Document not found: {}", id);
+                            error_response::<Document>(StatusCode::NOT_FOUND, "Document not found".into())
                         },
+                        Err(e) => {
+                            tracing::error!("Database error: {}", e);
+                            error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                        }
                     }
                 },
-                Ok(None) => {
-                    tracing::warn!("pin_document_handler: Document not found with ID: {}", id);
-                    error_response::<()>(StatusCode::NOT_FOUND, "Document not found".into())
-                },
                 Err(e) => {
-                    tracing::error!("pin_document_handler: Database error while finding document: {}", e);
-                    error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                    tracing::error!("Update error: {}", e);
+                    error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
                 }
             }
         },
         Err((status, e)) => {
-            tracing::error!("pin_document_handler: Failed to get database: {}", e);
-            error_response::<()>(status, e)
+            tracing::error!("Database connection error: {}", e);
+            error_response::<Document>(status, e)
         },
     }
 }
@@ -1129,7 +1139,6 @@ pub async fn unpin_document_handler(
     Path((collection_name, id)): Path<(String, String)>,
     TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
 ) -> impl IntoResponse {
-    // Log the call
     tracing::debug!(
         "unpin_document_handler called: collection={}, document_id={}", 
         collection_name, id
@@ -1139,50 +1148,43 @@ pub async fn unpin_document_handler(
     let state = state.lock().await;
     let session_manager = &state.session_manager;
     
-    // Validate session
     let valid = session_manager.lock().await.validate_session(token).await;
     if !valid {
         tracing::warn!("unpin_document_handler: Invalid session token");
-        return error_response::<()>(StatusCode::UNAUTHORIZED, "Invalid session".into());
+        return error_response::<Document>(StatusCode::UNAUTHORIZED, "Invalid session".into());
     }
 
-    // Get user ID from session
     let user_id = match session_manager.lock().await.get_user_id(token).await {
-        Some(id) => {
-            tracing::debug!("unpin_document_handler: Found user_id={}", id);
-            id
-        },
+        Some(id) => id,
         None => {
             tracing::warn!("unpin_document_handler: Session expired");
-            return error_response::<()>(StatusCode::UNAUTHORIZED, "Session expired".into());
+            return error_response::<Document>(StatusCode::UNAUTHORIZED, "Session expired".into());
         }
     };
 
-    // Convert to ObjectId
     let user_oid = match ObjectId::parse_str(&user_id) {
         Ok(oid) => oid,
         Err(e) => {
             tracing::error!("unpin_document_handler: Invalid user ID format: {}", e);
-            return error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, "Invalid user ID format".into());
+            return error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, "Invalid user ID format".into());
         }
     };
 
     match get_database(&state.mongodb_state).await {
         Ok(db) => {
-            // Check if the collection supports pinning
             let schema = match get_collection_schema_internal(&db, &collection_name).await {
                 Ok(s) => s,
                 Err(e) => {
-                    tracing::error!("unpin_document_handler: Failed to get schema for collection {}: {}", collection_name, e);
-                    return error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e);
+                    tracing::error!("unpin_document_handler: Failed to get schema: {}", e);
+                    return error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, e);
                 }
             };
 
             if !schema_has_pinned_property(&schema) {
-                tracing::warn!("unpin_document_handler: Collection {} doesn't support pinning", collection_name);
-                return error_response::<()>(
+                tracing::warn!("unpin_document_handler: Collection doesn't support pinning");
+                return error_response::<Document>(
                     StatusCode::BAD_REQUEST,
-                    "This collection does not support pinning.".into(),
+                    "Collection does not support pinning".into(),
                 );
             }
 
@@ -1191,88 +1193,77 @@ pub async fn unpin_document_handler(
                 Ok(oid) => oid,
                 Err(e) => {
                     tracing::warn!("unpin_document_handler: Invalid document ID: {}", e);
-                    return error_response::<()>(StatusCode::BAD_REQUEST, format!("Invalid document ID: {}", e));
+                    return error_response::<Document>(StatusCode::BAD_REQUEST, format!("Invalid document ID: {}", e));
                 }
             };
 
-            // First, check if document exists and its current pinned status
+            let now = mongodb::bson::DateTime::now();
             let filter = doc! {
-                "_id": doc_id
+                "_id": doc_id,
+                "pinned_by": &user_id  // Use a reference here
             };
-            
-            match collection.find_one(filter.clone(), None).await {
-                Ok(Some(doc)) => {
-                    // Check if document is already unpinned
-                    if let Ok(is_pinned) = doc.get_bool("is_pinned") {
-                        if !is_pinned {
-                            tracing::info!("unpin_document_handler: Document {} is already unpinned", id);
-                            return (StatusCode::OK, Json(ApiResponse {
-                                success: true,
-                                data: Some(()),
-                                error: None,
-                            }));
-                        }
+            let update = doc! {
+                "$pull": { "pinned_by": &user_id },
+                "$push": {
+                    "pinned_history": {
+                        "action": "unpin",
+                        "user_id": &user_id, // Store the user_id string
+                        "timestamp": now
                     }
-                    
-                    // Document exists and is pinned, proceed with update
-                    let now = mongodb::bson::DateTime::now();
-                    let update = doc! {
-                        "$set": {
-                            "is_pinned": false,
-                            "updated_at": now,
-                        },
-                        "$push": {
-                            "pinned_history": {
-                                "action": "unpin",
-                                "user_id": user_oid,
-                                "timestamp": now
-                            }
-                        },
-                        "$pull": {
-                            "pinned_by": user_id  // Remove user ID from pinned_by array
-                        }
-                    };
+                },
+                "$set": { "updated_at": now }
+            };
 
-                    tracing::debug!("unpin_document_handler: Update operation: {:?}", update);
+            let options = FindOneAndUpdateOptions::builder()
+                .return_document(ReturnDocument::After)
+                .build();
 
-                    match collection.update_one(filter, update, None).await {
-                        Ok(result) => {
-                            tracing::debug!(
-                                "unpin_document_handler: Update result - matched: {}, modified: {}", 
-                                result.matched_count, result.modified_count
-                            );
-                            
-                            tracing::info!("unpin_document_handler: Successfully unpinned document {}", id);
+            match collection.find_one_and_update(filter, update, options).await {
+                Ok(Some(mut updated_doc)) => {
+                    format_date_fields(&mut updated_doc);
+                    tracing::info!("Successfully unpinned document {}", id);
+                    let response = Json(ApiResponse {
+                        success: true,
+                        data: Some(updated_doc),
+                        error: None,
+                    });
+                    tracing::info!("Response: {:?}", response); // Log the success response
+                    (StatusCode::OK, response)
+                },
+                Ok(None) => {
+                    match collection.find_one(doc! { "_id": doc_id }, None).await {
+                        Ok(Some(mut existing_doc)) => {
+                            format_date_fields(&mut existing_doc);
                             (StatusCode::OK, Json(ApiResponse {
                                 success: true,
-                                data: Some(()),
+                                data: Some(existing_doc),
                                 error: None,
                             }))
                         },
-                        Err(e) => {
-                            tracing::error!("unpin_document_handler: Database error while updating: {}", e);
-                            error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                        Ok(None) => {
+                            tracing::warn!("Document not found: {}", id);
+                            error_response::<Document>(StatusCode::NOT_FOUND, "Document not found".into())
                         },
+                        Err(e) => {
+                            tracing::error!("Database error: {}", e);
+                            error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                        }
                     }
                 },
-                Ok(None) => {
-                    tracing::warn!("unpin_document_handler: Document not found with ID: {}", id);
-                    error_response::<()>(StatusCode::NOT_FOUND, "Document not found".into())
-                },
                 Err(e) => {
-                    tracing::error!("unpin_document_handler: Database error while finding document: {}", e);
-                    error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                    tracing::error!("Update error: {}", e);
+                    error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
                 }
             }
         },
         Err((status, e)) => {
-            tracing::error!("unpin_document_handler: Failed to get database: {}", e);
-            error_response::<()>(status, e)
+            tracing::error!("Database connection error: {}", e);
+            error_response::<Document>(status, e)
         },
     }
 }
 
-// Helper function to check if the schema includes the 'is_pinned' property
+// Helper function to check if the schema includes the 'pinned_by' property
 fn schema_has_pinned_property(schema: &Document) -> bool {
     if let Ok(properties) = schema.get_document("properties") {
         let has = properties.contains_key("pinned_by");

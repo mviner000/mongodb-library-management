@@ -4,7 +4,8 @@ use axum::{http::StatusCode, Json};
 use serde::{Deserialize, Serialize};
 
 // Document response types
-#[derive(Serialize)]
+#[cfg_attr(debug_assertions, derive(Debug))] // Only in debug builds
+#[derive(Serialize, Deserialize)]
 pub struct ApiResponse<T> {
     pub success: bool,
     pub data: Option<T>,
@@ -35,6 +36,7 @@ pub struct LoginResponse {
 
 #[derive(Serialize)]
 pub struct UserResponse {
+    pub id: String,
     pub username: String,
     pub email: String,
 }
