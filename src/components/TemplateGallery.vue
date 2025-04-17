@@ -12,7 +12,6 @@
   import HomeNavbar from './HomeNavbar.vue'
   import { documentService } from '@/services/documentService'
   import { MONGODB_CONSTANTS } from '@/constants/mongodb'
-  import UserLogger from './UserLogger.vue'
 
   interface Template {
     id: string
@@ -319,7 +318,6 @@
           </ContextMenuContent>
         </ContextMenu>
       </div>
-      <UserLogger />
     </div>
   </div>
 </template>

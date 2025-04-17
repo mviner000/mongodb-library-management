@@ -38,7 +38,6 @@
   import MongoDBDataTableNavbar from './MongoDBDataTableNavbar.vue' // [cite: 1]
   import StickyLeftSidebar from './StickyLeftSidebar.vue'
   import { useUserStore } from '@/store/useUserStore'
-  import UserLogger from './UserLogger.vue'
   // Remove FooterTabsBar import if not used in old template
   // import FooterTabsBar from './FooterTabsBar.vue';
 
@@ -518,40 +517,32 @@
     selectedCellInfo.value = null
   }
 
-  // Fixed pinCell function
   const pinCell = async () => {
     console.log('pinCell: Function called')
-
     if (!selectedCellInfo.value) {
       console.warn('pinCell: No cell selected')
       return
     }
-
     if (isSelectedArchived.value) {
       console.warn('pinCell: Selected document is archived, cannot pin/unpin')
       return
     }
-
     // Add check for null user
     if (!user.value) {
       console.warn('pinCell: User not authenticated')
       return
     }
-
     const rowIndex = selectedCellInfo.value.rowIndex
     console.log(`pinCell: Selected row index: ${rowIndex}`)
-
     const doc = paginatedDocuments.value[rowIndex]
     if (!doc) {
       console.warn(`pinCell: No document found at row index ${rowIndex}`)
       return
     }
-
     const isPinned = doc.pinned_by?.includes(user.value.id)
     console.log(
       `pinCell: Document ID: ${doc._id.$oid}, Current pin state: ${isPinned ? 'pinned' : 'unpinned'}`
     )
-
     try {
       if (isPinned) {
         console.log(`pinCell: Document is currently pinned, attempting to unpin`)
@@ -562,10 +553,14 @@
         await dataTableStore.pinDocument(doc._id.$oid)
         console.log(`pinCell: Pin operation completed`)
       }
+
+      // Add this critical line to refresh documents after pin/unpin operation
+      console.log('pinCell: Refreshing documents to ensure pin state consistency across users')
+      await dataTableStore.fetchDocuments()
+      console.log('pinCell: Document refresh completed')
     } catch (error) {
       console.error('pinCell: Pin/Unpin error:', error)
     }
-
     console.log('pinCell: Closing context menu')
     closeContextMenu()
   }
@@ -627,7 +622,6 @@
 </script>
 
 <template>
-  <UserLogger />
   <!-- MongoDBDataTable main div -->
   <div
     :class="isSidebarOpen ? 'ml-[280px]' : 'ml-0'"

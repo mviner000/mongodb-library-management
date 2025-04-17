@@ -161,23 +161,24 @@ export const useDataTableStore = defineStore('dataTable', () => {
       console.log('pinDocument: Received response', response)
 
       if (response.success) {
+        // Find and replace the document with the updated version from the response
+        const updatedDoc = response.data
         const index = documents.value.findIndex((doc) => doc._id.$oid === documentId)
         console.log(`pinDocument: Document index in array: ${index}`)
 
         if (index !== -1) {
-          console.log(
-            `pinDocument: Updating document in local state, adding user to pinned_by array`
-          )
-          // Get the user store instance
-          const userStoreInstance = useUserStore()
-          // Access user directly without .value
-          const userId = userStoreInstance?.user?.id || 'unknown'
-
-          if (!documents.value[index].pinned_by) documents.value[index].pinned_by = []
-          documents.value[index].pinned_by.push(userId)
+          console.log(`pinDocument: Updating document in local state with response data`)
+          documents.value[index] = updatedDoc
         } else {
           console.warn(`pinDocument: Document with ID ${documentId} not found in local state`)
+          // If not found, add to documents array (might be a new pinned document)
+          console.log(`pinDocument: Adding new document to local state`)
+          documents.value.push(updatedDoc)
         }
+
+        // Force array update for Vue reactivity
+        console.log(`pinDocument: Forcing array update for Vue reactivity`)
+        documents.value = [...documents.value]
 
         toast({ title: 'Pinned', description: 'Document pinned successfully' })
       } else {
@@ -210,26 +211,21 @@ export const useDataTableStore = defineStore('dataTable', () => {
       console.log('unpinDocument: Received response', response)
 
       if (response.success) {
+        // Find and replace the document with the updated version from the response
+        const updatedDoc = response.data
         const index = documents.value.findIndex((doc) => doc._id.$oid === documentId)
         console.log(`unpinDocument: Document index in array: ${index}`)
 
         if (index !== -1) {
-          console.log(
-            `unpinDocument: Updating document in local state, removing user from pinned_by array`
-          )
-          // Get the user store instance
-          const userStoreInstance = useUserStore()
-          // Access user directly without .value
-          const userId = userStoreInstance?.user?.id || 'unknown'
-
-          if (documents.value[index].pinned_by) {
-            documents.value[index].pinned_by = documents.value[index].pinned_by.filter(
-              (id: string) => id !== userId
-            )
-          }
+          console.log(`unpinDocument: Updating document in local state with response data`)
+          documents.value[index] = updatedDoc
         } else {
           console.warn(`unpinDocument: Document with ID ${documentId} not found in local state`)
         }
+
+        // Force array update for Vue reactivity
+        console.log(`unpinDocument: Forcing array update for Vue reactivity`)
+        documents.value = [...documents.value]
 
         toast({ title: 'Unpinned', description: 'Document unpinned successfully' })
       } else {
