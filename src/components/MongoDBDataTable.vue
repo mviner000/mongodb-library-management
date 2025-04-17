@@ -38,6 +38,7 @@
   import MongoDBDataTableNavbar from './MongoDBDataTableNavbar.vue' // [cite: 1]
   import StickyLeftSidebar from './StickyLeftSidebar.vue'
   import { useUserStore } from '@/store/useUserStore'
+  import { invoke } from '@tauri-apps/api/core'
   // Remove FooterTabsBar import if not used in old template
   // import FooterTabsBar from './FooterTabsBar.vue';
 

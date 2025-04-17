@@ -120,7 +120,7 @@ pub async fn create_lib_attendance_collection(db: &Database) -> Result<()> {
             "validator": {
                 "$jsonSchema": {
                     "bsonType": "object",
-                    "required": ["school_id", "full_name", "time_in_date", "classification", "created_at", "updated_at"],
+                    "required": ["school_id", "full_name", "classification", "created_at", "updated_at"],
                     "properties": properties
                 }
             },

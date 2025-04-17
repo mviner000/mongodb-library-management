@@ -22,7 +22,7 @@
                 <!-- Content -->
                 <div class="flex-1 min-w-0">
                   <div class="text-sm font-medium truncate item-label">
-                    {{ doc.label || doc._id.$oid }}
+                    {{ doc[primaryKey] || doc._id.$oid }}
                   </div>
                   <div class="text-xs text-gray-500 truncate time-info">
                     pinned {{ formatRelativeTime(getPinnedTime(doc)) }}
@@ -109,7 +109,9 @@
 
 <script setup lang="ts">
   import { ScrollArea } from '@/components/ui/scroll-area'
+  import { useDataTableStore } from '@/store/dataTableStore'
   import { formatDistanceToNow, parseISO, isValid } from 'date-fns'
+  import { storeToRefs } from 'pinia'
   import { computed } from 'vue'
 
   // Define Document interface to match store's Document interface
@@ -207,6 +209,12 @@
     emit('toggle')
   }
 
+  const dataTableStore = useDataTableStore()
+  const { collectionSchema } = storeToRefs(dataTableStore)
+
+  const primaryKey = computed(() => {
+    return collectionSchema.value?.primaryKey || '_id' // Fallback to _id if no primary key
+  })
   // Function for relative time without "ago" since we'll add "pinned" before it
   const formatRelativeTime = (dateString: string) => {
     if (!dateString) return ''

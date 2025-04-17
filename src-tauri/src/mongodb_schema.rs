@@ -9,7 +9,6 @@ use mongodb::bson::{doc, Document};
 use anyhow::Result;
 use crate::lib_mongodb_schema;
 
-
 pub async fn initialize_database(db: &Database) -> Result<()> {
     // Create only essential collections by default
     create_users_collection(db).await?;

@@ -387,10 +387,20 @@ pub async fn insert_document_handler(
                     doc.remove("created_at");
                     doc.remove("updated_at");
                     
+                    // For attendance collection, also handle time_in_date
+                    if collection_name == "attendance" {
+                        doc.remove("time_in_date");
+                    }
+                    
                     // Add server-managed timestamp fields
                     let current_time = mongodb::bson::DateTime::now();
                     doc.insert("created_at", current_time.clone());
-                    doc.insert("updated_at", current_time);
+                    doc.insert("updated_at", current_time.clone());
+                    
+                    // For attendance collection, also set time_in_date
+                    if collection_name == "attendance" {
+                        doc.insert("time_in_date", current_time);
+                    }
                     
                     // Process fields according to schema types (dates, integers, etc.)
                     if let Err(e) = process_document_fields(&db, &collection_name, &mut doc).await {
