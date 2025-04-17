@@ -64,7 +64,6 @@
     { label: 'Recoveries' },
     { label: 'Archives' },
     { label: 'All' },
-    { label: 'Pins' },
   ]
 
   // Helper function to get the appropriate icon component based on menu item
@@ -78,8 +77,6 @@
         return Archive
       case 'All':
         return Globe
-      case 'Pins':
-        return Pin
       default:
         return Circle
     }
@@ -103,8 +100,6 @@
       viewType = 'recoveries'
     } else if (label === 'Default') {
       viewType = 'empty-or-recovered'
-    } else if (label === 'Pins') {
-      viewType = 'pins' // Add this case
     } else if (label === 'All') {
       viewType = 'all'
     }
@@ -511,7 +506,7 @@
 <template>
   <!-- ExcelCellReference main div -->
   <div
-    class="fixed h-[42px] z-30 top-14 w-full flex items-center bg-white border-b border-b-gray-400 transition-all duration-300 ease-in-out"
+    class="fixed h-[42px] z-30 top-14 w-screen flex items-center bg-white border-b border-b-gray-400 transition-all duration-300 ease-in-out"
     :class="isSidebarOpen ? 'left-[280px]' : 'left-0'"
   >
     <!-- Cell reference box (e.g., A1) -->
@@ -528,110 +523,113 @@
 
     <!-- Empty space -->
     <div class="flex-1 h-full"></div>
-
-    <!-- single selection buttons -->
     <div
-      v-if="selectedRows.size === 1"
-      class="-mr-1 flex gap-2"
+      class="flex transition-all duration-300 ease-in-out"
+      :class="isSidebarOpen ? 'mr-[280px]' : 'mr-[0px]'"
     >
-      <!-- Single Recover Button -->
-      <button
-        v-if="selected === 'Archives' || selected === 'All'"
-        @click="handleRecoverClick"
-        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-green-100 text-green-600 border-green-300 hover:bg-green-200"
+      <!-- single selection buttons -->
+      <div
+        v-if="selectedRows.size === 1"
+        class="mr-5 flex gap-2"
       >
-        <ArrowDownToLine class="h-3 w-3 mr-1" />
-        Recover 1 Item
-      </button>
-
-      <!-- Single Archive Button -->
-      <button
-        v-if="selected === 'Default' || selected === 'Recoveries' || selected === 'All'"
-        @click="handleArchiveClick"
-        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-blue-100 text-blue-500 border-blue-300 hover:bg-blue-200"
-      >
-        <Archive class="h-3 w-3 mr-1" />
-        Archive 1 Item
-      </button>
-
-      <!-- Single Delete Button -->
-      <button
-        v-if="selected === 'Archives' || selected === 'All'"
-        @click="handleDeleteClick"
-        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-red-100 text-red-500 border-red-300 hover:bg-red-200"
-      >
-        <Trash2 class="h-3 w-3 mr-1" />
-        Delete 1 Item
-      </button>
-    </div>
-
-    <!-- buttons for multiple selections -->
-    <div
-      v-if="selectedRows.size > 1"
-      class="-mr-1 flex gap-2"
-    >
-      <!-- Batch Recovery Button -->
-      <button
-        v-if="selected === 'Archives' || selected === 'All'"
-        @click="handleBatchRecover"
-        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-green-100 text-green-600 border-green-300 hover:bg-green-200"
-      >
-        <ArrowDownToLine class="h-3 w-3 mr-1" />
-        Batch Recover {{ selectedRows.size }} Items
-      </button>
-      <!-- Batch Archive Button -->
-      <button
-        v-if="selected === 'Default' || selected === 'Recoveries' || selected === 'All'"
-        @click="handleBatchArchive"
-        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-blue-100 text-blue-500 border-blue-300 hover:bg-blue-200"
-      >
-        <Archive class="h-3 w-3 mr-1" />
-        Batch Archive {{ selectedRows.size }} Items
-      </button>
-
-      <!-- Batch Delete Button -->
-      <button
-        v-if="selected === 'Archives' || selected === 'All'"
-        @click="openBatchDeleteDialog"
-        class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-red-100 text-red-500 border-red-300 hover:bg-red-200"
-      >
-        <Trash2 class="h-3 w-3 mr-1" />
-        Batch Delete {{ selectedRows.size }} Items
-      </button>
-    </div>
-
-    <!-- Empty space -->
-    <div class="h-full border-r border-gray-600 mx-4"></div>
-
-    <!-- options for view as dropdown with shadcn menubar -->
-    <div class="pr-4">
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200 gap-1"
+        <!-- Single Recover Button -->
+        <button
+          v-if="selected === 'Archives' || selected === 'All'"
+          @click="handleRecoverClick"
+          class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-green-100 text-green-600 border-green-300 hover:bg-green-200"
         >
-          <span class="inline-flex items-center"
-            ><component
-              :is="selectedIconComponent"
-              class="h-3 w-3 mr-1"
-            />{{ selected }}</span
+          <ArrowDownToLine class="h-3 w-3 mr-1" />
+          Recover 1 Item
+        </button>
+
+        <!-- Single Archive Button -->
+        <button
+          v-if="selected === 'Default' || selected === 'Recoveries' || selected === 'All'"
+          @click="handleArchiveClick"
+          class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-blue-100 text-blue-500 border-blue-300 hover:bg-blue-200"
+        >
+          <Archive class="h-3 w-3 mr-1" />
+          Archive 1 Item
+        </button>
+
+        <!-- Single Delete Button -->
+        <button
+          v-if="selected === 'Archives' || selected === 'All'"
+          @click="handleDeleteClick"
+          class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-red-100 text-red-500 border-red-300 hover:bg-red-200"
+        >
+          <Trash2 class="h-3 w-3 mr-1" />
+          Delete 1 Item
+        </button>
+      </div>
+
+      <!-- buttons for multiple selections -->
+      <div
+        v-if="selectedRows.size > 1"
+        class="-mr-1 flex gap-2"
+      >
+        <!-- Batch Recovery Button -->
+        <button
+          v-if="selected === 'Archives' || selected === 'All'"
+          @click="handleBatchRecover"
+          class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-green-100 text-green-600 border-green-300 hover:bg-green-200"
+        >
+          <ArrowDownToLine class="h-3 w-3 mr-1" />
+          Batch Recover {{ selectedRows.size }} Items
+        </button>
+        <!-- Batch Archive Button -->
+        <button
+          v-if="selected === 'Default' || selected === 'Recoveries' || selected === 'All'"
+          @click="handleBatchArchive"
+          class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-blue-100 text-blue-500 border-blue-300 hover:bg-blue-200"
+        >
+          <Archive class="h-3 w-3 mr-1" />
+          Batch Archive {{ selectedRows.size }} Items
+        </button>
+
+        <!-- Batch Delete Button -->
+        <button
+          v-if="selected === 'Archives' || selected === 'All'"
+          @click="openBatchDeleteDialog"
+          class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-red-100 text-red-500 border-red-300 hover:bg-red-200"
+        >
+          <Trash2 class="h-3 w-3 mr-1" />
+          Batch Delete {{ selectedRows.size }} Items
+        </button>
+      </div>
+
+      <!-- Empty space -->
+
+      <!-- options for view as dropdown with shadcn menubar -->
+      <div class="pl-3 border-l border-gray-400 pr-4">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            class="flex items-center justify-center px-3 py-1 text-xs rounded-md border bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200 gap-1"
           >
-          <ChevronDown class="h-3 w-3" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent>
-          <DropdownMenuItem
-            v-for="item in options"
-            :key="item.label"
-            @click="select(item.label)"
-            class="flex items-center gap-2 text-sm"
-          >
-            <component
-              :is="getIconComponent(item.label)"
-              class="h-3 w-3"
-            />
-            {{ item.label }}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            <span class="inline-flex items-center"
+              ><component
+                :is="selectedIconComponent"
+                class="h-3 w-3 mr-1"
+              />{{ selected }}</span
+            >
+            <ChevronDown class="h-3 w-3" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem
+              v-for="item in options"
+              :key="item.label"
+              @click="select(item.label)"
+              class="flex items-center gap-2 text-sm"
+            >
+              <component
+                :is="getIconComponent(item.label)"
+                class="h-3 w-3"
+              />
+              {{ item.label }}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </div>
 
     <!-- Single Delete document dialog -->

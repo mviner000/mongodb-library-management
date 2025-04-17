@@ -85,7 +85,10 @@ pub async fn create_lib_attendance_collection(db: &Database) -> Result<()> {
     // Create indexes
     let indexes = vec![
         IndexModel::builder()
-            .keys(doc! { "school_id": 1 })
+            .keys(doc! { "school_id": 1, "time_in_date": 1 })
+            .options(Some(IndexOptions::builder()
+                .unique(true)
+                .build()))
             .build(),
         IndexModel::builder()
             .keys(doc! { "time_in_date": 1 })
@@ -237,6 +240,9 @@ pub async fn create_lib_settings_styles_collection(db: &Database) -> Result<()> 
     let indexes = vec![
         IndexModel::builder()
             .keys(doc! { "component_name": 1 })
+            .options(Some(IndexOptions::builder()
+                .unique(true)  // Add unique constraint here
+                .build()))
             .build(),
         create_archive_index(),
         create_pinned_index(),

@@ -1,0 +1,9 @@
+if single data row is selected using column selector, and logged-in user want's to archive it using the button in the excelcellreference.vue, that data row maybe pinned_by. show a native web alert dialog.
+"This data is pinned, if you want to continue archiving this data, this will be removed from pin items before data will be archive. do you want to continue?"
+
+if batch data row is selected using column selector, logged-in user want's to archive it using the button in the excelcellreference.vue, that data row maybe pinned_by. show a native web alert dialog.
+"The data listed below are pinned, if you want to continue archiving these data, these will be removed from pin items before therse data will be archive. do you want to continue?"
+
+if app_user pressed no, do nothing.
+the idea is "no items can be moved to archive if they are pinned
+

@@ -1033,13 +1033,14 @@ pub async fn pin_document_handler(
         }
     };
 
-    let user_oid = match ObjectId::parse_str(&user_id) {
-        Ok(oid) => oid,
-        Err(e) => {
-            tracing::error!("pin_document_handler: Invalid user ID format: {}", e);
-            return error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, "Invalid user ID format".into());
-        }
-    };
+    // temporary commented, TODO: check this part if truly not needed
+    // let user_oid = match ObjectId::parse_str(&user_id) {
+    //     Ok(oid) => oid,
+    //     Err(e) => {
+    //         tracing::error!("pin_document_handler: Invalid user ID format: {}", e);
+    //         return error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, "Invalid user ID format".into());
+    //     }
+    // };
 
     match get_database(&state.mongodb_state).await {
         Ok(db) => {
@@ -1162,13 +1163,14 @@ pub async fn unpin_document_handler(
         }
     };
 
-    let user_oid = match ObjectId::parse_str(&user_id) {
-        Ok(oid) => oid,
-        Err(e) => {
-            tracing::error!("unpin_document_handler: Invalid user ID format: {}", e);
-            return error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, "Invalid user ID format".into());
-        }
-    };
+    // temporary commented, TODO: check this part if truly not needed
+    // let user_oid = match ObjectId::parse_str(&user_id) {
+    //     Ok(oid) => oid,
+    //     Err(e) => {
+    //         tracing::error!("unpin_document_handler: Invalid user ID format: {}", e);
+    //         return error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, "Invalid user ID format".into());
+    //     }
+    // };
 
     match get_database(&state.mongodb_state).await {
         Ok(db) => {

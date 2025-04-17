@@ -12,15 +12,29 @@
               <div
                 v-for="doc in sortedPinnedDocuments"
                 :key="doc._id.$oid"
-                class="group flex items-center gap-2 p-2 mb-1 rounded-md hover:bg-gray-100 cursor-pointer transition-colors pinned-item"
-                @click="navigateToDocument(doc._id.$oid)"
+                class="group flex items-center gap-2 p-2 mb-2 rounded hover:bg-gray-100 cursor-pointer transition-colors pinned-item relative"
+                :class="{ archived: doc.is_archive }"
+                @click="handlePinnedItemClick(doc)"
               >
-                <span class="text-lg">📌</span>
+                <!-- Pin icon -->
+                <span class="text-lg pin-icon">📌</span>
+
+                <!-- Content -->
                 <div class="flex-1 min-w-0">
-                  <div class="text-sm font-medium truncate">{{ doc.label || doc._id.$oid }}</div>
-                  <div class="text-xs text-gray-500 truncate">
+                  <div class="text-sm font-medium truncate item-label">
+                    {{ doc.label || doc._id.$oid }}
+                  </div>
+                  <div class="text-xs text-gray-500 truncate time-info">
                     pinned {{ formatRelativeTime(getPinnedTime(doc)) }}
                   </div>
+                </div>
+
+                <!-- Archive badge -->
+                <div
+                  v-if="doc.is_archive"
+                  class="archive-badge"
+                >
+                  Currently Archived
                 </div>
               </div>
               <div
@@ -35,7 +49,7 @@
       </div>
     </transition>
 
-    <!-- Half-circle trigger button - Excel style -->
+    <!-- Original trigger button style -->
     <div
       class="trigger-button opacity-50 hover:opacity-100"
       :class="{ open: isOpen }"
@@ -120,6 +134,7 @@
     label?: string
     updated_at?: string
     pinned_history?: PinnedHistoryItem[]
+    is_archive?: boolean
     [key: string]: any
   }
 
@@ -216,14 +231,37 @@
   const navigateToDocument = (docId: string) => {
     emit('navigate', docId)
   }
+  const handlePinnedItemClick = (doc: Document) => {
+    if (doc.is_archive) return
+    navigateToDocument(doc._id.$oid)
+  }
 </script>
 
 <style scoped>
+  /* Excel-inspired colors */
+  :root {
+    --excel-green: #217346;
+    --excel-dark-green: #185a34;
+    --excel-hover: #f3f9fd;
+    --excel-select: #e6f2fa;
+    --excel-border: #d4d4d8;
+    --excel-text: #333333;
+    --excel-secondary-text: #666666;
+
+    --archive-bg: #333333;
+    --archive-border: #000000;
+    --archive-text: #cccccc;
+    --archive-badge-bg: #444444;
+    --archive-badge-text: #eeeeee;
+  }
+
+  /* Sidebar Container */
   .sidebar-container {
     position: relative;
     z-index: 40;
   }
 
+  /* Sidebar */
   .sidebar {
     position: fixed;
     top: 0;
@@ -231,28 +269,89 @@
     height: 100vh;
     width: 280px;
     background-color: #f8f9fa;
-    border-right: 1px solid #d4d4d8;
+    border-right: 1px solid var(--excel-border);
     z-index: 40;
-    margin-top: 0px; /* Adjust based on your Excel header height */
-    @apply shadow-lg;
+    margin-top: 0px;
+    box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
   }
 
   .sidebar-content {
-    padding: 16px;
+    padding: 16px 12px;
   }
 
   .sidebar-title {
     font-size: 14px;
-    font-weight: 500;
-    color: #4b5563;
+    font-weight: 600;
+    color: var(--excel-dark-green);
     margin-bottom: 16px;
+    padding-left: 4px;
   }
 
-  .sidebar-menu {
-    display: flex;
-    flex-direction: column;
+  /* Pinned items */
+  .pinned-item {
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
   }
 
+  .pinned-item:hover {
+    background-color: var(--excel-hover);
+    border-color: var(--excel-border);
+  }
+
+  .pinned-item:active {
+    background-color: var(--excel-select);
+  }
+
+  .pin-icon {
+    color: var(--excel-dark-green);
+  }
+
+  .item-label {
+    color: var(--excel-text);
+  }
+
+  .time-info {
+    color: var(--excel-secondary-text);
+  }
+
+  /* Archive styling */
+  .pinned-item.archived {
+    background-color: var(--archive-bg);
+    border: 1px solid var(--archive-border);
+    cursor: not-allowed;
+  }
+
+  .pinned-item.archived:hover {
+    background-color: #222222;
+    border-color: #111111;
+  }
+
+  .pinned-item.archived .item-label {
+    color: var(--archive-text);
+  }
+
+  .pinned-item.archived .time-info {
+    color: #999999;
+  }
+
+  .pinned-item.archived .pin-icon {
+    opacity: 0.7;
+  }
+
+  .archive-badge {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    font-size: 10px;
+    font-style: italic;
+    background-color: var(--archive-badge-bg);
+    color: var(--archive-badge-text);
+    padding: 1px 4px;
+    border-radius: 2px;
+    line-height: 1.2;
+  }
+
+  /* Original trigger button style */
   .trigger-button {
     position: fixed;
     top: 75%;
@@ -296,17 +395,5 @@
   .slide-enter-from,
   .slide-leave-to {
     transform: translateX(-100%);
-  }
-
-  .pinned-item {
-    @apply transition-colors duration-200 ease-in-out;
-  }
-
-  .pinned-item:hover {
-    @apply bg-blue-50;
-  }
-
-  .pinned-item:active {
-    @apply bg-blue-100;
   }
 </style>
