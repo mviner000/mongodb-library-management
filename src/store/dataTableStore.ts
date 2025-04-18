@@ -964,6 +964,10 @@ export const useDataTableStore = defineStore('dataTable', () => {
     errorMessage.value = ''
   }
 
+  const shortNames = computed(() => {
+    return collectionSchema.value?.ui?.short_names || {}
+  })
+
   // Return state, getters, and actions
   return {
     // State
@@ -997,6 +1001,7 @@ export const useDataTableStore = defineStore('dataTable', () => {
     columnWidths,
     allSelected,
 
+    shortNames,
     // Actions
     fetchCollections,
     setCollection,

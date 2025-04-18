@@ -399,6 +399,12 @@ async fn create_lib_ui_metadata(db: &Database) -> Result<()> {
         let column_order = mongodb::bson::to_bson(&column_widths.keys().collect::<Vec<_>>())
             .unwrap_or(mongodb::bson::Bson::Array(Vec::new()));
         
+        // Create default short names (same as original field names)
+        let mut short_names = Document::new();
+        for key in column_widths.keys() {
+            short_names.insert(key.clone(), key.clone());
+        }
+        
         let default_settings = doc! {
             "collection": collection_name,
             "ui": {
@@ -410,6 +416,7 @@ async fn create_lib_ui_metadata(db: &Database) -> Result<()> {
                     "direction": "asc"
                 },
                 "filterSettings": {},
+                "short_names": short_names
             },
             "created_at": now,
             "updated_at": now

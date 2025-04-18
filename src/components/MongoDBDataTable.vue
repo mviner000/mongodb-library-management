@@ -899,7 +899,8 @@
               >
                 <div class="flex items-center justify-between">
                   <span>
-                    {{ header }}
+                    <!-- Add short name display with fallback -->
+                    {{ collectionSchema.ui?.short_names?.[header] || header }}
                     <span
                       v-if="isFieldRequired(header)"
                       class="text-red-500"

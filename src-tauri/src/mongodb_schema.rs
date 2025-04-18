@@ -336,6 +336,7 @@ async fn create_ui_metadata_collection(db: &Database) -> Result<()> {
                                     }
                                 },
                                 "filterSettings": { "bsonType": "object", "description": "Filter configurations" },
+                                "short_names": { "bsonType": "object", "description": "Short display names for columns" }
                             }
                         },
                         "created_at": { "bsonType": "date", "description": "Creation timestamp" },
@@ -400,6 +401,12 @@ fn create_default_ui_settings() -> Vec<Document> {
         let column_order = mongodb::bson::to_bson(&column_widths.keys().collect::<Vec<_>>())
             .unwrap_or(mongodb::bson::Bson::Array(Vec::new()));
         
+        // Create default short names (same as original field names)
+        let mut short_names = Document::new();
+        for key in column_widths.keys() {
+            short_names.insert(key.clone(), key.clone());
+        }
+        
         doc! {
             "collection": collection_name,
             "ui": {
@@ -411,6 +418,7 @@ fn create_default_ui_settings() -> Vec<Document> {
                     "direction": "asc"
                 },
                 "filterSettings": {},
+                "short_names": short_names
             },
             "created_at": now,
             "updated_at": now
