@@ -84,7 +84,7 @@ pub async fn register(
         "email": email,
         "password": hashed,
         "created_at": now,
-        "updated_at": now  // Add updated_at field
+        // "updated_at": now  // updated_at field remains blank when creating a new document and is only set during updates
     };
 
     // Insert new user

@@ -1,6 +1,7 @@
 // src/api_server/models/responses.rs
 
 use axum::{http::StatusCode, Json};
+use mongodb::bson::Document;
 use serde::{Deserialize, Serialize};
 
 // Document response types
@@ -21,6 +22,7 @@ pub struct InsertResponse {
 pub struct UpdateResponse {
     pub success: bool,
     pub modified_count: u64,
+    pub document: Option<Document>, 
 }
 
 #[derive(Serialize, Deserialize)]

@@ -629,6 +629,24 @@ export const useDataTableStore = defineStore('dataTable', () => {
     editValue.value = ''
   }
 
+  function updateDocument(docId: string, updatedDoc: any) {
+    console.log(`Updating document ${docId} in store:`, updatedDoc)
+
+    // Find document index in the main documents array
+    const docIndex = documents.value.findIndex((doc) => doc._id.$oid === docId)
+
+    if (docIndex !== -1) {
+      // Replace the document with the updated version
+      documents.value = documents.value.map((doc, index) => (index === docIndex ? updatedDoc : doc))
+
+      console.log(`Document updated successfully at index ${docIndex}`)
+      // No need to update paginatedDocuments as it's a computed property
+      // that will automatically update based on the documents array
+    } else {
+      console.warn(`Document with ID ${docId} not found in local state`)
+    }
+  }
+
   // Save an edited cell value
   async function saveEdit() {
     if (!editingCell.value || isSaving.value) return
@@ -707,17 +725,16 @@ export const useDataTableStore = defineStore('dataTable', () => {
         throw new Error(errorData?.error || `Update failed: HTTP ${response.status}`)
       }
 
-      const result = await response.json() // Assuming API returns success status and modified count
+      const result = await response.json()
 
-      if (result.success && result.data?.modified_count > 0) {
+      if (result.success && result.data?.document) {
+        const updatedDoc = result.data.document
+
+        // Update the document in the store - this will automatically update any computed properties
+        // using the proper store action instead of direct mutation
+        updateDocument(docId, updatedDoc)
+
         toast({ title: 'Update Successful', description: `Field '${header}' updated.` })
-        // Update local document state directly for immediate feedback
-        const globalDocIndex = documents.value.findIndex((d) => d._id.$oid === docId)
-        if (globalDocIndex !== -1) {
-          documents.value[globalDocIndex] = { ...documents.value[globalDocIndex], ...update }
-          // Trigger reactivity if needed (sometimes direct modification isn't enough)
-          // documents.value = [...documents.value];
-        }
         cancelEdit() // Exit edit mode on success
       } else if (result.success && result.data?.modified_count === 0) {
         // API succeeded but didn't modify (e.g., value was the same)
@@ -729,8 +746,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     } catch (err: any) {
       errorMessage.value = `Error updating field '${header}': ${err.message}`
       toast({ title: 'Update Error', description: errorMessage.value, variant: 'destructive' })
-      // Optionally revert the local value visually, or leave the editor open
-      // editValue.value = originalValue; // Revert visual state
       console.error('Save edit error:', err)
     } finally {
       isSaving.value = false
@@ -996,6 +1011,7 @@ export const useDataTableStore = defineStore('dataTable', () => {
     startEditingCell,
     cancelEdit,
     saveEdit,
+    updateDocument,
     deleteDocument,
     toggleRow,
     resetSelection,

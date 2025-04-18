@@ -204,7 +204,7 @@ async fn create_users_collection(db: &Database) -> Result<()> {
             "validator": {
                 "$jsonSchema": {
                     "bsonType": "object",
-                    "required": ["username", "email", "password", "created_at", "updated_at"],
+                    "required": ["username", "email", "password", "created_at"],
                     "properties": properties
                 }
             },
@@ -319,7 +319,7 @@ async fn create_ui_metadata_collection(db: &Database) -> Result<()> {
             "validator": {
                 "$jsonSchema": {
                     "bsonType": "object",
-                    "required": ["collection", "ui", "created_at", "updated_at"],
+                    "required": ["collection", "ui", "created_at"],
                     "properties": {
                         "collection": { "bsonType": "string", "description": "Collection name" },
                         "ui": { 

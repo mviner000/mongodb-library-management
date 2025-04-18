@@ -395,7 +395,6 @@ pub async fn insert_document_handler(
                     // Add server-managed timestamp fields
                     let current_time = mongodb::bson::DateTime::now();
                     doc.insert("created_at", current_time.clone());
-                    doc.insert("updated_at", current_time.clone());
                     
                     // For attendance collection, also set time_in_date
                     if collection_name == "attendance" {
@@ -459,14 +458,16 @@ pub async fn update_document_handler(
                     // Remove any attempts to modify timestamp fields
                     update_doc.remove("created_at");
                     
-                    // Process row_height if present
-                    if let Some(row_height) = update_doc.get_i32("row_height").ok() {
-                        update_doc.insert("row_height", row_height);
-                    }
+                    // Check if the update contains only row_height
+                    // Count keys in update_doc and check if row_height is the only one
+                    let keys: Vec<_> = update_doc.keys().collect();
+                    let is_row_height_only = keys.len() == 1 && keys[0] == "row_height";
                     
-                    // Always update the updated_at field with current timestamp
-                    let current_time = mongodb::bson::DateTime::now();
-                    update_doc.insert("updated_at", current_time);
+                    // Only update timestamp if other fields are being modified
+                    if !is_row_height_only {
+                        let current_time = mongodb::bson::DateTime::now();
+                        update_doc.insert("updated_at", current_time);
+                    }
                     
                     if let Err(e) = process_document_fields(&db, &collection_name, &mut update_doc).await {
                         return error_response::<UpdateResponse>(StatusCode::BAD_REQUEST, e);
@@ -474,18 +475,34 @@ pub async fn update_document_handler(
                     
                     let update_bson = doc! { "$set": update_doc };
                     
-                    match collection.update_one(filter, update_bson, None).await {
-                        Ok(result) => {
+                    // Use FindOneAndUpdateOptions to return the updated document
+                    let options = FindOneAndUpdateOptions::builder()
+                        .return_document(ReturnDocument::After)
+                        .build();
+
+                    match collection.find_one_and_update(filter, update_bson, options).await {
+                        Ok(Some(mut updated_doc)) => {
+                            // Format the date fields for proper JSON serialization
+                            format_date_fields(&mut updated_doc);
+                            
                             (StatusCode::OK, Json(ApiResponse {
                                 success: true,
                                 data: Some(UpdateResponse {
                                     success: true,
-                                    modified_count: result.modified_count,
+                                    modified_count: 1,
+                                    document: Some(updated_doc),
                                 }),
                                 error: None,
                             }))
                         },
-                        Err(e) => error_response::<UpdateResponse>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+                        Ok(None) => error_response::<UpdateResponse>(
+                            StatusCode::NOT_FOUND, 
+                            "Document not found".into()
+                        ),
+                        Err(e) => error_response::<UpdateResponse>(
+                            StatusCode::INTERNAL_SERVER_ERROR, 
+                            e.to_string()
+                        ),
                     }
                 },
                 Err(e) => error_response::<UpdateResponse>(

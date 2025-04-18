@@ -565,7 +565,7 @@
       <!-- buttons for multiple selections -->
       <div
         v-if="selectedRows.size > 1"
-        class="-mr-1 flex gap-2"
+        class="mr-5 flex gap-2"
       >
         <!-- Batch Recovery Button -->
         <button

@@ -65,7 +65,7 @@ pub async fn create_lib_school_accounts_collection(db: &Database) -> Result<()> 
             "validator": {
                 "$jsonSchema": {
                     "bsonType": "object",
-                    "required": ["school_id", "is_active", "created_at", "updated_at"],
+                    "required": ["school_id", "is_active", "created_at"],
                     "properties": properties
                 }
             },
@@ -120,7 +120,7 @@ pub async fn create_lib_attendance_collection(db: &Database) -> Result<()> {
             "validator": {
                 "$jsonSchema": {
                     "bsonType": "object",
-                    "required": ["school_id", "full_name", "classification", "created_at", "updated_at"],
+                    "required": ["school_id", "full_name", "classification", "created_at"],
                     "properties": properties
                 }
             },
@@ -170,7 +170,7 @@ pub async fn create_lib_purposes_collection(db: &Database) -> Result<()> {
             "validator": {
                 "$jsonSchema": {
                     "bsonType": "object",
-                    "required": ["label", "icon_name", "is_deleted", "created_at", "updated_at"],
+                    "required": ["label", "icon_name", "is_deleted", "created_at"],
                     "properties": properties
                 }
             },
@@ -219,7 +219,7 @@ pub async fn create_lib_semesters_collection(db: &Database) -> Result<()> {
             "validator": {
                 "$jsonSchema": {
                     "bsonType": "object",
-                    "required": ["label", "is_active", "created_at", "updated_at"],
+                    "required": ["label", "is_active", "created_at"],
                     "properties": properties
                 }
             },
@@ -269,7 +269,7 @@ pub async fn create_lib_settings_styles_collection(db: &Database) -> Result<()> 
             "validator": {
                 "$jsonSchema": {
                     "bsonType": "object",
-                    "required": ["component_name", "tailwind_classes", "created_at", "updated_at"],
+                    "required": ["component_name", "tailwind_classes", "created_at"],
                     "properties": properties
                 }
             },

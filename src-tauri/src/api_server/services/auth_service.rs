@@ -115,7 +115,7 @@ pub async fn register_user(
         "email": email,
         "password": hashed,
         "created_at": now,
-        "updated_at": now
+        // "updated_at": now // commented out for now, updated_at field remains blank when creating a new document and is only set during updates
     };
 
     collection.insert_one(user, None)
