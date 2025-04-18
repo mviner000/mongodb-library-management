@@ -96,6 +96,7 @@
     getSchemaInfo,
     isReferenceField,
     getReferencedCollection,
+    updateUIMetadata,
     // fetchSchema, // Optional direct access
   } = dataTableStore
 
@@ -741,6 +742,43 @@
     // Use debounced save instead of immediate
     debouncedRowHeightSave(documentId, currentHeight)
   }
+
+  // New reactive state
+  const editingHeader = ref<string | null>(null)
+  const editedShortName = ref('')
+
+  const shortName = (header: string) => {
+    return collectionSchema.value.ui?.short_names?.[header] || header
+  }
+
+  const startEditingHeader = (header: string) => {
+    editingHeader.value = header
+    editedShortName.value = shortName(header)
+  }
+
+  const isEditingHeader = (header: string) => {
+    return editingHeader.value === header
+  }
+
+  const saveShortName = async (header: string) => {
+    if (!editedShortName.value.trim()) return
+
+    const newShortNames = {
+      ...collectionSchema.value.ui?.short_names,
+      [header]: editedShortName.value,
+    }
+
+    try {
+      await updateUIMetadata({ short_names: newShortNames })
+      editingHeader.value = null
+    } catch (error) {
+      // Handle error
+    }
+  }
+
+  const cancelEditTextHead = () => {
+    editingHeader.value = null
+  }
 </script>
 
 <template>
@@ -898,15 +936,28 @@
                 }"
               >
                 <div class="flex items-center justify-between">
-                  <span>
-                    <!-- Add short name display with fallback -->
-                    {{ collectionSchema.ui?.short_names?.[header] || header }}
-                    <span
-                      v-if="isFieldRequired(header)"
-                      class="text-red-500"
-                      >*</span
-                    >
-                  </span>
+                  <div
+                    class="header-content"
+                    @dblclick="startEditingHeader(header)"
+                  >
+                    <span v-if="!isEditingHeader(header)">
+                      <!-- Use short name with fallback to header name -->
+                      {{ collectionSchema.ui?.short_names?.[header] || header }}
+                      <span
+                        v-if="isFieldRequired(header)"
+                        class="text-red-500"
+                        >*</span
+                      >
+                    </span>
+                    <input
+                      v-else
+                      v-model="editedShortName"
+                      @keyup.enter="saveShortName(header)"
+                      @keyup.esc="cancelEditTextHead"
+                      @blur="saveShortName(header)"
+                      class="header-edit-input"
+                    />
+                  </div>
                   <div
                     class="excel-resizer absolute right-0 top-0"
                     :class="[
@@ -1441,6 +1492,13 @@
 </template>
 
 <style scoped>
+  .header-edit-input {
+    @apply px-1 py-0 border border-blue-300 rounded;
+  }
+  .header-content {
+    min-width: 100px;
+  }
+
   .row-resize-handle {
     background-color: transparent;
     transition: background-color 0.2s;

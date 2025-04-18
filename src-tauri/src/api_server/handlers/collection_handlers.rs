@@ -158,15 +158,16 @@ pub async fn update_ui_metadata_handler(
         Err((status, e)) => return error_response::<()>(status, e),
     };
 
-    // Extract column widths from payload
-    let column_widths = match payload.get("columnWidths")
-        .and_then(|v| v.as_object()) {
-        Some(widths) => serde_json::Value::Object(widths.clone()),
-        None => return error_response::<()>(StatusCode::BAD_REQUEST, "Invalid columnWidths format".into()),
+    // Convert payload to BSON document
+    let ui_update = match mongodb::bson::to_document(&payload) {
+        Ok(doc) => doc,
+        Err(e) => return error_response::<()>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid UI metadata format: {}", e)
+        ),
     };
 
-    // Use the service function instead of duplicating logic
-    match update_ui_metadata(&db, &collection_name, &column_widths).await {
+    match update_ui_metadata(&db, &collection_name, &ui_update).await {
         Ok(_) => (StatusCode::OK, Json(ApiResponse {
             success: true,
             data: None,

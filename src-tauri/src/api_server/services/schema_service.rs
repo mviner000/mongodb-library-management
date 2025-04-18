@@ -76,18 +76,16 @@ pub async fn get_collection_schema_with_ui(
 pub async fn update_ui_metadata(
     db: &Database,
     collection_name: &str,
-    column_widths: &serde_json::Value
+    ui_update: &Document,
 ) -> Result<(), String> {
-    // Convert column widths to BSON
-    let bson_column_widths = mongodb::bson::to_bson(column_widths)
-        .map_err(|e| format!("Failed to convert column widths to BSON: {}", e))?;
+    let now = mongodb::bson::DateTime::now();
     
-    let update_doc = doc! {
-        "$set": {
-            "ui.columnWidths": bson_column_widths,
-            "updated_at": mongodb::bson::DateTime::now()
-        }
-    };
+    // Build the $set document
+    let mut set_doc = Document::new();
+    for (key, value) in ui_update {
+        set_doc.insert(format!("ui.{}", key), value.clone());
+    }
+    set_doc.insert("updated_at", now);
 
     let filter = doc! {
         "collection": collection_name,
@@ -99,7 +97,7 @@ pub async fn update_ui_metadata(
         .build();
 
     db.collection::<Document>("ui_metadata")
-        .update_one(filter, update_doc, options)
+        .update_one(filter, doc! { "$set": set_doc }, options)
         .await
         .map_err(|e| format!("Failed to update UI metadata: {}", e))?;
     

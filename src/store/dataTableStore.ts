@@ -896,6 +896,24 @@ export const useDataTableStore = defineStore('dataTable', () => {
     }
   }
 
+  const updateUIMetadata = async (uiUpdate: Record<string, any>) => {
+    if (!collectionName.value) return
+
+    try {
+      const response = await fetch(`${API_BASE}/collections/${collectionName.value}/ui-metadata`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(uiUpdate),
+      })
+
+      if (!response.ok) throw new Error('Failed to update UI metadata')
+      await fetchSchema() // Refresh schema to get updated UI metadata
+    } catch (error) {
+      console.error('Error updating UI metadata:', error)
+      throw error
+    }
+  }
+
   // Update and save column widths
   async function updateColumnWidth(header: string, width: number) {
     if (!collectionSchema.value.ui) {
@@ -1024,6 +1042,7 @@ export const useDataTableStore = defineStore('dataTable', () => {
     setPage,
     setPageSize,
     updateDocumentField,
+    updateUIMetadata,
     updateColumnWidth,
     resetColumnWidth,
     saveColumnWidthsToBackend, // Exposed for debouncing in component
