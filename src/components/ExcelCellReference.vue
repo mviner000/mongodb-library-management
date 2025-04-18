@@ -15,7 +15,6 @@
     Globe,
     ArrowDownToLine,
     Trash2,
-    Pin,
   } from 'lucide-vue-next'
 
   import DropdownMenu from './ui/dropdown-menu/DropdownMenu.vue'

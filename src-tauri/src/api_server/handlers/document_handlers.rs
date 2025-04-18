@@ -459,6 +459,11 @@ pub async fn update_document_handler(
                     // Remove any attempts to modify timestamp fields
                     update_doc.remove("created_at");
                     
+                    // Process row_height if present
+                    if let Some(row_height) = update_doc.get_i32("row_height").ok() {
+                        update_doc.insert("row_height", row_height);
+                    }
+                    
                     // Always update the updated_at field with current timestamp
                     let current_time = mongodb::bson::DateTime::now();
                     update_doc.insert("updated_at", current_time);

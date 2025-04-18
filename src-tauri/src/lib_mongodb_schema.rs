@@ -10,7 +10,7 @@ use anyhow::Result;
 use crate::mongodb_schema::{
     create_archive_index, 
     create_pinned_index,
-    merge_with_archive_and_pinned_properties
+    merge_with_archive_pinned_and_row_height_properties
 };
 
 // Library-specific collection for school accounts
@@ -56,7 +56,7 @@ pub async fn create_lib_school_accounts_collection(db: &Database) -> Result<()> 
     };
     
     // Merge with both archive and pinned properties
-    let properties = merge_with_archive_and_pinned_properties(base_properties);
+    let properties = merge_with_archive_pinned_and_row_height_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -111,7 +111,7 @@ pub async fn create_lib_attendance_collection(db: &Database) -> Result<()> {
     };
     
     // Merge with both archive and pinned properties
-    let properties = merge_with_archive_and_pinned_properties(base_properties);
+    let properties = merge_with_archive_pinned_and_row_height_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -161,7 +161,7 @@ pub async fn create_lib_purposes_collection(db: &Database) -> Result<()> {
     };
     
     // Merge with both archive and pinned properties
-    let properties = merge_with_archive_and_pinned_properties(base_properties);
+    let properties = merge_with_archive_pinned_and_row_height_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -210,7 +210,7 @@ pub async fn create_lib_semesters_collection(db: &Database) -> Result<()> {
     };
     
     // Merge with both archive and pinned properties
-    let properties = merge_with_archive_and_pinned_properties(base_properties);
+    let properties = merge_with_archive_pinned_and_row_height_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -260,7 +260,7 @@ pub async fn create_lib_settings_styles_collection(db: &Database) -> Result<()> 
     };
     
     // Merge with both archive and pinned properties
-    let properties = merge_with_archive_and_pinned_properties(base_properties);
+    let properties = merge_with_archive_pinned_and_row_height_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -302,6 +302,7 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "last_updated_semester_id": default_column_width,
             "is_archive": default_column_width,
             "pinned_by": default_column_width,
+            "row_height": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
@@ -313,6 +314,7 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "purpose_label": default_column_width,
             "is_archive": default_column_width,
             "pinned_by": default_column_width,
+            "row_height": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
@@ -322,6 +324,7 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "is_deleted": default_column_width,
             "is_archive": default_column_width,
             "pinned_by": default_column_width,
+            "row_height": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
@@ -330,6 +333,7 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "is_active": default_column_width,
             "is_archive": default_column_width,
             "pinned_by": default_column_width,
+            "row_height": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },
@@ -339,6 +343,7 @@ pub fn get_default_lib_column_widths(collection_name: &str) -> Document {
             "label": default_column_width,
             "is_archive": default_column_width,
             "pinned_by": default_column_width,
+            "row_height": default_column_width,
             "created_at": default_column_width,
             "updated_at": default_column_width
         },

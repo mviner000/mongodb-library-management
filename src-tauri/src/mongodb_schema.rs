@@ -9,6 +9,9 @@ use mongodb::bson::{doc, Document};
 use anyhow::Result;
 use crate::lib_mongodb_schema;
 
+// NOTE:
+// row height is used for each data[a more data specific approach], unlike column width that has a global state
+
 pub async fn initialize_database(db: &Database) -> Result<()> {
     // Create only essential collections by default
     create_users_collection(db).await?;
@@ -81,6 +84,16 @@ pub fn get_pinned_properties() -> Document {
     }
 }
 
+// New helper function to get row_height properties schema
+pub fn get_row_height_properties() -> Document {
+    doc! {
+        "row_height": { 
+            "bsonType": "int", 
+            "description": "Maximum usage limit for this document, initially set to 20" 
+        }
+    }
+}
+
 // Helper function to create archive index - made public
 pub fn create_archive_index() -> IndexModel {
     IndexModel::builder()
@@ -114,9 +127,16 @@ pub fn merge_with_pinned_properties(properties: Document) -> Document {
 }
 
 // Helper function to merge document properties with both archive and pinned properties - made public
-pub fn merge_with_archive_and_pinned_properties(properties: Document) -> Document {
+pub fn merge_with_archive_pinned_and_row_height_properties(properties: Document) -> Document {
     let with_archive = merge_with_archive_properties(properties);
-    merge_with_pinned_properties(with_archive)
+    let with_pinned = merge_with_pinned_properties(with_archive);
+    
+    // Add row_height property to all collections with pinned_by
+    let mut merged = with_pinned;
+    for (key, value) in get_row_height_properties() {
+        merged.insert(key, value);
+    }
+    merged
 }
 
 async fn create_users_collection(db: &Database) -> Result<()> {
@@ -174,8 +194,8 @@ async fn create_users_collection(db: &Database) -> Result<()> {
         }
     };
     
-    // Merge with archive and pinned properties
-    let properties = merge_with_archive_and_pinned_properties(base_properties);
+    // Merge with archive, pinned, and row_height properties
+    let properties = merge_with_archive_pinned_and_row_height_properties(base_properties);
 
     // Apply validator schema using collMod
     db.run_command(
@@ -253,8 +273,8 @@ async fn create_sessions_collection(db: &Database) -> Result<()> {
         }
     };
     
-    // Merge with archive and pinned properties
-    let properties = merge_with_archive_and_pinned_properties(base_properties);
+    // Merge with archive, pinned, and row_height properties
+    let properties = merge_with_archive_pinned_and_row_height_properties(base_properties);
     
     // Apply validator schema using collMod
     db.run_command(
@@ -406,6 +426,7 @@ fn get_default_column_widths(collection_name: &str) -> Document {
             "password": DEFAULT_COLUMN_WIDTH,
             "is_archive": DEFAULT_COLUMN_WIDTH,
             "pinned_by": DEFAULT_COLUMN_WIDTH,
+            "row_height": DEFAULT_COLUMN_WIDTH,
             "created_at": DEFAULT_COLUMN_WIDTH, 
             "updated_at": DEFAULT_COLUMN_WIDTH
         },
@@ -416,6 +437,7 @@ fn get_default_column_widths(collection_name: &str) -> Document {
             "is_valid": DEFAULT_COLUMN_WIDTH,
             "is_archive": DEFAULT_COLUMN_WIDTH,
             "pinned_by": DEFAULT_COLUMN_WIDTH,
+            "row_height": DEFAULT_COLUMN_WIDTH,
             "created_at": DEFAULT_COLUMN_WIDTH, 
             "label": DEFAULT_COLUMN_WIDTH
         },
@@ -440,7 +462,7 @@ fn get_default_sort_field(collection_name: &str) -> &str {
 
 // Helper function to get field names for a collection - reduced to essential collections
 fn get_field_names_for_collection(collection_name: &str) -> Vec<&str> {
-    // Add is_archive and pinned_by to all collection field lists
+    // Add is_archive, pinned_by, and row_height to all collection field lists
     let mut fields = match collection_name {
         "users" => vec![
             "username", "email", "password", "created_at", "updated_at"
@@ -451,9 +473,10 @@ fn get_field_names_for_collection(collection_name: &str) -> Vec<&str> {
         _ => vec!["created_at", "updated_at"] // Fallback for unknown collections
     };
     
-    // Add is_archive, and pinned_by fields to each collection's fields
+    // Add is_archive, pinned_by, and row_height fields to each collection's fields
     fields.push("is_archive");
     fields.push("pinned_by");
+    fields.push("row_height");
     fields
 }
 // metadata for collections ends here

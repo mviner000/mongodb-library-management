@@ -4,7 +4,6 @@ import { ref, computed } from 'vue'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { getApiBaseUrl } from '@/utils/api'
 import { documentService } from '@/services/documentService'
-import { useUserStore } from '@/store/useUserStore'
 const API_BASE = getApiBaseUrl()
 
 // Define the structure of a document (adjust based on your actual data)
@@ -833,6 +832,55 @@ export const useDataTableStore = defineStore('dataTable', () => {
     // If API supports server-side pagination, call fetchDocuments() here
   }
 
+  async function updateDocumentField(documentId: string, field: string, value: any) {
+    if (!collectionName.value) return
+
+    errorMessage.value = ''
+    console.log(`Updating document ${documentId}, field ${field} to:`, value)
+
+    try {
+      const update = { [field]: value }
+      const response = await fetch(
+        `${API_BASE}/collections/${collectionName.value}/documents/${documentId}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(update),
+        }
+      )
+
+      if (!response.ok) {
+        let errorData
+        try {
+          errorData = await response.json()
+        } catch {
+          /* ignore */
+        }
+        throw new Error(errorData?.error || `Update failed: HTTP ${response.status}`)
+      }
+
+      const result = await response.json()
+
+      if (result.success) {
+        // Update local document state
+        const docIndex = documents.value.findIndex((d) => d._id.$oid === documentId)
+        if (docIndex !== -1) {
+          documents.value[docIndex] = { ...documents.value[docIndex], ...update }
+          // Force reactivity update
+          documents.value = [...documents.value]
+        }
+        return true
+      } else {
+        throw new Error(result.error || 'Update failed (API indicated failure)')
+      }
+    } catch (err: any) {
+      errorMessage.value = `Error updating field '${field}': ${err.message}`
+      toast({ title: 'Update Error', description: errorMessage.value, variant: 'destructive' })
+      console.error('Update document field error:', err)
+      return false
+    }
+  }
+
   // Update and save column widths
   async function updateColumnWidth(header: string, width: number) {
     if (!collectionSchema.value.ui) {
@@ -954,6 +1002,7 @@ export const useDataTableStore = defineStore('dataTable', () => {
     changeView,
     setPage,
     setPageSize,
+    updateDocumentField,
     updateColumnWidth,
     resetColumnWidth,
     saveColumnWidthsToBackend, // Exposed for debouncing in component

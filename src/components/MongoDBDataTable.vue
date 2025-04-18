@@ -38,7 +38,6 @@
   import MongoDBDataTableNavbar from './MongoDBDataTableNavbar.vue' // [cite: 1]
   import StickyLeftSidebar from './StickyLeftSidebar.vue'
   import { useUserStore } from '@/store/useUserStore'
-  import { invoke } from '@tauri-apps/api/core'
   // Remove FooterTabsBar import if not used in old template
   // import FooterTabsBar from './FooterTabsBar.vue';
 
@@ -628,13 +627,14 @@
   })
 
   // --- New Watcher ---
-  watch(
-    pinnedDocuments,
-    (newPinnedDocs) => {
-      console.log('Pinned Documents:', JSON.parse(JSON.stringify(newPinnedDocs)))
-    },
-    { immediate: true, deep: true }
-  )
+  const debouncedLogPinnedDocuments = useDebounceFn((newVal) => {
+    console.log('Pinned Documents:', newVal)
+  }, 500)
+
+  watch(pinnedDocuments, (newVal) => debouncedLogPinnedDocuments(newVal), {
+    immediate: true,
+    deep: true,
+  })
 
   const highlightedDocumentId = ref<string | null>(null)
   let highlightTimeout: ReturnType<typeof setTimeout> | null = null
@@ -672,6 +672,74 @@
         setTimeout(() => row.classList.remove('highlight-pulse'), 1000)
       }
     })
+  }
+
+  // row resizing state
+  const rowResizingState = ref({
+    isResizing: false,
+    documentId: '',
+    startY: 0,
+    startHeight: 40, // Default row height
+    currentHeight: 40,
+  })
+
+  const startRowResize = (documentId: string, event: MouseEvent) => {
+    const doc = documents.value.find((d) => d._id.$oid === documentId)
+    if (!doc) return
+
+    const currentHeight = doc.row_height || 40
+    rowResizingState.value = {
+      isResizing: true,
+      documentId,
+      startY: event.clientY,
+      startHeight: currentHeight,
+      currentHeight,
+    }
+
+    document.addEventListener('mousemove', handleRowMouseMove)
+    document.addEventListener('mouseup', stopRowResize)
+  }
+
+  const handleRowMouseMove = (event: MouseEvent) => {
+    if (!rowResizingState.value.isResizing) return
+
+    const delta = event.clientY - rowResizingState.value.startY
+    const newHeight = Math.max(40, rowResizingState.value.startHeight + delta)
+
+    rowResizingState.value.currentHeight = newHeight
+
+    // Update local document for visual feedback
+    const docIndex = documents.value.findIndex(
+      (d) => d._id.$oid === rowResizingState.value.documentId
+    )
+    if (docIndex !== -1) {
+      const updatedDoc = {
+        ...documents.value[docIndex],
+        row_height: newHeight,
+      }
+      documents.value.splice(docIndex, 1, updatedDoc)
+    }
+  }
+
+  // Row height debouncing
+  const debouncedRowHeightSave = useDebounceFn(async (documentId: string, height: number) => {
+    try {
+      await dataTableStore.updateDocumentField(documentId, 'row_height', height)
+    } catch (error) {
+      console.error('Error saving row height:', error)
+    }
+  }, 500) // 500ms delay
+
+  const stopRowResize = async () => {
+    if (!rowResizingState.value.isResizing) return
+    const { documentId, currentHeight } = rowResizingState.value
+
+    rowResizingState.value.isResizing = false
+    document.removeEventListener('mousemove', handleRowMouseMove)
+    document.removeEventListener('mouseup', stopRowResize)
+
+    // Use debounced save instead of immediate
+    debouncedRowHeightSave(documentId, currentHeight)
   }
 </script>
 
@@ -864,7 +932,8 @@
                 v-for="(doc, rowIndex) in paginatedDocuments"
                 :key="doc._id.$oid"
                 :data-document-id="doc._id.$oid"
-                class="excel-data-row"
+                :style="{ height: (doc.row_height || 40) + 'px' }"
+                class="excel-data-row relative"
                 :class="{
                   'highlight-row': highlightedDocumentId === doc._id.$oid,
                   'bg-red-100 border-2 border-red-500 text-red-800':
@@ -889,7 +958,7 @@
                   />
                 </TableCell>
                 <TableCell
-                  class="excel-row-number"
+                  class="excel-row-number relative"
                   :style="{
                     width: numberColumnWidth,
                     minWidth: numberColumnWidth,
@@ -897,7 +966,7 @@
                   }"
                 >
                   <div
-                    class="relative inline-block w-full h-full cursor-pointer"
+                    class="w-full h-full flex items-center justify-center cursor-pointer relative"
                     @click.stop="
                       togglePinStatus(doc._id.$oid, user && doc.pinned_by?.includes(user.id))
                     "
@@ -910,14 +979,21 @@
                           : 'Click to pin'
                     "
                   >
+                    <span class="">{{ (currentPage - 1) * pageSize + rowIndex + 1 }}</span>
+
                     <span
                       v-if="user && doc.pinned_by?.includes(user.id)"
-                      class="text-xl absolute top-1 left-[5px] -translate-y-1/2"
+                      class="text-xl left-2 bottom-2 absolute z-10"
                     >
                       📌
                     </span>
-                    <span class="">{{ (currentPage - 1) * pageSize + rowIndex + 1 }}</span>
                   </div>
+
+                  <!-- Row resize handle -->
+                  <div
+                    class="row-resize-handle absolute bottom-[-1px] left-0 right-0 h-2 cursor-row-resize z-10"
+                    @mousedown.prevent="startRowResize(doc._id.$oid, $event)"
+                  ></div>
                 </TableCell>
                 <TableCell
                   v-for="header in tableHeaders"
@@ -1364,6 +1440,19 @@
 </template>
 
 <style scoped>
+  .row-resize-handle {
+    background-color: transparent;
+    transition: background-color 0.2s;
+  }
+
+  .row-resize-handle:hover {
+    background-color: #3b82f6;
+  }
+
+  .excel-data-row:hover .row-resize-handle {
+    background-color: #3b82f666;
+  }
+
   .highlight-row {
     position: relative;
     animation: highlight-fade 2s forwards;
