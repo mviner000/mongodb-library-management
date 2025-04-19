@@ -779,6 +779,24 @@
   const cancelEditTextHead = () => {
     editingHeader.value = null
   }
+
+  // highlighted column state
+  const highlightedColumn = ref<string | null>(null)
+
+  //  highlighted column methods section
+  const handleColumnHighlight = (index: number) => {
+    const header = tableHeaders.value[index]
+
+    if (selectedRows.value.size > 0) {
+      const confirmed = confirm('You have selected rows. Unselect them to highlight the column?')
+      if (confirmed) {
+        resetSelection()
+        highlightedColumn.value = header
+      }
+    } else {
+      highlightedColumn.value = header === highlightedColumn.value ? null : header
+    }
+  }
 </script>
 
 <template>
@@ -876,6 +894,8 @@
                 v-for="(letter, index) in columnLetters"
                 :key="`letter-${index}`"
                 class="excel-column-letter relative"
+                :class="{ 'highlighted-column': highlightedColumn === tableHeaders[index] }"
+                @click="handleColumnHighlight(index)"
                 :style="{
                   width:
                     alphaResizingState.isResizing && alphaResizingState.columnIndex === index
@@ -883,7 +903,13 @@
                       : `${columnWidths[tableHeaders[index]] || 200}px`,
                 }"
               >
-                <div class="flex items-center justify-center">
+                <div
+                  class="flex items-center justify-center"
+                  :class="{
+                    'cursor-pointer bg-blue-500 text-white py-[9px] px-3 -mx-[10px] -my-[10px]':
+                      highlightedColumn === tableHeaders[index],
+                  }"
+                >
                   <span class="excel-letter">{{ letter }}</span>
                   <div
                     class="excel-resizer absolute right-0 top-0"
@@ -927,7 +953,10 @@
                 v-for="header in tableHeaders"
                 :key="header"
                 class="excel-column-header font-bold text-black relative"
-                :class="{ 'error-column-header': header === errorColumn && isAdding }"
+                :class="{
+                  'error-column-header': header === errorColumn && isAdding,
+                  'highlighted-column': highlightedColumn === header,
+                }"
                 :style="{
                   width:
                     resizingState.isResizing && resizingState.header === header
@@ -1058,6 +1087,7 @@
                     'excel-cell-context-selected':
                       selectedCellInfo?.rowIndex === rowIndex &&
                       selectedCellInfo?.header === header,
+                    'highlighted-column': highlightedColumn === header,
                   }"
                   @contextmenu.prevent="handleRightClick(rowIndex, header, $event)"
                 >
@@ -1280,7 +1310,10 @@
                 v-for="header in tableHeaders"
                 :key="`new-${header}`"
                 class="excel-cell"
-                :class="{ 'error-column-cell': header === errorColumn }"
+                :class="{
+                  'error-column-cell': header === errorColumn,
+                  'highlighted-column': highlightedColumn === header,
+                }"
               >
                 <span
                   v-if="['created_at', 'updated_at'].includes(header)"
@@ -1492,6 +1525,29 @@
 </template>
 
 <style scoped>
+  /* highlight for entire column */
+  .highlighted-column {
+    position: relative;
+    outline: none;
+    box-shadow:
+      1px 0 0 0 #2196f3,
+      -1px 0 0 0 #2196f3;
+    z-index: 2;
+    background-color: rgba(33, 150, 243, 0.05) !important;
+  }
+
+  .highlighted-column::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: -2px;
+    width: 2px;
+    background-color: #2196f3;
+    z-index: 3;
+  }
+
+  /* column table head inline edit */
   .header-edit-input {
     @apply px-1 py-0 border border-blue-300 rounded;
   }
