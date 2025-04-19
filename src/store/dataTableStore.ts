@@ -145,6 +145,10 @@ export const useDataTableStore = defineStore('dataTable', () => {
     referenceOptions.value = {} // Clear old references
 
     await fetchSchema() // Fetch schema first
+
+    // Initialize hidden columns from schema
+    hiddenColumns.value = collectionSchema.value.ui?.hiddenColumns || []
+
     await fetchDocuments() // Then fetch documents
     await preloadReferenceOptions() // Preload references needed by the schema
   }
@@ -923,6 +927,37 @@ export const useDataTableStore = defineStore('dataTable', () => {
     }
   }
 
+  const hiddenColumns = ref<string[]>([])
+
+  // Add getter for visible headers
+  const visibleHeaders = computed(() => {
+    return tableHeaders.value.filter((header) => !hiddenColumns.value.includes(header))
+  })
+
+  // Add action to toggle visibility
+  function toggleColumnVisibility(header: string) {
+    const index = hiddenColumns.value.indexOf(header)
+    if (index === -1) {
+      hiddenColumns.value.push(header)
+    } else {
+      hiddenColumns.value.splice(index, 1)
+    }
+    saveColumnVisibilityToBackend()
+  }
+
+  // Add action to save to backend
+  async function saveColumnVisibilityToBackend() {
+    if (!collectionName.value) return
+    try {
+      await updateUIMetadata({
+        ...(collectionSchema.value.ui || {}), // Preserve existing UI metadata
+        hiddenColumns: hiddenColumns.value, // Override hiddenColumns
+      })
+    } catch (error) {
+      console.error('Error saving column visibility:', error)
+    }
+  }
+
   // Update and save column widths
   async function updateColumnWidth(header: string, width: number) {
     if (!collectionSchema.value.ui) {
@@ -1019,6 +1054,8 @@ export const useDataTableStore = defineStore('dataTable', () => {
     collectionsList,
     errorColumn,
     addingRowError,
+    hiddenColumns,
+    visibleHeaders,
 
     // Getters
     totalDocuments,
@@ -1052,6 +1089,8 @@ export const useDataTableStore = defineStore('dataTable', () => {
     setPageSize,
     updateDocumentField,
     updateUIMetadata,
+    toggleColumnVisibility,
+    saveColumnVisibilityToBackend,
     updateColumnWidth,
     resetColumnWidth,
     saveColumnWidthsToBackend, // Exposed for debouncing in component

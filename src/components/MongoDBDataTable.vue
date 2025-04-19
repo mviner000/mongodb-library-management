@@ -28,6 +28,16 @@
     PaginationNext,
     PaginationPrev,
   } from '@/components/ui/pagination' // [cite: 79]
+  import {
+    NavigationMenu,
+    NavigationMenuContent,
+    NavigationMenuItem,
+    NavigationMenuLink,
+    NavigationMenuList,
+    NavigationMenuTrigger,
+    navigationMenuTriggerStyle,
+  } from './ui/navigation-menu'
+  import Checkbox from './ui/checkbox/Checkbox.vue'
 
   import { ScrollArea } from '@/components/ui/scroll-area' // [cite: 40]
   // Remove toast import if not used directly in setup, it's in the store
@@ -70,6 +80,8 @@
     tableHeaders,
     columnWidths,
     allSelected,
+    hiddenColumns,
+    visibleHeaders,
   } = storeToRefs(dataTableStore)
 
   // Destructure actions (they are just functions)
@@ -98,6 +110,7 @@
     isReferenceField,
     getReferencedCollection,
     updateUIMetadata,
+    toggleColumnVisibility,
     // fetchSchema, // Optional direct access
   } = dataTableStore
 
@@ -149,8 +162,8 @@
   } // [cite: 9]
 
   const columnLetters = computed(() => {
-    return tableHeaders.value.map((_, index) => getColumnLabel(index))
-  }) // [cite: 9]
+    return visibleHeaders.value.map((_, index) => getColumnLabel(index))
+  })
 
   const numberColumnWidth = computed(() => {
     const maxDigits = documents.value.length > 0 ? String(documents.value.length).length : 1
@@ -158,17 +171,19 @@
   }) // [cite: 18] adjusted logic slightly
 
   const totalTableWidth = computed(() => {
-    const dataColumnsWidth = tableHeaders.value.reduce(
-      (acc, header) => acc + (columnWidths.value[header] || 200),
+    // Calculate the total width of visible data columns
+    const dataColumnsWidth = visibleHeaders.value.reduce(
+      (acc, header) => acc + (columnWidths.value[header] || 200), // Default width if not specified
       0
     )
-    const selectColWidth = 40 // [cite: 5]
-    const rowNumColWidth = 30 // As per original template [cite: 7] - Adjust if needed
-    const actionsColWidth = 60 // As per original styles [cite: 125]
 
-    return selectColWidth + rowNumColWidth + dataColumnsWidth + actionsColWidth + 1
-  }) // Adjusted calculation based on old template fixed widths
+    const selectColWidth = 40 // Width for the selection column
+    const rowNumColWidth = 30 // Width for the row number column
+    const actionsColWidth = 60 // Width for the actions column
 
+    // Return the total width including only visible columns
+    return selectColWidth + rowNumColWidth + dataColumnsWidth + actionsColWidth + 1 // +1 for border
+  })
   // --- Utility Functions ---
   const isFieldRequired = (field: string): boolean => {
     return collectionSchema.value.required?.includes(field) || false
@@ -267,13 +282,6 @@
   onMounted(async () => {
     console.log('MongoDBDataTable mounted (Pinia + Old Style).')
 
-    // Add user ID logging
-    if (user.value) {
-      console.log('User ID:', user.value.id)
-    } else {
-      console.log('User not authenticated')
-    }
-
     await fetchCollections()
     const routeName = Array.isArray(route.params.name) ? route.params.name[0] : route.params.name
     const initialCollection = routeName || props.selectedCollection
@@ -288,6 +296,10 @@
       try {
         await dataTableStore.fetchSchema()
         await dataTableStore.fetchDocuments()
+
+        // Add this code to log and count column names after data is loaded
+        console.log('Column names:', tableHeaders.value)
+        console.log('Total columns:', tableHeaders.value.length)
       } catch (error) {
         console.error('Error fetching initial schema/documents in onMounted:', error)
       }
@@ -994,8 +1006,42 @@
           @delete-end="handleDeleteEnd"
           @view-change="handleViewChange"
         />
+        <!-- Visibility of Columns -->
+        <div class="z-40 mt-10 p-2 bg-[#217346]/90">
+          <NavigationMenu>
+            <NavigationMenuList>
+              <NavigationMenuItem>
+                <NavigationMenuTrigger size="sm">Visibility</NavigationMenuTrigger>
+                <NavigationMenuContent>
+                  <div class="p-2 w-48">
+                    <div
+                      v-for="header in tableHeaders"
+                      :key="header"
+                      class="flex items-center space-x-2 py-1 px-2 rounded hover:bg-green-100 transition-colors duration-150 group"
+                    >
+                      <input
+                        type="checkbox"
+                        :id="`checkbox-${header}`"
+                        :checked="!hiddenColumns.includes(header)"
+                        @change="toggleColumnVisibility(header)"
+                        class="cursor-pointer accent-green-600"
+                      />
+                      <label
+                        :for="`checkbox-${header}`"
+                        class="flex-1 cursor-pointer text-sm group-hover:text-green-800"
+                      >
+                        {{ collectionSchema.ui?.short_names?.[header] || header }}
+                      </label>
+                    </div>
+                  </div>
+                </NavigationMenuContent>
+              </NavigationMenuItem>
+            </NavigationMenuList>
+          </NavigationMenu>
+        </div>
+
         <table
-          class="mt-10 excel-table"
+          class="excel-table"
           :style="{ width: `${totalTableWidth}px` }"
         >
           <TableHeader>
@@ -1095,7 +1141,7 @@
                 &-
               </TableHead>
               <TableHead
-                v-for="(header, index) in tableHeaders"
+                v-for="(header, index) in visibleHeaders"
                 :key="header"
                 class="cursor-pointer excel-column-header font-bold text-black relative"
                 :class="{
@@ -1170,8 +1216,7 @@
                 class="excel-data-row relative"
                 :class="{
                   'highlight-row': highlightedDocumentId === doc._id.$oid,
-                  'bg-red-100 border-2 border-red-500 text-red-800':
-                    doc._id.$oid === pendingDeleteId,
+                  'pending-delete-outline': doc._id.$oid === pendingDeleteId,
                   'selected-row bg-blue-100':
                     selectedRows.has(doc._id.$oid) && doc._id.$oid !== pendingDeleteId,
                 }"
@@ -1230,7 +1275,7 @@
                   ></div>
                 </TableCell>
                 <TableCell
-                  v-for="header in tableHeaders"
+                  v-for="header in visibleHeaders"
                   :key="`${doc._id.$oid}-${header}`"
                   class="excel-cell"
                   :class="{
@@ -1679,6 +1724,11 @@
 </template>
 
 <style scoped>
+  .pending-delete-outline {
+    background-color: #fee2e2;
+    border: 2px solid #ef4444;
+    color: #991b1b;
+  }
   /* drag state */
   .dragging {
     opacity: 0.6;

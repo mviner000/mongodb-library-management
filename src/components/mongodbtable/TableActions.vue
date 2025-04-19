@@ -1,46 +1,48 @@
-<!-- src/components/mongodbtable/TableActions.vue -->
-
 <script setup lang="ts">
-import { ref } from 'vue'; // Keep ref
-// REMOVE: onMounted, onBeforeUnmount
-import { TableCell } from '@/components/ui/table';
-import { TrashIcon } from '@radix-icons/vue';
-import { Button } from '@/components/ui/button';
-// REMOVE: useToast, getApiBaseUrl, Input, Dialog, DialogContent
-import DeleteDocumentAction from './DeleteDocumentAction.vue'; // IMPORT the new component
+  import { ref } from 'vue'
+  import { TableCell } from '@/components/ui/table'
+  import { TrashIcon } from '@radix-icons/vue'
+  import { Button } from '@/components/ui/button'
+  import DeleteDocumentAction from './DeleteDocumentAction.vue'
 
-// REMOVE: toast, API_BASE, isDeleting, showDialog, confirmationText, confirmationRequired, inputRef
+  const props = defineProps<{
+    collectionName: string
+    documentId: string
+    rowNumber: number
+  }>()
 
-const props = defineProps<{
-  collectionName: string;
-  documentId: string;
-  rowNumber: number;
-}>();
+  const emit = defineEmits(['deleted', 'delete-start', 'delete-end'])
 
-// Keep emits, they will be forwarded from the child
-const emit = defineEmits(['deleted', 'delete-start', 'delete-end']);
+  const deleteActionRef = ref<InstanceType<typeof DeleteDocumentAction> | null>(null)
+  const isDialogOpen = ref(false)
 
-// Add a ref to access the child component's exposed methods
-const deleteActionRef = ref<InstanceType<typeof DeleteDocumentAction> | null>(null);
+  const triggerDelete = () => {
+    deleteActionRef.value?.openDeleteDialog()
+  }
 
-// Method to trigger the delete dialog in the child component
-const triggerDelete = () => {
-  deleteActionRef.value?.openDeleteDialog();
-};
+  // Handle events to track dialog state
+  const handleDeleteStart = (id: string) => {
+    isDialogOpen.value = true
+    emit('delete-start', id)
+  }
 
-// REMOVE: openDeleteDialog, closeDialog, confirmDelete, handleKeyDown
-// REMOVE: onMounted, onBeforeUnmount (as they were only for the keydown listener)
-
+  const handleDeleteEnd = () => {
+    isDialogOpen.value = false
+    emit('delete-end')
+  }
 </script>
 
 <template>
-  <TableCell class="excel-cell excel-actions-cell select-none">
+  <TableCell
+    class="excel-delete-cell select-none z-0"
+    :class="{ 'with-green-border': isDialogOpen }"
+  >
     <Button
       variant="ghost"
       size="sm"
       class="excel-delete-button"
-      @click="triggerDelete" 
-      :disabled="false" 
+      @click="triggerDelete"
+      :disabled="false"
     >
       <TrashIcon class="h-4 w-4" />
     </Button>
@@ -51,22 +53,37 @@ const triggerDelete = () => {
       :document-id="props.documentId"
       :row-number="props.rowNumber"
       @deleted="emit('deleted')"
-      @delete-start="(id) => emit('delete-start', id)"
-      @delete-end="emit('delete-end')"
+      @delete-start="handleDeleteStart"
+      @delete-end="handleDeleteEnd"
     />
-
-    </TableCell>
+  </TableCell>
 </template>
 
 <style scoped>
-/* Keep styles for the button */
-.excel-delete-button {
-  color: #d32f2f;
-}
-.excel-delete-button:hover {
-  color: #b71c1c;
-  background-color: #ffebee;
-}
+  .excel-delete-cell {
+    /* Applied to TD */
+    border: 1px solid #d0d0d0;
+    position: sticky;
+    right: 0;
+    width: 60px !important;
+    min-width: 60px !important;
+    max-width: 60px !important;
+    background-color: #ffffff;
+    text-align: center;
+    vertical-align: middle;
+    box-sizing: border-box;
+  }
 
-/* REMOVE .custom-delete-dialog style */
+  /* Add the green border only when the class is applied */
+  .with-green-border {
+    border-right: 2px solid #ef4444;
+  }
+
+  .excel-delete-button {
+    color: #d32f2f;
+  }
+  .excel-delete-button:hover {
+    color: #b71c1c;
+    background-color: #ffebee;
+  }
 </style>
