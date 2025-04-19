@@ -57,11 +57,20 @@ export const useDataTableStore = defineStore('dataTable', () => {
   const tableHeaders = computed(() => {
     if (!collectionSchema.value.properties) return []
     const props = collectionSchema.value.properties
-    return Object.keys(props).sort((a, b) => {
+    const keys = Object.keys(props)
+
+    if (collectionSchema.value.ui?.columnOrder) {
+      const columnOrder = collectionSchema.value.ui.columnOrder
+      // Filter valid headers and add missing ones
+      const ordered = columnOrder.filter((key: string) => keys.includes(key))
+      const remaining = keys.filter((key: string) => !columnOrder.includes(key))
+      return [...ordered, ...remaining]
+    }
+
+    return keys.sort((a, b) => {
       const required = collectionSchema.value.required || []
       if (required.includes(a) && !required.includes(b)) return -1
       if (!required.includes(a) && required.includes(b)) return 1
-      // Keep _id first if it exists
       if (a === '_id') return -1
       if (b === '_id') return 1
       return a.localeCompare(b)

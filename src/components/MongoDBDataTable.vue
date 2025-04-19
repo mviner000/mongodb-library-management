@@ -38,6 +38,7 @@
   import MongoDBDataTableNavbar from './MongoDBDataTableNavbar.vue' // [cite: 1]
   import StickyLeftSidebar from './StickyLeftSidebar.vue'
   import { useUserStore } from '@/store/useUserStore'
+  import { reactive } from 'vue'
   // Remove FooterTabsBar import if not used in old template
   // import FooterTabsBar from './FooterTabsBar.vue';
 
@@ -785,17 +786,134 @@
 
   //  highlighted column methods section
   const handleColumnHighlight = (index: number) => {
+    console.log(`[HIGHLIGHT DEBUG] handleColumnHighlight: Called with index ${index}`)
     const header = tableHeaders.value[index]
+    console.log(`[HIGHLIGHT DEBUG] handleColumnHighlight: Header at index ${index} is "${header}"`)
+    console.log(
+      `[HIGHLIGHT DEBUG] handleColumnHighlight: Current highlighted column: "${highlightedColumn.value}"`
+    )
 
     if (selectedRows.value.size > 0) {
+      console.log(
+        `[HIGHLIGHT DEBUG] handleColumnHighlight: ${selectedRows.value.size} rows are selected`
+      )
       const confirmed = confirm('You have selected rows. Unselect them to highlight the column?')
+      console.log(`[HIGHLIGHT DEBUG] handleColumnHighlight: User confirmation: ${confirmed}`)
+
       if (confirmed) {
+        console.log(
+          `[HIGHLIGHT DEBUG] handleColumnHighlight: Resetting selection and highlighting column "${header}"`
+        )
         resetSelection()
         highlightedColumn.value = header
       }
     } else {
-      highlightedColumn.value = header === highlightedColumn.value ? null : header
+      console.log(`[HIGHLIGHT DEBUG] handleColumnHighlight: No rows selected`)
+
+      if (header === highlightedColumn.value) {
+        console.log(`[HIGHLIGHT DEBUG] handleColumnHighlight: Unhighlighting column "${header}"`)
+        highlightedColumn.value = null
+      } else {
+        console.log(`[HIGHLIGHT DEBUG] handleColumnHighlight: Highlighting column "${header}"`)
+        highlightedColumn.value = header
+      }
     }
+
+    console.log(
+      `[HIGHLIGHT DEBUG] handleColumnHighlight: Final highlighted column state: "${highlightedColumn.value}"`
+    )
+  }
+  // drag state
+  const dragState = reactive({
+    isDragging: false,
+    draggedIndex: -1,
+    targetIndex: -1,
+  })
+
+  function onDragStart(event: DragEvent, index: number) {
+    console.log(`[DRAG DEBUG] onDragStart: Starting drag for index ${index}`)
+    dragState.isDragging = true
+    dragState.draggedIndex = index
+    event.dataTransfer?.setData('text/plain', '')
+    event.dataTransfer!.effectAllowed = 'move'
+    console.log(`[DRAG DEBUG] onDragStart: State updated:`, { ...dragState })
+  }
+
+  function onDragOver(event: DragEvent, index: number) {
+    if (!dragState.isDragging) {
+      console.log(`[DRAG DEBUG] onDragOver: Ignoring - not dragging`)
+      return
+    }
+    event.preventDefault()
+
+    // Only log when target index changes to reduce console spam
+    if (dragState.targetIndex !== index) {
+      dragState.targetIndex = index
+      console.log(`[DRAG DEBUG] onDragOver: Target updated to index ${index}`, { ...dragState })
+    }
+  }
+
+  function onDrop(event: DragEvent, targetIndex: number) {
+    console.log(`[DRAG DEBUG] onDrop: Dropping at index ${targetIndex}`)
+    event.preventDefault()
+
+    if (!dragState.isDragging) {
+      console.log(`[DRAG DEBUG] onDrop: Ignoring - not dragging`)
+      return
+    }
+
+    if (dragState.draggedIndex === targetIndex) {
+      console.log(`[DRAG DEBUG] onDrop: Ignoring - same position`)
+      return
+    }
+
+    console.log(
+      `[DRAG DEBUG] onDrop: Moving item from index ${dragState.draggedIndex} to ${targetIndex}`
+    )
+
+    const currentUI = collectionSchema.value.ui || {}
+    let columnOrder = currentUI.columnOrder ? [...currentUI.columnOrder] : [...tableHeaders.value]
+    const allHeaders = Object.keys(collectionSchema.value.properties || {})
+
+    console.log(`[DRAG DEBUG] onDrop: Initial column order:`, columnOrder)
+
+    // Clean up column order
+    columnOrder = columnOrder.filter((header) => allHeaders.includes(header))
+    const missingHeaders = allHeaders.filter((header) => !columnOrder.includes(header))
+    columnOrder.push(...missingHeaders)
+
+    console.log(`[DRAG DEBUG] onDrop: Cleaned column order:`, columnOrder)
+
+    // Perform reorder
+    const [movedHeader] = columnOrder.splice(dragState.draggedIndex, 1)
+    columnOrder.splice(targetIndex, 0, movedHeader)
+
+    console.log(`[DRAG DEBUG] onDrop: Reordered columns:`, columnOrder)
+    console.log(`[DRAG DEBUG] onDrop: Moved header: ${movedHeader}`)
+
+    // Update store
+    updateUIMetadata({ columnOrder })
+
+    // Reset state
+    dragState.isDragging = false
+    dragState.draggedIndex = -1
+    dragState.targetIndex = -1
+    console.log(`[DRAG DEBUG] onDrop: Reset drag state:`, { ...dragState })
+  }
+
+  function onDragEnd() {
+    console.log(`[DRAG DEBUG] onDragEnd: Drag operation ended or canceled`)
+
+    if (dragState.isDragging) {
+      console.log(
+        `[DRAG DEBUG] onDragEnd: Final indices - dragged: ${dragState.draggedIndex}, target: ${dragState.targetIndex}`
+      )
+    }
+
+    dragState.isDragging = false
+    dragState.draggedIndex = -1
+    dragState.targetIndex = -1
+    console.log(`[DRAG DEBUG] onDragEnd: Reset drag state:`, { ...dragState })
   }
 </script>
 
@@ -950,12 +1068,14 @@
                 &-
               </TableHead>
               <TableHead
-                v-for="header in tableHeaders"
+                v-for="(header, index) in tableHeaders"
                 :key="header"
-                class="excel-column-header font-bold text-black relative"
+                class="cursor-pointer excel-column-header font-bold text-black relative"
                 :class="{
                   'error-column-header': header === errorColumn && isAdding,
                   'highlighted-column': highlightedColumn === header,
+                  dragging: dragState.draggedIndex === index,
+                  'drop-target': dragState.targetIndex === index,
                 }"
                 :style="{
                   width:
@@ -963,6 +1083,11 @@
                       ? `${resizingState.currentWidth}px`
                       : `${columnWidths[header] || 200}px`,
                 }"
+                draggable="true"
+                @dragstart="onDragStart($event, index)"
+                @dragover.prevent="onDragOver($event, index)"
+                @dragend="onDragEnd"
+                @drop="onDrop($event, index)"
               >
                 <div class="flex items-center justify-between">
                   <div
@@ -1525,6 +1650,29 @@
 </template>
 
 <style scoped>
+  /* drag state */
+  .dragging {
+    opacity: 0.6;
+    cursor: grabbing;
+    background: rgba(33, 150, 243, 0.1);
+  }
+
+  .drop-target {
+    position: relative;
+    border-right: 2px solid rgba(33, 150, 243, 0.6);
+    box-shadow: 5px 0 8px -2px rgba(33, 150, 243, 0.6);
+  }
+  .drop-target::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 0;
+    border-right: 8px solid rgba(33, 150, 243, 1);
+    right: -4px;
+  }
+
   /* highlight for entire column */
   .highlighted-column {
     position: relative;
@@ -1696,6 +1844,9 @@
 
   /* Excel column headers */
   .excel-column-header {
+    transition:
+      background 0.2s,
+      opacity 0.2s;
     background-color: #f3f3f3; /* [cite: 89] */
     border: 1px solid #d0d0d0; /* [cite: 89] */
     padding: 6px 8px; /* [cite: 89] */
