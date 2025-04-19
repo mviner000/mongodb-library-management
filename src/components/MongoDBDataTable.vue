@@ -807,11 +807,34 @@
   // highlighted column state
   const highlightedColumn = ref<string | null>(null)
 
-  //  highlighted column methods section
+  // highlighted column methods section
   const handleColumnHighlight = (index: number) => {
     console.log(`[HIGHLIGHT DEBUG] handleColumnHighlight: Called with index ${index}`)
-    const header = tableHeaders.value[index]
-    console.log(`[HIGHLIGHT DEBUG] handleColumnHighlight: Header at index ${index} is "${header}"`)
+
+    // Count hidden columns before the visible index to get the actual index in tableHeaders
+    let hiddenColumnsCount = 0
+    for (let i = 0; i <= index; i++) {
+      const visibleIndex = i + hiddenColumnsCount
+      if (
+        visibleIndex < tableHeaders.value.length &&
+        hiddenColumns.value.includes(tableHeaders.value[visibleIndex])
+      ) {
+        hiddenColumnsCount++
+        i-- // Stay at the same visible index since we found a hidden column
+      }
+    }
+
+    // Adjust index to account for hidden columns
+    const adjustedIndex = index + hiddenColumnsCount
+    const header = tableHeaders.value[adjustedIndex]
+
+    console.log(
+      `[HIGHLIGHT DEBUG] handleColumnHighlight: Hidden columns count: ${hiddenColumnsCount}`
+    )
+    console.log(`[HIGHLIGHT DEBUG] handleColumnHighlight: Adjusted index: ${adjustedIndex}`)
+    console.log(
+      `[HIGHLIGHT DEBUG] handleColumnHighlight: Header at adjusted index ${adjustedIndex} is "${header}"`
+    )
     console.log(
       `[HIGHLIGHT DEBUG] handleColumnHighlight: Current highlighted column: "${highlightedColumn.value}"`
     )
@@ -1079,7 +1102,7 @@
                 class="select-none excel-column-letter relative"
                 :class="{
                   'drop-target': dragState.targetIndex === index,
-                  'highlighted-column': highlightedColumn === tableHeaders[index],
+                  'highlighted-column': highlightedColumn === visibleHeaders[index],
                 }"
                 @click="handleColumnHighlight(index)"
                 draggable="true"
@@ -1097,8 +1120,9 @@
                 <div
                   class="flex items-center justify-center"
                   :class="{
+                    // UPDATED condition: Compare with the header from visibleHeaders at the current index
                     'cursor-pointer bg-blue-500 text-white py-[9px] px-3 -mx-[10px] -my-[10px]':
-                      highlightedColumn === tableHeaders[index],
+                      highlightedColumn === visibleHeaders[index],
                   }"
                 >
                   <span class="excel-letter">{{ letter }}</span>

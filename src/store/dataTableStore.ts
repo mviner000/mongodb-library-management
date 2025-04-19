@@ -942,6 +942,17 @@ export const useDataTableStore = defineStore('dataTable', () => {
     } else {
       hiddenColumns.value.splice(index, 1)
     }
+
+    // Add debugging logs
+    console.log('Column visibility updated:', {
+      header,
+      isNowHidden: hiddenColumns.value.includes(header),
+      hiddenColumns: [...hiddenColumns.value], // Clone for logging
+      visibleColumnsCount: tableHeaders.value.length - hiddenColumns.value.length,
+      allColumns: tableHeaders.value.length,
+      visibleColumns: tableHeaders.value.filter((h) => !hiddenColumns.value.includes(h)),
+    })
+
     saveColumnVisibilityToBackend()
   }
 
