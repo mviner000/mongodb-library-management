@@ -880,79 +880,72 @@
     targetIndex: -1,
   })
 
-  function onDragStart(event: DragEvent, index: number) {
-    console.log(`[DRAG DEBUG] onDragStart: Starting drag for index ${index}`)
+  function getActualIndex(visibleIndex: number) {
+    let actualIndex = 0
+    let visibleCount = 0
+
+    while (visibleCount <= visibleIndex && actualIndex < tableHeaders.value.length) {
+      if (!hiddenColumns.value.includes(tableHeaders.value[actualIndex])) {
+        visibleCount++
+      }
+      actualIndex++
+    }
+
+    return actualIndex - 1
+  }
+
+  function onDragStart(event: DragEvent, visibleIndex: number) {
+    const actualIndex = getActualIndex(visibleIndex)
+    console.log(`Drag start from visible index ${visibleIndex} (actual ${actualIndex})`)
+
     dragState.isDragging = true
-    dragState.draggedIndex = index
+    dragState.draggedIndex = actualIndex
     event.dataTransfer?.setData('text/plain', '')
-    event.dataTransfer!.effectAllowed = 'move'
-
-    // Set highlighted column to the dragged column
-    highlightedColumn.value = tableHeaders.value[index]
-
-    console.log(`[DRAG DEBUG] onDragStart: State updated:`, { ...dragState })
+    highlightedColumn.value = tableHeaders.value[actualIndex]
   }
 
-  function onDragOver(event: DragEvent, index: number) {
-    if (!dragState.isDragging) {
-      console.log(`[DRAG DEBUG] onDragOver: Ignoring - not dragging`)
-      return
-    }
+  function onDragOver(event: DragEvent, visibleIndex: number) {
+    if (!dragState.isDragging) return
     event.preventDefault()
 
-    // Only log when target index changes to reduce console spam
-    if (dragState.targetIndex !== index) {
-      dragState.targetIndex = index
-      console.log(`[DRAG DEBUG] onDragOver: Target updated to index ${index}`, { ...dragState })
+    const actualIndex = getActualIndex(visibleIndex)
+    if (dragState.targetIndex !== actualIndex) {
+      dragState.targetIndex = actualIndex
+      console.log(`Drag over at visible index ${visibleIndex} (actual ${actualIndex})`)
     }
   }
 
-  function onDrop(event: DragEvent, targetIndex: number) {
-    console.log(`[DRAG DEBUG] onDrop: Dropping at index ${targetIndex}`)
+  function onDrop(event: DragEvent, visibleIndex: number) {
     event.preventDefault()
+    if (!dragState.isDragging) return
 
-    if (!dragState.isDragging) {
-      console.log(`[DRAG DEBUG] onDrop: Ignoring - not dragging`)
-      return
-    }
+    const targetActualIndex = getActualIndex(visibleIndex)
+    const draggedIndex = dragState.draggedIndex
 
-    if (dragState.draggedIndex === targetIndex) {
-      console.log(`[DRAG DEBUG] onDrop: Ignoring - same position`)
-      return
-    }
+    console.log(`Dropping from actual index ${draggedIndex} to ${targetActualIndex}`)
 
-    console.log(
-      `[DRAG DEBUG] onDrop: Moving item from index ${dragState.draggedIndex} to ${targetIndex}`
-    )
-
+    // Existing column order logic
     const currentUI = collectionSchema.value.ui || {}
     let columnOrder = currentUI.columnOrder ? [...currentUI.columnOrder] : [...tableHeaders.value]
     const allHeaders = Object.keys(collectionSchema.value.properties || {})
 
-    console.log(`[DRAG DEBUG] onDrop: Initial column order:`, columnOrder)
+    // Clean and reorder
+    columnOrder = columnOrder.filter((h) => allHeaders.includes(h))
+    const missing = allHeaders.filter((h) => !columnOrder.includes(h))
+    columnOrder.push(...missing)
 
-    // Clean up column order
-    columnOrder = columnOrder.filter((header) => allHeaders.includes(header))
-    const missingHeaders = allHeaders.filter((header) => !columnOrder.includes(header))
-    columnOrder.push(...missingHeaders)
+    // Perform the move using actual indices
+    const [moved] = columnOrder.splice(draggedIndex, 1)
+    columnOrder.splice(targetActualIndex, 0, moved)
 
-    console.log(`[DRAG DEBUG] onDrop: Cleaned column order:`, columnOrder)
-
-    // Perform reorder
-    const [movedHeader] = columnOrder.splice(dragState.draggedIndex, 1)
-    columnOrder.splice(targetIndex, 0, movedHeader)
-
-    console.log(`[DRAG DEBUG] onDrop: Reordered columns:`, columnOrder)
-    console.log(`[DRAG DEBUG] onDrop: Moved header: ${movedHeader}`)
-
-    // Update store
+    // Update UI metadata
     updateUIMetadata({ columnOrder })
 
     // Reset state
     dragState.isDragging = false
     dragState.draggedIndex = -1
     dragState.targetIndex = -1
-    console.log(`[DRAG DEBUG] onDrop: Reset drag state:`, { ...dragState })
+    highlightedColumn.value = null
   }
 
   function onDragEnd() {
@@ -1096,12 +1089,13 @@
               >
                 @
               </TableHead>
+              <!-- TableHead for column letters -->
               <TableHead
                 v-for="(letter, index) in columnLetters"
                 :key="`letter-${index}`"
                 class="select-none excel-column-letter relative"
                 :class="{
-                  'drop-target': dragState.targetIndex === index,
+                  'drop-target': getActualIndex(index) === dragState.targetIndex,
                   'highlighted-column': highlightedColumn === visibleHeaders[index],
                 }"
                 @click="handleColumnHighlight(index)"
@@ -1164,6 +1158,7 @@
               >
                 &-
               </TableHead>
+              <!-- TableHead for column headers -->
               <TableHead
                 v-for="(header, index) in visibleHeaders"
                 :key="header"
@@ -1171,8 +1166,8 @@
                 :class="{
                   'error-column-header': header === errorColumn && isAdding,
                   'highlighted-column': highlightedColumn === header,
-                  dragging: dragState.draggedIndex === index,
-                  'drop-target': dragState.targetIndex === index,
+                  dragging: dragState.draggedIndex === getActualIndex(index),
+                  'drop-target': dragState.targetIndex === getActualIndex(index),
                 }"
                 :style="{
                   width:
