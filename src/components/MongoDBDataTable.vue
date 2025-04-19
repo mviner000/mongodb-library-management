@@ -573,15 +573,26 @@
     closeContextMenu()
   }
 
+  const checkClickOutsideHeaders = (event: MouseEvent) => {
+    const target = event.target as HTMLElement
+    const isHeaderClick = target.closest('.excel-column-letter, .excel-column-header')
+    if (!isHeaderClick) {
+      highlightedColumn.value = null
+    }
+  }
+
   // Add window click listener (in onMounted)
   onMounted(() => {
     window.addEventListener('click', closeContextMenu)
+    document.addEventListener('click', checkClickOutsideHeaders)
   })
 
   // Add cleanup (if using beforeUnmount)
   onBeforeUnmount(() => {
+    document.removeEventListener('click', checkClickOutsideHeaders)
     window.removeEventListener('click', closeContextMenu)
   })
+
   const isSelectedArchived = computed(() => {
     console.log('Computing isSelectedArchived')
 
@@ -793,6 +804,10 @@
       `[HIGHLIGHT DEBUG] handleColumnHighlight: Current highlighted column: "${highlightedColumn.value}"`
     )
 
+    // Clear both selected cell and editing state
+    selectedCell.value = null
+    cancelEdit() // This clears editingCell in the store
+
     if (selectedRows.value.size > 0) {
       console.log(
         `[HIGHLIGHT DEBUG] handleColumnHighlight: ${selectedRows.value.size} rows are selected`
@@ -836,6 +851,10 @@
     dragState.draggedIndex = index
     event.dataTransfer?.setData('text/plain', '')
     event.dataTransfer!.effectAllowed = 'move'
+
+    // Set highlighted column to the dragged column
+    highlightedColumn.value = tableHeaders.value[index]
+
     console.log(`[DRAG DEBUG] onDragStart: State updated:`, { ...dragState })
   }
 
@@ -1011,9 +1030,17 @@
               <TableHead
                 v-for="(letter, index) in columnLetters"
                 :key="`letter-${index}`"
-                class="excel-column-letter relative"
-                :class="{ 'highlighted-column': highlightedColumn === tableHeaders[index] }"
+                class="select-none excel-column-letter relative"
+                :class="{
+                  'drop-target': dragState.targetIndex === index,
+                  'highlighted-column': highlightedColumn === tableHeaders[index],
+                }"
                 @click="handleColumnHighlight(index)"
+                draggable="true"
+                @dragstart="onDragStart($event, index)"
+                @dragover.prevent="onDragOver($event, index)"
+                @dragend="onDragEnd"
+                @drop="onDrop($event, index)"
                 :style="{
                   width:
                     alphaResizingState.isResizing && alphaResizingState.columnIndex === index
@@ -1083,6 +1110,7 @@
                       ? `${resizingState.currentWidth}px`
                       : `${columnWidths[header] || 200}px`,
                 }"
+                @click="handleColumnHighlight(index)"
                 draggable="true"
                 @dragstart="onDragStart($event, index)"
                 @dragover.prevent="onDragOver($event, index)"
@@ -1213,6 +1241,7 @@
                       selectedCellInfo?.rowIndex === rowIndex &&
                       selectedCellInfo?.header === header,
                     'highlighted-column': highlightedColumn === header,
+                    'drop-target': dragState.targetIndex === tableHeaders.indexOf(header),
                   }"
                   @contextmenu.prevent="handleRightClick(rowIndex, header, $event)"
                 >
@@ -1659,8 +1688,7 @@
 
   .drop-target {
     position: relative;
-    border-right: 2px solid rgba(33, 150, 243, 0.6);
-    box-shadow: 5px 0 8px -2px rgba(33, 150, 243, 0.6);
+    border-right: 2px solid #d0d0d0; /* Light gray */
   }
   .drop-target::after {
     content: '';
@@ -1669,7 +1697,7 @@
     right: 0;
     bottom: 0;
     width: 0;
-    border-right: 8px solid rgba(33, 150, 243, 1);
+    border-right: 8px solid #d0d0d0; /* Same light gray */
     right: -4px;
   }
 
