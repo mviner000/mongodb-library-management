@@ -49,6 +49,8 @@
   import StickyLeftSidebar from './StickyLeftSidebar.vue'
   import { useUserStore } from '@/store/useUserStore'
   import { reactive } from 'vue'
+  import Switch from './ui/switch/Switch.vue'
+  import Label from './ui/label/Label.vue'
   // Remove FooterTabsBar import if not used in old template
   // import FooterTabsBar from './FooterTabsBar.vue';
 
@@ -962,6 +964,29 @@
     dragState.targetIndex = -1
     console.log(`[DRAG DEBUG] onDragEnd: Reset drag state:`, { ...dragState })
   }
+
+  const previewMode = ref(false)
+
+  // Add a more verbose debugging approach
+  watch(
+    previewMode,
+    (newVal, oldVal) => {
+      // Multiple logging approaches to ensure visibility
+      console.log('PREVIEW MODE CHANGED:', newVal)
+      console.log(`Preview mode changed from ${oldVal} to ${newVal}`)
+      console.warn(`Preview toggle state: ${newVal ? 'ACTIVE' : 'INACTIVE'}`) // Using warn to make it more visible
+
+      // You can also try adding an alert for testing
+      // alert(`Preview mode is now ${newVal ? 'active' : 'inactive'}`)
+    },
+    { immediate: true }
+  )
+
+  // You could also add a method that gets called on click for additional debugging
+  const togglePreviewMode = () => {
+    previewMode.value = !previewMode.value
+    console.log('Toggle function called, new value:', previewMode.value)
+  }
 </script>
 
 <template>
@@ -1023,7 +1048,7 @@
           @view-change="handleViewChange"
         />
         <!-- Visibility of Columns -->
-        <div class="z-40 mt-10 p-2 bg-[#217346]/90">
+        <div class="z-40 mt-10 p-2 bg-[#217346]/90 flex gap-2">
           <NavigationMenu>
             <NavigationMenuList>
               <NavigationMenuItem>
@@ -1054,6 +1079,25 @@
               </NavigationMenuItem>
             </NavigationMenuList>
           </NavigationMenu>
+
+          <div class="flex items-center space-x-2">
+            <Switch
+              id="preview-live-toggle"
+              :modelValue="previewMode"
+              @update:modelValue="
+                (value) => {
+                  previewMode = value
+                  console.log('Switch toggled via update:modelValue to:', value)
+                }
+              "
+            />
+            <Label
+              class="text-white cursor-pointer"
+              for="preview-live-toggle"
+            >
+              {{ previewMode ? 'Preview Mode' : 'Live Mode' }}
+            </Label>
+          </div>
         </div>
 
         <table
@@ -1266,15 +1310,21 @@
                   <div
                     class="w-full h-full flex items-center justify-center cursor-pointer relative"
                     @click.stop="
+                      !previewMode &&
                       togglePinStatus(doc._id.$oid, user && doc.pinned_by?.includes(user.id))
                     "
-                    :class="{ 'hover:bg-gray-100': !doc.is_archive }"
+                    :class="[
+                      { 'hover:bg-gray-100': !doc.is_archive },
+                      { 'cursor-auto': previewMode },
+                    ]"
                     :title="
-                      doc.is_archive
-                        ? 'Cannot pin/unpin archived items'
-                        : user && doc.pinned_by?.includes(user.id)
-                          ? 'Click to unpin'
-                          : 'Click to pin'
+                      previewMode
+                        ? ''
+                        : doc.is_archive
+                          ? 'Cannot pin/unpin archived items'
+                          : user && doc.pinned_by?.includes(user.id)
+                            ? 'Click to unpin'
+                            : 'Click to pin'
                     "
                   >
                     <span class="">{{ (currentPage - 1) * pageSize + rowIndex + 1 }}</span>
@@ -1282,6 +1332,7 @@
                     <span
                       v-if="user && doc.pinned_by?.includes(user.id)"
                       class="text-xl left-2 bottom-2 absolute z-10"
+                      :class="previewMode ? 'hidden' : ''"
                     >
                       📌
                     </span>
@@ -1400,7 +1451,7 @@
                         ),
                         'excel-cell-readonly': ['_id', 'created_at', 'updated_at'].includes(header),
                       }"
-                      @click="handleCellClick(rowIndex, header, doc[header])"
+                      @click="!previewMode && handleCellClick(rowIndex, header, doc[header])"
                     >
                       <div
                         v-if="getSchemaInfo(header).bsonType === 'bool'"
@@ -1437,6 +1488,7 @@
                   </div>
                 </TableCell>
                 <TableActions
+                  :preview-mode="previewMode"
                   :collection-name="collectionName"
                   :document-id="doc._id.$oid"
                   :row-number="(currentPage - 1) * pageSize + rowIndex + 1"
@@ -1445,6 +1497,7 @@
                   @delete-end="handleDeleteEnd"
                 />
                 <StickyTableActions
+                  :preview-mode="previewMode"
                   :collection-name="collectionName"
                   :document-id="doc._id.$oid"
                   :row-number="(currentPage - 1) * pageSize + rowIndex + 1"
@@ -1461,6 +1514,7 @@
               <div
                 v-if="showContextMenu"
                 class="fixed z-50 bg-white shadow-lg border rounded-md p-1 min-w-[120px] context-menu"
+                :class="previewMode ? 'hidden' : ''"
                 :style="{
                   left: `${contextMenuPosition.x}px`,
                   top: `${contextMenuPosition.y}px`,
@@ -1619,7 +1673,7 @@
             </TableRow>
 
             <TableRow
-              v-if="!isAdding"
+              v-if="!isAdding && !previewMode"
               class="excel-add-row"
               @click="startAdding"
             >

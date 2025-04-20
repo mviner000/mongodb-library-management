@@ -17,6 +17,7 @@
     targetRef?: HTMLElement | null
     isLastRow: boolean
     isSingleRow: boolean
+    previewMode: Boolean
   }>()
 
   // Keep emits, they will be forwarded from the child
@@ -105,7 +106,7 @@
         size="sm"
         class="excel-delete-button -pb-0 -mb-[10px]"
         @click="triggerDelete"
-        :disabled="false"
+        :disabled="previewMode"
       >
         <TrashIcon class="h-4 w-4" />
       </Button>

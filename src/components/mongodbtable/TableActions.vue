@@ -9,6 +9,7 @@
     collectionName: string
     documentId: string
     rowNumber: number
+    previewMode: Boolean
   }>()
 
   const emit = defineEmits(['deleted', 'delete-start', 'delete-end'])
@@ -42,7 +43,7 @@
       size="sm"
       class="excel-delete-button"
       @click="triggerDelete"
-      :disabled="false"
+      :disabled="previewMode"
     >
       <TrashIcon class="h-4 w-4" />
     </Button>
