@@ -1,6 +1,6 @@
 <!-- src/views/CSVImportView.vue -->
 <script setup lang="ts">
-  import { ref, computed, onMounted } from 'vue'
+  import { ref, computed, onMounted, onUnmounted } from 'vue'
   import { useRoute } from 'vue-router'
   import { useToast } from '@/components/ui/toast'
   import { Button } from '@/components/ui/button'
@@ -46,6 +46,11 @@
       const transformedData = transformCSVData(csvData, shortNameMap)
 
       previewData.value = transformedData
+
+      // Auto-select all rows
+      const ids = transformedData.map((doc: any) => doc._id.$oid)
+      dataTableStore.selectedRows = new Set(ids)
+
       localStorage.setItem(
         `csv-import-${collectionName.value}`,
         JSON.stringify({
@@ -166,6 +171,11 @@
         const csvData = JSON.parse(savedData)
         previewData.value = csvData.data
         hasImportedData.value = true
+
+        // Auto-select all rows when loading saved data
+        const ids = csvData.data.map((doc: any) => doc._id.$oid)
+        dataTableStore.selectedRows = new Set(ids)
+
         console.log(`Loaded saved CSV data with ${csvData.data.length} rows`)
       } catch (error) {
         console.error('Error loading saved CSV data:', error)
@@ -181,11 +191,18 @@
     localStorage.removeItem(`csv-import-${collectionName.value}`)
     previewData.value = []
     hasImportedData.value = false
+    // Clear selected rows when resetting
+    dataTableStore.selectedRows = new Set()
     if (fileInput.value) {
       fileInput.value.value = ''
     }
     toast({ title: 'Reset Complete', description: 'CSV data has been cleared' })
   }
+
+  onUnmounted(() => {
+    // Clear selected rows when component is unmounted
+    dataTableStore.selectedRows = new Set()
+  })
 </script>
 
 <template>

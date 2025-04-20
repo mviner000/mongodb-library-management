@@ -158,7 +158,6 @@
   const selectedCellInfo = ref<{ rowIndex: number; header: string } | null>(null) // [cite: 41]
   const highlightedDocumentId = ref<string | null>(null) // [cite: 49]
   let highlightTimeout: ReturnType<typeof setTimeout> | null = null // [cite: 49]
-  const fileInput = ref<HTMLInputElement | null>(null) // [cite: 71]
   const editingHeader = ref<string | null>(null) // [cite: 59]
   const editedShortName = ref('') // [cite: 59]
 
@@ -266,8 +265,6 @@
     return heights ? JSON.parse(heights) : {} // [cite: 56, 57]
   })
 
-  const isPreviewMode = computed(() => previewMode.value) // [cite: 70]
-  const showImportInPreview = computed(() => isPreviewMode.value && props.previewData) // [cite: 70]
   const isImportRoute = computed(() => route.path.includes('/import-csv')) // [cite: 71]
 
   // ==========================================================================
@@ -334,23 +331,13 @@
     }
   }) // [cite: 22]
 
-  // Watch pinnedDocuments (removed console.log)
-  const debouncedLogPinnedDocuments = useDebounceFn((newVal) => {
-    // Empty function now that console.log is removed [cite: 47]
-  }, 500)
-
-  watch(pinnedDocuments, (newVal) => debouncedLogPinnedDocuments(newVal), {
-    immediate: true, // [cite: 48]
-    deep: true, // [cite: 48]
-  })
-
   // Watch previewMode (removed console.log)
   watch(
     previewMode,
-    (newVal, oldVal) => {
+    () => {
       // All console.log statements removed [cite: 69]
     },
-    { immediate: true } // [cite: 69]
+    { immediate: true }
   )
 
   // Watch route to set preview mode
@@ -970,10 +957,6 @@
   const handleDeleteEnd = () => {
     dataTableStore.pendingDeleteId = null // [cite: 40]
   } // [cite: 40]
-
-  const triggerFileImport = () => {
-    fileInput.value?.click() // [cite: 71]
-  }
 
   // --- Emit events ---
   const emit = defineEmits(['preview-data-update']) // [cite: 71]

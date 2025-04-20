@@ -1,9 +1,8 @@
 <!-- src/views/ExcelCellReference.vue -->
 <script setup lang="ts">
-  import { computed } from 'vue'
   import { ArrowUpToLine } from 'lucide-vue-next'
 
-  const props = defineProps<{
+  defineProps<{
     selectedCell: { colIndex: number; rowNumber: number } | null
     selectedRows: Set<string>
     isSidebarOpen: boolean
@@ -13,23 +12,6 @@
   const emit = defineEmits<{
     (e: 'reset-selection'): void
   }>()
-
-  const getColumnLabel = (index: number): string => {
-    let label = ''
-    let i = index
-    do {
-      const remainder = i % 26
-      label = String.fromCharCode(65 + remainder) + label
-      i = Math.floor(i / 26) - 1
-    } while (i >= 0)
-    return label
-  }
-
-  const cellReference = computed(() => {
-    if (!props.selectedCell) return 'A1' // Default when no cell is selected
-    const { colIndex, rowNumber } = props.selectedCell
-    return `${getColumnLabel(colIndex)}${rowNumber}`
-  })
 
   // Placeholder function for recovery
   const handleCSVImport = () => {
@@ -43,10 +25,10 @@
     class="fixed h-[42px] z-30 top-14 w-screen flex items-center bg-white border-b border-b-gray-400 transition-all duration-300 ease-in-out"
     :class="[isSidebarOpen ? 'left-[280px]' : 'left-0', { hidden: previewMode }]"
   >
-    <!-- Cell reference box (e.g., A1) -->
+    <!-- Cell reference box (e.g., CSV) -->
     <div class="flex items-center px-2">
       <div class="flex items-center cursor-pointer">
-        <span class="text-sm font-bold text-gray-700">{{ cellReference }}</span>
+        <span class="text-sm font-bold text-gray-700">CSV</span>
       </div>
     </div>
 

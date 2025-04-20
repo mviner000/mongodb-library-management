@@ -1,6 +1,6 @@
 <!-- src/views/ExcelCellReference.vue -->
 <script setup lang="ts">
-  import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+  import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
   import DeleteDocumentAction from './mongodbtable/DeleteDocumentAction.vue'
   import { getApiBaseUrl } from '@/utils/api'
   import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
@@ -211,23 +211,6 @@
   // Store information about document to delete
   const documentToDelete = ref<{ id: string; rowNumber: number } | null>(null)
   const isDeleting = ref(false)
-
-  // Debug watcher for props
-  watch(
-    () => props.selectedRows,
-    (newVal) => {
-      // Removed console.log
-    },
-    { immediate: true }
-  )
-
-  watch(
-    () => props.collectionName,
-    (newVal) => {
-      // Removed console.log
-    },
-    { immediate: true }
-  )
 
   const getColumnLabel = (index: number): string => {
     let label = ''
