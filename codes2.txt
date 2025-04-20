@@ -1,0 +1,1090 @@
+// src/store/dataTableStore.ts
+// ==========================================================================
+// Imports
+// ==========================================================================
+import { defineStore } from 'pinia' //
+import { ref, computed } from 'vue' //
+import { useToast } from '@/components/ui/toast/use-toast' //
+import { getApiBaseUrl } from '@/utils/api' //
+import { documentService } from '@/services/documentService' //
+import { useDebounceFn } from '@vueuse/core' //
+
+// ==========================================================================
+// Constants
+// ==========================================================================
+const API_BASE = getApiBaseUrl() //
+
+// ==========================================================================
+// Interfaces / Types
+// ==========================================================================
+interface Document {
+  _id: { $oid: string } //
+  [key: string]: any // Allow other properties
+}
+
+interface ReferenceOption {
+  id: string //
+  label: string //
+}
+
+// ==========================================================================
+// Store Definition
+// ==========================================================================
+export const useDataTableStore = defineStore('dataTable', () => {
+  // --- Setup ---
+  const { toast } = useToast() //
+  const previewMode = ref(sessionStorage.getItem('previewMode') === 'true') //
+
+  // --- State ---
+  const collectionName = ref<string>('users') // Default collection [cite: 2]
+  const documents = ref<Document[]>([]) // [cite: 2]
+  const collectionSchema = ref<any>({}) // Consider defining a stricter type [cite: 2]
+  const isLoading = ref<boolean>(false) // [cite: 2]
+  const errorMessage = ref<string>('') // [cite: 2]
+  const pageSize = ref<number>(10) // [cite: 2]
+  const currentPage = ref<number>(1) // [cite: 2]
+  const filterQuery = ref<string>('{}') // Keep filter query local or move if needed globally [cite: 2]
+  const newDocument = ref<Record<string, any>>({}) // [cite: 2]
+  const isAdding = ref<boolean>(false) // [cite: 2]
+  const editingCell = ref<{ rowIndex: number; header: string } | null>(null) // [cite: 2]
+  const editValue = ref<any>('') // Can be string, boolean, etc. [cite: 3]
+  const isSaving = ref<boolean>(false) // [cite: 3]
+  const selectedRows = ref<Set<string>>(new Set()) // [cite: 3]
+  const currentView = ref<string>('empty-or-recovered') // e.g., "all", "archives" [cite: 3]
+  const pendingDeleteId = ref<string | null>(null) // [cite: 3]
+  const referenceOptions = ref<Record<string, ReferenceOption[]>>({}) // [cite: 4]
+  const loadingReferences = ref<Record<string, boolean>>({}) // [cite: 4]
+  const collectionsList = ref<string[]>([]) // [cite: 4]
+  const errorColumn = ref<string | null>(null) // For highlighting duplicate errors [cite: 4]
+  const addingRowError = ref<boolean>(false) // [cite: 5]
+  const hiddenColumns = ref<string[]>([]) // [cite: 92]
+
+  // --- Getters (Computed) ---
+  const totalDocuments = computed(() => documents.value.length) // [cite: 5]
+  const totalPages = computed(() => Math.ceil(totalDocuments.value / pageSize.value)) // [cite: 5]
+
+  const paginatedDocuments = computed(() => {
+    const start = (currentPage.value - 1) * pageSize.value // [cite: 5]
+    const end = start + pageSize.value // [cite: 5]
+    return documents.value.slice(start, end) // [cite: 5]
+  })
+
+  const tableHeaders = computed(() => {
+    if (!collectionSchema.value.properties) return [] // [cite: 5]
+    const props = collectionSchema.value.properties // [cite: 5]
+    const keys = Object.keys(props) // [cite: 5]
+
+    if (collectionSchema.value.ui?.columnOrder) { // [cite: 6]
+      const columnOrder = collectionSchema.value.ui.columnOrder // [cite: 6]
+      // Filter valid headers and add missing ones
+      const ordered = columnOrder.filter((key: string) => keys.includes(key)) // [cite: 6]
+      const remaining = keys.filter((key: string) => !columnOrder.includes(key)) // [cite: 6]
+      return [...ordered, ...remaining] // [cite: 6]
+    }
+
+    return keys.sort((a, b) => {
+      const required = collectionSchema.value.required || [] // [cite: 6]
+      if (required.includes(a) && !required.includes(b)) return -1 // [cite: 7]
+      if (!required.includes(a) && required.includes(b)) return 1 // [cite: 7]
+      if (a === '_id') return -1 // [cite: 7]
+      if (b === '_id') return 1 // [cite: 7]
+      return a.localeCompare(b) // [cite: 7]
+    })
+  })
+
+  const visibleHeaders = computed(() => { // [cite: 92]
+    return tableHeaders.value.filter((header) => !hiddenColumns.value.includes(header)) // [cite: 93]
+  })
+
+  const columnWidths = computed(() => {
+    return collectionSchema.value?.ui?.columnWidths || {} // [cite: 7]
+  })
+
+  const allSelected = computed({
+    get: () => totalDocuments.value > 0 && selectedRows.value.size === totalDocuments.value, // [cite: 7]
+    set: (val: boolean) => {
+      selectedRows.value = val ? new Set(documents.value.map((doc) => doc._id.$oid)) : new Set() // [cite: 8]
+    },
+  })
+
+  const shortNames = computed(() => {
+    return collectionSchema.value?.ui?.short_names || {} // [cite: 102]
+  })
+
+  // --- Internal Helper Functions ---
+
+  // Helper to get schema info
+  const getSchemaInfo = (field: string) => {
+    return collectionSchema.value.properties?.[field] || {} // [cite: 8]
+  }
+
+  // Helper to check if field is reference
+  const isReferenceField = (field: string): boolean => {
+    return getSchemaInfo(field).description?.includes('REF:') || false // [cite: 9]
+  }
+
+  // Helper to get referenced collection name
+  const getReferencedCollection = (field: string): string | null => {
+    const desc = getSchemaInfo(field).description || '' // [cite: 11]
+    const match = desc.match(/REF:(\w+)/) // [cite: 12]
+    return match ? match[1] : null // [cite: 13]
+  }
+
+  // Get default value based on BSON type
+  function getDefaultValue(bsonType: string | string[]) {
+    const type = Array.isArray(bsonType) ? bsonType[0] : bsonType // Handle potential array of types [cite: 47]
+    switch (type) { // [cite: 48]
+      case 'string': // [cite: 48]
+        return '' // [cite: 48]
+      case 'int': // [cite: 48]
+      case 'long': // [cite: 48]
+      case 'double': // [cite: 48]
+      case 'decimal': // [cite: 48]
+        return 0 // [cite: 48]
+      case 'bool': // [cite: 48]
+        return false // [cite: 48]
+      case 'date': // [cite: 48]
+        return new Date().toISOString() // Store dates consistently, e.g., ISO string [cite: 49]
+      case 'objectId': // [cite: 49]
+        return null // Or handle differently if needed [cite: 49]
+      case 'object': // [cite: 49]
+        return {} // [cite: 49]
+      case 'array': // [cite: 49]
+        return [] // [cite: 49]
+      default: // [cite: 49]
+        return null // [cite: 49]
+    }
+  }
+
+  // Initialize the new document structure based on schema
+  function initializeNewDocument() {
+    const doc: Record<string, any> = {} // [cite: 44]
+    const required = collectionSchema.value.required || [] // [cite: 44]
+    const properties = collectionSchema.value.properties || {} // [cite: 45]
+
+    // Initialize required fields first (excluding specific auto-fields)
+    required.forEach((field: string) => { // [cite: 45]
+      if (['_id', 'created_at', 'updated_at'].includes(field)) return // [cite: 45]
+      const prop = properties[field] // [cite: 45]
+      if (prop) { // [cite: 45]
+        doc[field] = getDefaultValue(prop.bsonType) // [cite: 45]
+      }
+    })
+
+    // Consider adding default values for non-required fields if desired
+    // Object.keys(properties).forEach(field => {
+    //   if (!doc.hasOwnProperty(field) && !['_id', 'created_at', 'updated_at'].includes(field)) { [cite: 46]
+    //      doc[field] = getDefaultValue(properties[field].bsonType);
+    //   }
+    // }); [cite: 47]
+    newDocument.value = doc // [cite: 47]
+  }
+
+  // --- Actions ---
+
+  // Collections & Schema Actions
+  async function fetchCollections() {
+    try {
+      const response = await fetch(`${API_BASE}/collections`) // [cite: 13]
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`) // [cite: 13]
+      const { success, data, error } = await response.json() // [cite: 13]
+      if (success) { // [cite: 13]
+        collectionsList.value = data // [cite: 13]
+        // Optionally set collectionName if current is invalid or empty
+        if (data.length > 0 && (!collectionName.value || !data.includes(collectionName.value))) { // [cite: 14]
+          // await setCollection(data[0]); [cite: 14]
+          // Uncomment if you want to auto-select [cite: 15]
+        }
+      } else {
+        throw new Error(error || 'Failed to fetch collections') // [cite: 15]
+      }
+    } catch (err: any) {
+      errorMessage.value = `Error fetching collections: ${err.message}` // [cite: 15]
+    }
+  }
+
+  async function setCollection(name: string) {
+    if (collectionName.value === name && documents.value.length > 0) return // Avoid refetch if already set [cite: 15]
+
+    collectionName.value = name // [cite: 16]
+    // Reset state for the new collection
+    documents.value = [] // [cite: 16]
+    collectionSchema.value = {} // [cite: 16]
+    currentPage.value = 1 // [cite: 16]
+    selectedRows.value = new Set() // [cite: 16]
+    editingCell.value = null // [cite: 16]
+    isAdding.value = false // [cite: 16]
+    errorMessage.value = '' // [cite: 16]
+    referenceOptions.value = {} // Clear old references [cite: 16]
+
+    await fetchSchema() // Fetch schema first [cite: 16]
+
+    // Initialize hidden columns from schema
+    hiddenColumns.value = collectionSchema.value.ui?.hiddenColumns || [] // [cite: 16]
+
+    await fetchDocuments() // Then fetch documents [cite: 17]
+    await preloadReferenceOptions() // Preload references needed by the schema [cite: 17]
+  }
+
+  async function fetchSchema() {
+    if (previewMode.value) return // Skip in preview [cite: 23]
+    if (!collectionName.value) return // [cite: 23]
+
+    isLoading.value = true // Indicate loading schema [cite: 23]
+    errorMessage.value = '' // [cite: 23]
+
+    try {
+      // Prefer API fetch if available, fallback to invoke if needed
+      const response = await fetch(`${API_BASE}/collections/${collectionName.value}/schema`) // [cite: 23]
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`) // [cite: 23]
+      const { success, data, error } = await response.json() // [cite: 24]
+
+      if (success) { // [cite: 24]
+        collectionSchema.value = data // [cite: 24]
+
+        // Apply preview state if in preview mode
+        if (previewMode.value) { // [cite: 24]
+          const savedUI = sessionStorage.getItem(`previewState-${collectionName.value}`) // [cite: 24]
+          if (savedUI) { // [cite: 24]
+            collectionSchema.value.ui = { // [cite: 24]
+              ...collectionSchema.value.ui, // [cite: 25]
+              ...JSON.parse(savedUI), // [cite: 25]
+            }
+          }
+        }
+
+        initializeNewDocument() // Initialize based on new schema [cite: 25]
+      } else {
+        throw new Error(error || 'Schema fetch failed') // [cite: 25]
+      }
+    } catch (err: any) { // [cite: 26]
+      errorMessage.value = `Schema error: ${err.message}` // [cite: 26]
+      collectionSchema.value = {} // Reset schema on error [cite: 26]
+    } finally {
+      isLoading.value = false // Schema loading finished [cite: 26]
+    }
+  }
+
+  // Document Fetching Actions
+  async function fetchDocuments() {
+    if (previewMode.value) return // Skip in preview [cite: 26]
+    if (!collectionName.value) return // [cite: 26]
+
+    isLoading.value = true // [cite: 26]
+    errorMessage.value = '' // [cite: 26]
+    pendingDeleteId.value = null // Clear pending deletion style [cite: 26]
+
+    try {
+      let filter = {} // [cite: 27]
+      try {
+        filter = JSON.parse(filterQuery.value) // Use the filter from state [cite: 27]
+      } catch (e: any) {
+        throw new Error(`Invalid filter JSON: ${e.message}`) // [cite: 27]
+      }
+
+      // Build endpoint based on current view
+      let endpoint // [cite: 27]
+      switch (currentView.value) { // [cite: 27]
+        case 'archives': // [cite: 28]
+          endpoint = `${API_BASE}/collections/${collectionName.value}/archives` // [cite: 28]
+          break // [cite: 28]
+        case 'recoveries': // [cite: 28]
+          endpoint = `${API_BASE}/collections/${collectionName.value}/recoveries` // [cite: 28]
+          break // [cite: 28]
+        case 'empty-or-recovered': // [cite: 28]
+          endpoint = `${API_BASE}/collections/${collectionName.value}/empty-or-recovered` // [cite: 28]
+          break // [cite: 28]
+        case 'pins': // [cite: 29]
+          endpoint = `${API_BASE}/collections/${collectionName.value}/pins` // [cite: 29]
+          break // [cite: 29]
+        case 'all': // [cite: 29]
+        default: // [cite: 29]
+          endpoint = `${API_BASE}/collections/${collectionName.value}/documents` // [cite: 29]
+          break // [cite: 29]
+      }
+
+      const params = new URLSearchParams() // [cite: 29]
+      params.append('filter', JSON.stringify(filter)) // [cite: 29]
+      // Add pagination/sorting params if your API supports them
+      // params.append('page', currentPage.value.toString()); [cite: 30]
+      // params.append('limit', pageSize.value.toString()); [cite: 30]
+      const url = `${endpoint}?${params.toString()}` // [cite: 31]
+      const response = await fetch(url) // [cite: 31]
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`) // [cite: 31]
+      const { success, data, error } = await response.json() // [cite: 31]
+
+      if (success) { // [cite: 31]
+        documents.value = data // [cite: 31]
+        if (currentPage.value > totalPages.value) { // [cite: 31]
+          currentPage.value = Math.max(1, totalPages.value) // Adjust page if out of bounds [cite: 31]
+        }
+      } else { // [cite: 32]
+        throw new Error(error || 'Failed to fetch documents') // [cite: 32]
+      }
+    } catch (err: any) {
+      errorMessage.value = `Error fetching documents: ${err.message}` // [cite: 32]
+      documents.value = [] // Clear documents on error [cite: 32]
+    } finally {
+      isLoading.value = false // [cite: 32]
+    }
+  }
+
+  // Reference Data Actions
+  async function preloadReferenceOptions() {
+    if (!collectionSchema.value.properties) return // [cite: 32]
+
+    const fields = Object.keys(collectionSchema.value.properties) // [cite: 33]
+    for (const field of fields) { // [cite: 33]
+      const refCollection = getReferencedCollection(field) // [cite: 33]
+      if (refCollection && !referenceOptions.value[refCollection]) { // [cite: 33]
+        await fetchReferenceOptions(refCollection) // [cite: 33]
+      }
+    }
+  }
+
+  async function fetchReferenceOptions(refCollectionName: string, force = false) {
+    if (!force && referenceOptions.value[refCollectionName]?.length > 0) { // [cite: 33]
+      return // Already fetched or has data [cite: 33]
+    }
+    if (loadingReferences.value[refCollectionName]) return // Already loading [cite: 34]
+
+    loadingReferences.value[refCollectionName] = true // [cite: 34]
+
+    try {
+      // 1. Fetch Schema to determine the best label field
+      const schemaResponse = await fetch(`${API_BASE}/collections/${refCollectionName}/schema`) // [cite: 34]
+      if (!schemaResponse.ok) throw new Error(`Schema fetch failed for ${refCollectionName}`) // [cite: 34]
+      const {
+        success: schemaSuccess,
+        data: schemaData,
+        error: schemaError,
+      } = await schemaResponse.json() // [cite: 34]
+      if (!schemaSuccess) // [cite: 35]
+        throw new Error(schemaError || `Failed to fetch schema for ${refCollectionName}`) // [cite: 35]
+
+      let labelField = '_id' // Default label [cite: 36]
+      const properties = schemaData.properties || {} // [cite: 36]
+      const uniqueStringFields = Object.keys(properties).filter( // [cite: 37]
+        (field) => properties[field].bsonType === 'string' && properties[field].unique === true // [cite: 37]
+      )
+      if (uniqueStringFields.length > 0) { // [cite: 37]
+        labelField = uniqueStringFields[0] // Prefer unique string fields [cite: 37]
+      } else {
+        const commonLabels = ['label', 'name', 'title', 'username'] // [cite: 37]
+        labelField = commonLabels.find((f) => properties[f]?.bsonType === 'string') || '_id' // [cite: 37]
+      }
+
+      // 2. Fetch Documents to populate options
+      const docsResponse = await fetch( // [cite: 38]
+        `${API_BASE}/collections/${refCollectionName}/documents?limit=1000` // Fetch all or limit as needed [cite: 38]
+      ) // Fetch all or limit as needed [cite: 38]
+      if (!docsResponse.ok) throw new Error(`Document fetch failed for ${refCollectionName}`) // [cite: 38]
+      const { success: docsSuccess, data: docsData, error: docsError } = await docsResponse.json() // [cite: 38]
+
+      if (docsSuccess) { // [cite: 38]
+        referenceOptions.value[refCollectionName] = docsData.map((doc: any) => ({ // [cite: 38]
+          id: doc._id.$oid, // Assuming MongoDB ObjectId structure [cite: 39]
+          label: doc[labelField] || doc._id.$oid, // Use determined label or fallback to ID [cite: 39]
+        }))
+        if (referenceOptions.value[refCollectionName].length === 0) { // [cite: 39]
+          toast({ // [cite: 39]
+            title: 'No Reference Options', // [cite: 39]
+            description: `No documents found in collection '${refCollectionName}'.`, // [cite: 39]
+            variant: 'default', // [cite: 40]
+          })
+        }
+      } else {
+        throw new Error(docsError || `Failed to fetch documents for ${refCollectionName}`) // [cite: 40]
+      }
+    } catch (err: any) {
+      toast({ // [cite: 41]
+        title: 'Reference Error', // [cite: 41]
+        description: `Failed to load options for ${refCollectionName}: ${err.message}`, // [cite: 41]
+        variant: 'destructive', // [cite: 41]
+      })
+      referenceOptions.value[refCollectionName] = [] // Ensure it's an empty array on error [cite: 41]
+    } finally {
+      loadingReferences.value[refCollectionName] = false // [cite: 41]
+    }
+  }
+
+  function getReferenceLabel(field: string, id: string): string {
+    const refCollection = getReferencedCollection(field) // [cite: 42]
+    if (!refCollection) return id // Not a reference field [cite: 42]
+    const options = referenceOptions.value[refCollection] || [] // [cite: 42]
+    const option = options.find((opt) => opt.id === id) // [cite: 43]
+    return option ? option.label : id // Return label or ID if not found [cite: 43]
+  }
+
+  // Document CRUD Actions (Create, Update, Delete)
+  function startAdding() {
+    initializeNewDocument() // Ensure clean slate based on current schema [cite: 49]
+    isAdding.value = true // [cite: 50]
+    addingRowError.value = false // Reset error state [cite: 50]
+    errorColumn.value = null // [cite: 50]
+    // Pre-fetch references needed for the add form
+    preloadReferenceOptions() // [cite: 50]
+  }
+
+  function cancelAdding() {
+    isAdding.value = false // [cite: 50]
+    newDocument.value = {} // Clear the form [cite: 50]
+    addingRowError.value = false // [cite: 50]
+    errorColumn.value = null // [cite: 50]
+  }
+
+  async function saveNewDocument() {
+    if (!collectionName.value) return // [cite: 50]
+    isSaving.value = true // Use isSaving for feedback [cite: 51]
+    errorMessage.value = '' // [cite: 51]
+    errorColumn.value = null // [cite: 51]
+    addingRowError.value = false // [cite: 51]
+
+    try {
+      const response = await fetch(`${API_BASE}/collections/${collectionName.value}/documents`, { // [cite: 51]
+        method: 'POST', // [cite: 51]
+        headers: { 'Content-Type': 'application/json' }, // [cite: 51]
+        body: JSON.stringify(newDocument.value), // [cite: 51]
+      })
+
+      // Check if response is OK, even if not strictly JSON (e.g., 201 Created with no body)
+      if (!response.ok) { // [cite: 52]
+        // Try to parse error JSON, otherwise use status text
+        let errorData // [cite: 52]
+        try {
+          errorData = await response.json() // [cite: 52]
+        } catch (jsonError) {
+          // Ignore json parse error if body is not json
+        } // [cite: 52]
+        const errorDetail = errorData?.error || `HTTP ${response.status}: ${response.statusText}` // [cite: 53]
+        throw new Error(errorDetail) // [cite: 53]
+      }
+
+      // Handle potential non-JSON success response (like 201)
+      let result // [cite: 53]
+      const contentType = response.headers.get('content-type') // [cite: 53]
+      if (contentType && contentType.includes('application/json')) { // [cite: 53]
+        result = await response.json() // [cite: 53]
+      } else {
+        // Assume success if response.ok was true and no JSON body [cite: 53]
+        result = { success: true } // [cite: 54]
+      }
+
+      // Check application-level success (if applicable)
+      if (result.success) { // [cite: 54]
+        toast({ title: 'Success', description: 'Document created successfully.' }) // [cite: 54]
+        isAdding.value = false // [cite: 54]
+        await fetchDocuments() // Refresh list [cite: 54]
+      } else {
+        // This else block might be redundant if !response.ok is handled above, [cite: 54]
+        // but keep it if your API returns 200 OK with a success: false payload [cite: 55]
+        throw new Error(result.error || 'Failed to create document (API indicated failure)') // [cite: 55]
+      }
+    } catch (err: any) {
+      errorMessage.value = err.message || 'Failed to create document' // [cite: 55]
+      addingRowError.value = true // Indicate error on the add row [cite: 56]
+
+      // Handle specific errors like duplicates
+      if (err.message && err.message.includes('E11000')) { // [cite: 56]
+        // Extract field name from duplicate key error message
+        const fieldMatch = err.message.match(/index: (\w+)_/) // Basic pattern, adjust if needed [cite: 56]
+        const valueMatch = err.message.match(/dup key: { (\w+): "(.+?)" }/) // More specific pattern [cite: 56]
+        const fieldName = valueMatch ? valueMatch[1] : fieldMatch ? fieldMatch[1] : null // [cite: 57]
+
+        if (fieldName) { // [cite: 58]
+          errorMessage.value = `Duplicate value detected for field "${fieldName}". Please use a unique value.` // [cite: 58]
+          errorColumn.value = fieldName // Highlight the column in the add row [cite: 59]
+        } else {
+          errorMessage.value = 'Duplicate value detected. Please check unique fields.' // [cite: 59]
+        }
+      }
+
+      // Optionally use toast for errors too
+      toast({ title: 'Save Error', description: errorMessage.value, variant: 'destructive' }) // [cite: 60]
+    } finally {
+      isSaving.value = false // [cite: 60]
+    }
+  }
+
+  function startEditingCell(rowIndex: number, header: string, currentValue: any) {
+    if (isSaving.value) return // Don't allow edit while saving [cite: 60]
+    if (['_id', 'created_at', 'updated_at'].includes(header)) return // Non-editable fields [cite: 60]
+
+    // Commit previous edit if any [cite: 60]
+    if (editingCell.value) { // [cite: 61]
+      // Consider auto-saving on blur/new cell click, or require explicit save
+      // For simplicity here, we just cancel the previous edit visually [cite: 61]
+      // await saveEdit(); [cite: 61]
+      // Uncomment if you want to auto-save previous cell [cite: 62]
+    }
+
+    const doc = paginatedDocuments.value[rowIndex] // [cite: 62]
+    if (!doc) return // [cite: 62]
+
+    editingCell.value = { rowIndex, header } // [cite: 62]
+
+    // Format value for editing input
+    const schemaInfo = getSchemaInfo(header) // [cite: 62]
+    const bsonType = Array.isArray(schemaInfo.bsonType) // [cite: 62]
+      ? schemaInfo.bsonType[0] // [cite: 63]
+      : schemaInfo.bsonType // [cite: 63]
+
+    if (bsonType === 'bool') { // [cite: 63]
+      editValue.value = !!currentValue // Ensure boolean [cite: 63]
+    } else if (bsonType === 'date') { // [cite: 63]
+      // Ensure date is in yyyy-MM-ddTHH:mm format for datetime-local input
+      editValue.value = currentValue ? new Date(currentValue).toISOString().slice(0, 16) : '' // [cite: 63]
+    } else if (isReferenceField(header)) { // [cite: 64]
+      editValue.value = currentValue || '' // Store the ID for the select [cite: 64]
+      // Ensure options are loaded for the reference field [cite: 65]
+      const refCollection = getReferencedCollection(header) // [cite: 65]
+      if (refCollection) { // [cite: 65]
+        fetchReferenceOptions(refCollection) // [cite: 65]
+      }
+    } else if (typeof currentValue === 'object' && currentValue !== null) { // [cite: 65]
+      editValue.value = JSON.stringify(currentValue, null, 2) // Pretty print objects/arrays [cite: 65]
+    } else {
+      editValue.value = String(currentValue ?? '') // Handle null/undefined [cite: 65]
+    }
+  }
+
+  function cancelEdit() {
+    editingCell.value = null // [cite: 66]
+    editValue.value = '' // [cite: 66]
+  }
+
+  async function saveEdit() {
+    if (!editingCell.value || isSaving.value) return // [cite: 67]
+
+    const { rowIndex, header } = editingCell.value // [cite: 68]
+    const doc = paginatedDocuments.value[rowIndex] // [cite: 68]
+    if (!doc) { // [cite: 68]
+      cancelEdit() // [cite: 68]
+      return // [cite: 68]
+    }
+
+    const docId = doc._id.$oid // [cite: 68]
+    isSaving.value = true // [cite: 68]
+    errorMessage.value = '' // [cite: 68]
+    const originalValue = doc[header] // Store original value for comparison/revert [cite: 68]
+
+    try {
+      let valueToSave: any // [cite: 68]
+      const schemaInfo = getSchemaInfo(header) // [cite: 68]
+      const bsonType = Array.isArray(schemaInfo.bsonType) // [cite: 69]
+        ? schemaInfo.bsonType[0] // [cite: 70]
+        : schemaInfo.bsonType // [cite: 70]
+
+      // --- Parse/Validate editValue based on type ---
+      if (isReferenceField(header)) { // [cite: 70]
+        valueToSave = editValue.value // Assume editValue holds the selected ID string [cite: 70]
+      } else if (bsonType === 'bool') { // [cite: 70]
+        valueToSave = Boolean(editValue.value) // [cite: 70]
+      } else if (bsonType === 'date') { // [cite: 70]
+        valueToSave = editValue.value ? new Date(editValue.value).toISOString() : null // [cite: 71]
+      } else if (['int', 'long'].includes(bsonType)) { // [cite: 71]
+        valueToSave = parseInt(editValue.value, 10) // [cite: 71]
+        if (isNaN(valueToSave)) throw new Error('Invalid integer value') // [cite: 71]
+      } else if (['double', 'decimal'].includes(bsonType)) { // [cite: 71]
+        valueToSave = parseFloat(editValue.value) // [cite: 71]
+        if (isNaN(valueToSave)) throw new Error('Invalid number value') // [cite: 71]
+      } else if (bsonType === 'string') { // [cite: 71]
+        valueToSave = editValue.value // Keep as string [cite: 71]
+      } else if (bsonType === 'object' || bsonType === 'array') { // [cite: 72]
+        try {
+          valueToSave = JSON.parse(editValue.value) // [cite: 72]
+        } catch (e) {
+          throw new Error('Invalid JSON format') // [cite: 72]
+        }
+      } else {
+        valueToSave = editValue.value // Default case [cite: 72]
+      }
+
+      // --- Check if value actually changed --- [cite: 73]
+      // Note: Deep comparison might be needed for objects/arrays if stringify isn't sufficient
+      if (JSON.stringify(valueToSave) === JSON.stringify(originalValue)) { // [cite: 73]
+        cancelEdit() // Exit edit mode [cite: 73]
+        return // [cite: 73]
+      }
+
+      const update = { [header]: valueToSave } // [cite: 73]
+      const response = await fetch( // [cite: 73]
+        `${API_BASE}/collections/${collectionName.value}/documents/${docId}`, // [cite: 73]
+        { // [cite: 74]
+          method: 'PUT', // [cite: 74]
+          headers: { 'Content-Type': 'application/json' }, // [cite: 74]
+          body: JSON.stringify(update), // [cite: 74]
+        }
+      )
+
+      if (!response.ok) { // [cite: 74]
+        let errorData // [cite: 74]
+        try {
+          errorData = await response.json() // [cite: 74]
+        } catch { // [cite: 75]
+          /* ignore */ // [cite: 75]
+        }
+        throw new Error(errorData?.error || `Update failed: HTTP ${response.status}`) // [cite: 75]
+      }
+
+      const result = await response.json() // [cite: 76]
+
+      if (result.success && result.data?.document) { // [cite: 76]
+        const updatedDoc = result.data.document // [cite: 76]
+
+        // Update the document in the store - this will automatically update any computed properties
+        // using the proper store action instead of direct mutation
+        updateDocument(docId, updatedDoc) // [cite: 76]
+
+        toast({ title: 'Update Successful', description: `Field '${header}' updated.` }) // [cite: 76]
+        cancelEdit() // Exit edit mode on success [cite: 77]
+      } else if (result.success && result.data?.modified_count === 0) { // [cite: 77]
+        // API succeeded but didn't modify (e.g., value was the same)
+        cancelEdit() // [cite: 77]
+      } else {
+        throw new Error(result.error || 'Update failed (API indicated failure)') // [cite: 77]
+      }
+    } catch (err: any) {
+      errorMessage.value = `Error updating field '${header}': ${err.message}` // [cite: 78]
+      toast({ title: 'Update Error', description: errorMessage.value, variant: 'destructive' }) // [cite: 78]
+    } finally {
+      isSaving.value = false // [cite: 78]
+    }
+  }
+
+  // Action to update local document state after successful PUT/PIN etc.
+  function updateDocument(docId: string, updatedDoc: any) {
+    // Find document index in the main documents array
+    const docIndex = documents.value.findIndex((doc) => doc._id.$oid === docId) // [cite: 66]
+
+    if (docIndex !== -1) { // [cite: 66]
+      // Replace the document with the updated version
+      documents.value = documents.value.map((doc, index) => (index === docIndex ? updatedDoc : doc)) // [cite: 66]
+
+      // No need to update paginatedDocuments as it's a computed property [cite: 67]
+      // that will automatically update based on the documents array [cite: 67]
+    } else {
+      // Document with ID not found in local state
+    } // [cite: 67]
+  }
+
+  // Action to update a single field (used by row height, potentially others)
+  async function updateDocumentField(documentId: string, field: string, value: any) {
+    if (!collectionName.value) return // [cite: 86]
+
+    errorMessage.value = '' // [cite: 86]
+
+    try {
+      const update = { [field]: value } // [cite: 86]
+      const response = await fetch( // [cite: 86]
+        `${API_BASE}/collections/${collectionName.value}/documents/${documentId}`, // [cite: 86]
+        {
+          method: 'PUT', // [cite: 86]
+          headers: { 'Content-Type': 'application/json' }, // [cite: 86]
+          body: JSON.stringify(update), // [cite: 87]
+        }
+      )
+
+      if (!response.ok) { // [cite: 87]
+        let errorData // [cite: 87]
+        try {
+          errorData = await response.json() // [cite: 87]
+        } catch {
+          /* ignore */ // [cite: 87]
+        }
+        throw new Error(errorData?.error || `Update failed: HTTP ${response.status}`) // [cite: 88]
+      }
+
+      const result = await response.json() // [cite: 88]
+
+      if (result.success) { // [cite: 88]
+        // Update local document state
+        const docIndex = documents.value.findIndex((d) => d._id.$oid === documentId) // [cite: 88]
+        if (docIndex !== -1) { // [cite: 88]
+          documents.value[docIndex] = { ...documents.value[docIndex], ...update } // [cite: 88]
+          // Force reactivity update [cite: 88]
+          documents.value = [...documents.value] // [cite: 89]
+        }
+        return true // [cite: 89]
+      } else {
+        throw new Error(result.error || 'Update failed (API indicated failure)') // [cite: 89]
+      }
+    } catch (err: any) {
+      errorMessage.value = `Error updating field '${field}': ${err.message}` // [cite: 89]
+      toast({ title: 'Update Error', description: errorMessage.value, variant: 'destructive' }) // [cite: 89]
+      return false // [cite: 89]
+    }
+  }
+
+  async function deleteDocument(docId: string) {
+    if (!collectionName.value) return // [cite: 78]
+    pendingDeleteId.value = docId // Style the row during delete attempt [cite: 78]
+    errorMessage.value = '' // [cite: 78]
+
+    try {
+      const response = await fetch( // [cite: 78]
+        `${API_BASE}/collections/${collectionName.value}/documents/${docId}`, // [cite: 79]
+        { method: 'DELETE' } // [cite: 79]
+      )
+
+      if (!response.ok) { // [cite: 79]
+        let errorData // [cite: 79]
+        try {
+          errorData = await response.json() // [cite: 79]
+        } catch {
+          /* ignore */ // [cite: 79]
+        }
+        throw new Error(errorData?.error || `Delete failed: HTTP ${response.status}`) // [cite: 79]
+      }
+
+      // Check response body if API confirms success
+      const result = await response.json() // Or handle non-JSON responses if applicable [cite: 80]
+
+      if (result.success) { // [cite: 80]
+        // Adjust based on your API response structure
+        toast({ title: 'Document Deleted', description: `Document ID: ${docId} deleted.` }) // [cite: 80]
+        // Remove from local state *after* successful deletion
+        documents.value = documents.value.filter((doc) => doc._id.$oid !== docId) // [cite: 81]
+        selectedRows.value.delete(docId) // Remove from selection if present [cite: 81]
+      } else {
+        throw new Error(result.error || 'Delete failed (API indicated failure)') // [cite: 81]
+      }
+    } catch (err: any) {
+      errorMessage.value = `Error deleting document ${docId}: ${err.message}` // [cite: 81]
+      toast({ title: 'Delete Error', description: errorMessage.value, variant: 'destructive' }) // [cite: 81]
+    } finally {
+      // Clear pending style regardless of success/failure *after* potential fetchDocuments [cite: 81]
+      // If fetchDocuments is called on success, it resets loading and pending ID [cite: 82]
+      if (errorMessage.value) { // [cite: 82]
+        // Only clear if there was an error (success clears via fetch)
+        pendingDeleteId.value = null // [cite: 82]
+      }
+      // Consider calling fetchDocuments() here instead of filtering locally
+      // await fetchDocuments(); [cite: 82]
+      // This ensures consistency with the backend [cite: 83]
+    }
+  }
+
+  // Pinning Actions
+  const pinDocument = async (documentId: string) => {
+    if (!collectionName.value) { // [cite: 17]
+      return // [cite: 17]
+    }
+
+    try {
+      const response = await documentService.pinDocument(collectionName.value, documentId) // [cite: 17]
+
+      if (response.success) { // [cite: 17]
+        // Find and replace the document with the updated version from the response
+        const updatedDoc = response.data // [cite: 18]
+        updateDocument(documentId, updatedDoc) // Use helper action
+
+        // Force array update for Vue reactivity (already handled by updateDocument)
+        // documents.value = [...documents.value] [cite: 19]
+
+        toast({ title: 'Pinned', description: 'Document pinned successfully' }) // [cite: 19]
+      } else {
+        errorMessage.value = `Error pinning document: ${response.error}` // [cite: 19]
+        toast({ title: 'Pin Error', description: errorMessage.value, variant: 'destructive' }) // [cite: 19]
+      }
+    } catch (err: any) {
+      errorMessage.value = `Error pinning document: ${err.message}` // [cite: 19]
+      toast({ title: 'Pin Error', description: errorMessage.value, variant: 'destructive' }) // [cite: 20]
+    }
+  }
+
+  const unpinDocument = async (documentId: string) => {
+    if (!collectionName.value) { // [cite: 20]
+      return // [cite: 20]
+    }
+
+    try {
+      const response = await documentService.unpinDocument(collectionName.value, documentId) // [cite: 20]
+
+      if (response.success) { // [cite: 20]
+        // Find and replace the document with the updated version from the response
+        const updatedDoc = response.data // [cite: 20]
+        updateDocument(documentId, updatedDoc) // Use helper action
+
+        // Force array update for Vue reactivity (already handled by updateDocument)
+        // documents.value = [...documents.value] [cite: 21]
+
+        toast({ title: 'Unpinned', description: 'Document unpinned successfully' }) // [cite: 22]
+      } else {
+        errorMessage.value = `Error unpinning document: ${response.error}` // [cite: 22]
+        toast({ title: 'Unpin Error', description: errorMessage.value, variant: 'destructive' }) // [cite: 22]
+      }
+    } catch (err: any) {
+      errorMessage.value = `Error unpinning document: ${err.message}` // [cite: 22]
+      toast({ title: 'Unpin Error', description: errorMessage.value, variant: 'destructive' }) // [cite: 22]
+    }
+  }
+
+  // Selection Actions
+  function toggleRow(id: string) {
+    const newSet = new Set(selectedRows.value) // [cite: 83]
+    if (newSet.has(id)) { // [cite: 83]
+      newSet.delete(id) // [cite: 83]
+    } else {
+      newSet.add(id) // [cite: 83]
+    }
+    selectedRows.value = newSet // Assign new Set to trigger reactivity [cite: 83]
+    // Optional toast notification removed for brevity, add back if desired
+  }
+
+  function resetSelection() {
+    selectedRows.value = new Set() // [cite: 83]
+    editingCell.value = null // Also cancel any active edit [cite: 84]
+  }
+
+  // View & Pagination Actions
+  function changeView(view: string) {
+    if (currentView.value !== view) { // [cite: 84]
+      currentView.value = view // [cite: 84]
+      currentPage.value = 1 // Reset to first page on view change [cite: 84]
+      fetchDocuments() // Refetch documents for the new view [cite: 84]
+    }
+  }
+
+  function setPage(page: number) {
+    const newPage = Math.max(1, Math.min(page, totalPages.value)) // [cite: 84]
+    if (currentPage.value !== newPage) { // [cite: 85]
+      currentPage.value = newPage // [cite: 85]
+      // Fetching might not be needed if pagination is purely client-side
+      // If API supports server-side pagination, call fetchDocuments() here [cite: 85]
+    }
+  }
+
+  function setPageSize(size: number) {
+    pageSize.value = size // [cite: 85]
+    currentPage.value = 1 // Reset to page 1 when size changes [cite: 85]
+    // Fetching might not be needed if pagination is purely client-side
+    // If API supports server-side pagination, call fetchDocuments() here [cite: 86]
+  }
+
+  // UI Metadata & Appearance Actions
+  async function updateUIMetadata(uiUpdate: Record<string, any>) {
+    if (!collectionName.value) return // [cite: 90]
+
+    if (previewMode.value) { // [cite: 90]
+      // Preview mode: save to sessionStorage
+      const previewStateKey = `previewState-${collectionName.value}` // [cite: 90]
+      const currentPreviewState = JSON.parse(sessionStorage.getItem(previewStateKey) || '{}') // [cite: 90]
+      const updatedPreviewState = { ...currentPreviewState, ...uiUpdate } // [cite: 91]
+      sessionStorage.setItem(previewStateKey, JSON.stringify(updatedPreviewState)) // [cite: 91]
+
+      // Update local schema without API call
+      collectionSchema.value.ui = { // [cite: 91]
+        ...collectionSchema.value.ui, // [cite: 91]
+        ...uiUpdate, // [cite: 91]
+      }
+      return // [cite: 91]
+    }
+
+    // Regular mode: save to backend
+    try {
+      const response = await fetch(`${API_BASE}/collections/${collectionName.value}/ui-metadata`, { // [cite: 91]
+        method: 'PUT', // [cite: 92]
+        headers: { 'Content-Type': 'application/json' }, // [cite: 92]
+        body: JSON.stringify(uiUpdate), // [cite: 92]
+      })
+
+      if (!response.ok) throw new Error('Failed to update UI metadata') // [cite: 92]
+      await fetchSchema() // Refresh schema to get updated UI metadata [cite: 92]
+    } catch (error) {
+      throw error // [cite: 92]
+    }
+  }
+
+  function toggleColumnVisibility(header: string) {
+    const index = hiddenColumns.value.indexOf(header) // [cite: 93]
+    if (index === -1) { // [cite: 93]
+      hiddenColumns.value.push(header) // [cite: 93]
+    } else {
+      hiddenColumns.value.splice(index, 1) // [cite: 93]
+    }
+
+    if (previewMode.value) { // [cite: 93]
+      savePreviewState() // [cite: 93]
+    } else {
+      saveColumnVisibilityToBackend() // [cite: 93]
+    }
+  }
+
+  async function saveColumnVisibilityToBackend() {
+    if (!collectionName.value) return // [cite: 94]
+    try {
+      await updateUIMetadata({ // [cite: 94]
+        ...(collectionSchema.value.ui || {}), // Preserve existing UI metadata [cite: 94]
+        hiddenColumns: hiddenColumns.value, // Override hiddenColumns [cite: 95]
+      })
+    } catch (error) {
+      // Error handling without console.log [cite: 95]
+    }
+  }
+
+  async function updateColumnWidth(header: string, width: number) {
+    if (!collectionSchema.value.ui) { // [cite: 95]
+      collectionSchema.value.ui = {} // [cite: 95]
+    }
+    if (!collectionSchema.value.ui.columnWidths) { // [cite: 95]
+      collectionSchema.value.ui.columnWidths = {} // [cite: 95]
+    }
+    // Update local schema immediately for responsiveness [cite: 95]
+    collectionSchema.value.ui.columnWidths = { // [cite: 96]
+      ...collectionSchema.value.ui.columnWidths, // [cite: 96]
+      [header]: Math.max(50, width), // Ensure minimum width [cite: 96]
+    }
+    // Debounced save to backend will be handled in the component using this action
+    await saveColumnWidthsToBackend() // [cite: 96]
+  }
+
+  async function resetColumnWidth(header: string) {
+    if (collectionSchema.value?.ui?.columnWidths?.[header]) { // [cite: 96]
+      const newWidths = { ...collectionSchema.value.ui.columnWidths } // [cite: 96]
+      delete newWidths[header] // [cite: 96]
+      collectionSchema.value.ui.columnWidths = newWidths // [cite: 97]
+      await saveColumnWidthsToBackend() // [cite: 97]
+    }
+  }
+
+  async function saveColumnWidthsToBackend() {
+    if (!collectionName.value) return // [cite: 98]
+
+    if (previewMode.value) { // [cite: 98]
+      // Save to sessionStorage for Preview Mode
+      const previewState = { // [cite: 98]
+        ...collectionSchema.value.ui, // [cite: 98]
+        columnWidths: columnWidths.value, // [cite: 98]
+      }
+      sessionStorage.setItem(`previewState-${collectionName.value}`, JSON.stringify(previewState)) // [cite: 98]
+    } else {
+      try {
+        const response = await fetch( // [cite: 98]
+          `${API_BASE}/collections/${collectionName.value}/ui-metadata`, // [cite: 99]
+          {
+            method: 'PUT', // [cite: 99]
+            headers: { 'Content-Type': 'application/json' }, // [cite: 99]
+            body: JSON.stringify({ columnWidths: columnWidths.value }), // [cite: 99]
+          }
+        )
+
+        if (!response.ok) { // [cite: 99]
+          let errorData // [cite: 99]
+          try { // [cite: 100]
+            errorData = await response.json() // [cite: 100]
+          } catch {
+            /* ignore */ // [cite: 100]
+          }
+          throw new Error(errorData?.error || `Save widths failed: HTTP ${response.status}`) // [cite: 100]
+        }
+
+        const result = await response.json() // [cite: 101]
+        if (!result.success) { // [cite: 101]
+          throw new Error(result.error || 'Failed to save column widths (API Error)') // [cite: 101]
+        }
+      } catch (err: any) {
+        toast({ // [cite: 101]
+          title: 'Save Error', // [cite: 101]
+          description: `Could not save column widths: ${err.message}`, // [cite: 102]
+          variant: 'destructive', // [cite: 102]
+        })
+      }
+    }
+  }
+
+  // Debounced save for preview mode UI state
+  const savePreviewState = useDebounceFn(() => {
+    if (!collectionName.value) return // [cite: 97]
+
+    // Save UI settings
+    sessionStorage.setItem( // [cite: 97]
+      `previewState-${collectionName.value}`, // [cite: 97]
+      JSON.stringify(collectionSchema.value.ui) // [cite: 97]
+    )
+
+    // Save hidden columns
+    sessionStorage.setItem( // [cite: 97]
+      `previewHidden-${collectionName.value}`, // [cite: 97]
+      JSON.stringify(hiddenColumns.value) // [cite: 97]
+    )
+  }, 500)
+
+  // Other Actions
+  function clearError() {
+    errorMessage.value = '' // [cite: 102]
+  }
+
+  // --- Return Values ---
+  return {
+    // State
+    collectionName, // [cite: 102]
+    documents, // [cite: 102]
+    collectionSchema, // [cite: 102]
+    isLoading, // [cite: 103]
+    errorMessage, // [cite: 103]
+    pageSize, // [cite: 103]
+    currentPage, // [cite: 103]
+    filterQuery, // Keep filter local to component or move here if needed globally [cite: 103]
+    newDocument, // [cite: 103]
+    isAdding, // [cite: 103]
+    editingCell, // [cite: 103]
+    editValue, // [cite: 103]
+    isSaving, // [cite: 103]
+    selectedRows, // [cite: 103]
+    currentView, // [cite: 103]
+    pendingDeleteId, // [cite: 103]
+    referenceOptions, // [cite: 103]
+    loadingReferences, // [cite: 103]
+    collectionsList, // [cite: 103]
+    errorColumn, // [cite: 103]
+    addingRowError, // [cite: 103]
+    hiddenColumns, // [cite: 103]
+    previewMode, // [cite: 103]
+
+    // Getters (Computed)
+    totalDocuments, // [cite: 104]
+    totalPages, // [cite: 104]
+    paginatedDocuments, // [cite: 104]
+    tableHeaders, // [cite: 104]
+    visibleHeaders, // Expose visibleHeaders getter [cite: 103]
+    columnWidths, // [cite: 104]
+    allSelected, // [cite: 104]
+    shortNames, // [cite: 104]
+
+    // Actions
+    fetchCollections, // [cite: 104]
+    setCollection, // [cite: 104]
+    fetchSchema, // Expose if needed externally, otherwise internal use [cite: 104]
+    fetchDocuments, // [cite: 104]
+    fetchReferenceOptions, // [cite: 104]
+    getReferenceLabel, // [cite: 104]
+    // initializeNewDocument, // Might be internal unless needed outside [cite: 104]
+    startAdding, // [cite: 104]
+    cancelAdding, // [cite: 104]
+    saveNewDocument, // [cite: 104]
+    startEditingCell, // [cite: 104]
+    cancelEdit, // [cite: 104]
+    saveEdit, // [cite: 105]
+    updateDocument, // [cite: 105]
+    deleteDocument, // [cite: 105]
+    toggleRow, // [cite: 105]
+    resetSelection, // [cite: 105]
+    changeView, // [cite: 105]
+    setPage, // [cite: 105]
+    setPageSize, // [cite: 105]
+    updateDocumentField, // [cite: 105]
+    updateUIMetadata, // [cite: 105]
+    toggleColumnVisibility, // [cite: 105]
+    // saveColumnVisibilityToBackend, // Likely internal, triggered by toggle
+    updateColumnWidth, // [cite: 105]
+    resetColumnWidth, // [cite: 105]
+    saveColumnWidthsToBackend, // Exposed for debouncing in component [cite: 105]
+    clearError, // [cite: 105]
+    // getSchemaInfo, // Expose helpers if needed in component template [cite: 105]
+    isReferenceField, // Expose helpers if needed in component template [cite: 105]
+    getReferencedCollection, // Expose helpers if needed in component template [cite: 105]
+    pinDocument, // [cite: 105]
+    unpinDocument, // [cite: 105]
+  }
+})

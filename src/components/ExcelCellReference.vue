@@ -1,3 +1,4 @@
+<!-- src/views/ExcelCellReference.vue -->
 <script setup lang="ts">
   import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
   import DeleteDocumentAction from './mongodbtable/DeleteDocumentAction.vue'
@@ -88,7 +89,6 @@
 
   // Handle selecting an option from the dropdown or tab bar
   const select = (label: string) => {
-    console.log('Option selected:', label)
     selected.value = label
 
     // Map selection to appropriate view type value
@@ -215,7 +215,7 @@
   watch(
     () => props.selectedRows,
     (newVal) => {
-      console.log('Selected rows updated:', [...newVal])
+      // Removed console.log
     },
     { immediate: true }
   )
@@ -223,7 +223,7 @@
   watch(
     () => props.collectionName,
     (newVal) => {
-      console.log('Collection name:', newVal)
+      // Removed console.log
     },
     { immediate: true }
   )
@@ -259,43 +259,28 @@
     // Find the index of the document in the props.documents array
     const index = props.documents.findIndex((doc) => doc._id.$oid === documentId)
 
-    console.log('Document lookup for ID:', documentId)
-    console.log('Document index in array:', index)
-
     if (index === -1) return 0
 
     // Calculate row number based on pagination
     const rowNumber = (props.currentPage - 1) * props.pageSize + index + 1
-    console.log('Calculated row number:', rowNumber)
 
     return rowNumber
   }
 
   // Handle click on delete button
   const handleDeleteClick = () => {
-    console.log('Delete button clicked!')
-    console.log('Current selected rows:', [...props.selectedRows])
-
     const documentId = getSelectedDocumentId()
-    console.log('Selected document ID:', documentId)
 
     if (!documentId) {
-      console.error('No document ID found!')
       return
     }
 
     const rowNumber = getRowNumberForDocument(documentId)
-    console.log('Preparing to delete:')
-    console.log('- Collection:', props.collectionName)
-    console.log('- Document ID:', documentId)
-    console.log('- Row Number:', rowNumber)
 
     documentToDelete.value = { id: documentId, rowNumber }
-    console.log('documentToDelete set to:', documentToDelete.value)
 
     // Use a small delay to ensure component is updated
     setTimeout(() => {
-      console.log('Opening delete dialog with ref:', deleteDocumentRef.value)
       deleteDocumentRef.value?.openDeleteDialog()
     }, 50)
   }
@@ -303,7 +288,6 @@
   // Archive handler
   const handleArchiveClick = async () => {
     const documentId = getSelectedDocumentId()
-    console.log('Archiving document ID:', documentId) // Debug log
 
     if (!documentId) {
       toast({ title: 'Error', description: 'No document selected' })
@@ -334,8 +318,6 @@
       emit('document-deleted')
       emit('reset-selection')
     } catch (error: unknown) {
-      console.error('Archive error:', error)
-
       let message = 'Failed to archive document'
 
       if (error instanceof Error) {
@@ -428,7 +410,6 @@
       emit('document-deleted')
       emit('reset-selection')
     } catch (error: unknown) {
-      console.error('Recover error:', error)
       toast({
         title: 'Recover error',
         description: error instanceof Error ? error.message : 'Failed to recover document',
@@ -485,21 +466,13 @@
 
   // Event handlers for delete operations
   const onDocumentDeleted = () => {
-    console.log('Document successfully deleted!')
     documentToDelete.value = null
     isDeleting.value = false
     emit('document-deleted')
     emit('reset-selection') // Also reset selection after single document deletion
   }
 
-  // Debug log when the component mounts
-  console.log('ExcelCellReference component props:', {
-    collectionName: props.collectionName,
-    selectedRows: [...props.selectedRows],
-    documentsCount: props.documents?.length,
-    currentPage: props.currentPage,
-    pageSize: props.pageSize,
-  })
+  // Removed debug log when the component mounts
 </script>
 
 <template>

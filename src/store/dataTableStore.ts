@@ -20,6 +20,7 @@ interface ReferenceOption {
 }
 
 export const useDataTableStore = defineStore('dataTable', () => {
+  const previewMode = ref(sessionStorage.getItem('previewMode') === 'true')
   const { toast } = useToast()
 
   // --- State ---
@@ -125,7 +126,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
       }
     } catch (err: any) {
       errorMessage.value = `Error fetching collections: ${err.message}`
-      console.error(err)
     }
   }
 
@@ -133,7 +133,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
   async function setCollection(name: string) {
     if (collectionName.value === name && documents.value.length > 0) return // Avoid refetch if already set
 
-    console.log(`Setting collection to: ${name}`)
     collectionName.value = name
     // Reset state for the new collection
     documents.value = []
@@ -156,49 +155,33 @@ export const useDataTableStore = defineStore('dataTable', () => {
 
   const pinDocument = async (documentId: string) => {
     if (!collectionName.value) {
-      console.warn('pinDocument: No collection name provided')
       return
     }
 
-    console.log(
-      `pinDocument: Attempting to pin document ${documentId} in collection ${collectionName.value}`
-    )
-
     try {
-      console.log(
-        `pinDocument: Calling documentService.pinDocument(${collectionName.value}, ${documentId})`
-      )
       const response = await documentService.pinDocument(collectionName.value, documentId)
-      console.log('pinDocument: Received response', response)
 
       if (response.success) {
         // Find and replace the document with the updated version from the response
         const updatedDoc = response.data
         const index = documents.value.findIndex((doc) => doc._id.$oid === documentId)
-        console.log(`pinDocument: Document index in array: ${index}`)
 
         if (index !== -1) {
-          console.log(`pinDocument: Updating document in local state with response data`)
           documents.value[index] = updatedDoc
         } else {
-          console.warn(`pinDocument: Document with ID ${documentId} not found in local state`)
           // If not found, add to documents array (might be a new pinned document)
-          console.log(`pinDocument: Adding new document to local state`)
           documents.value.push(updatedDoc)
         }
 
         // Force array update for Vue reactivity
-        console.log(`pinDocument: Forcing array update for Vue reactivity`)
         documents.value = [...documents.value]
 
         toast({ title: 'Pinned', description: 'Document pinned successfully' })
       } else {
-        console.error(`pinDocument: API returned success=false`, response.error)
         errorMessage.value = `Error pinning document: ${response.error}`
         toast({ title: 'Pin Error', description: errorMessage.value, variant: 'destructive' })
       }
     } catch (err: any) {
-      console.error(`pinDocument: Exception occurred`, err)
       errorMessage.value = `Error pinning document: ${err.message}`
       toast({ title: 'Pin Error', description: errorMessage.value, variant: 'destructive' })
     }
@@ -206,46 +189,32 @@ export const useDataTableStore = defineStore('dataTable', () => {
 
   const unpinDocument = async (documentId: string) => {
     if (!collectionName.value) {
-      console.warn('unpinDocument: No collection name provided')
       return
     }
 
-    console.log(
-      `unpinDocument: Attempting to unpin document ${documentId} in collection ${collectionName.value}`
-    )
-
     try {
-      console.log(
-        `unpinDocument: Calling documentService.unpinDocument(${collectionName.value}, ${documentId})`
-      )
       const response = await documentService.unpinDocument(collectionName.value, documentId)
-      console.log('unpinDocument: Received response', response)
 
       if (response.success) {
         // Find and replace the document with the updated version from the response
         const updatedDoc = response.data
         const index = documents.value.findIndex((doc) => doc._id.$oid === documentId)
-        console.log(`unpinDocument: Document index in array: ${index}`)
 
         if (index !== -1) {
-          console.log(`unpinDocument: Updating document in local state with response data`)
           documents.value[index] = updatedDoc
         } else {
-          console.warn(`unpinDocument: Document with ID ${documentId} not found in local state`)
+          // If not found, add to documents array (might be a new pinned document)
         }
 
         // Force array update for Vue reactivity
-        console.log(`unpinDocument: Forcing array update for Vue reactivity`)
         documents.value = [...documents.value]
 
         toast({ title: 'Unpinned', description: 'Document unpinned successfully' })
       } else {
-        console.error(`unpinDocument: API returned success=false`, response.error)
         errorMessage.value = `Error unpinning document: ${response.error}`
         toast({ title: 'Unpin Error', description: errorMessage.value, variant: 'destructive' })
       }
     } catch (err: any) {
-      console.error(`unpinDocument: Exception occurred`, err)
       errorMessage.value = `Error unpinning document: ${err.message}`
       toast({ title: 'Unpin Error', description: errorMessage.value, variant: 'destructive' })
     }
@@ -253,9 +222,12 @@ export const useDataTableStore = defineStore('dataTable', () => {
 
   // Fetch schema for the current collection
   async function fetchSchema() {
+    if (previewMode.value) return // Skip in preview
     if (!collectionName.value) return
+
     isLoading.value = true // Indicate loading schema
     errorMessage.value = ''
+
     try {
       // Prefer API fetch if available, fallback to invoke if needed
       const response = await fetch(`${API_BASE}/collections/${collectionName.value}/schema`)
@@ -263,7 +235,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
       const { success, data, error } = await response.json()
 
       if (success) {
-        console.log(`Loaded schema for ${collectionName.value}:`, data)
         collectionSchema.value = data
 
         // Apply preview state if in preview mode
@@ -284,7 +255,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     } catch (err: any) {
       errorMessage.value = `Schema error: ${err.message}`
       collectionSchema.value = {} // Reset schema on error
-      console.error('Schema fetch error:', err)
     } finally {
       isLoading.value = false // Schema loading finished
     }
@@ -292,7 +262,9 @@ export const useDataTableStore = defineStore('dataTable', () => {
 
   // Fetch documents for the current collection and view
   async function fetchDocuments() {
+    if (previewMode.value) return // Skip in preview
     if (!collectionName.value) return
+
     isLoading.value = true
     errorMessage.value = ''
     pendingDeleteId.value = null // Clear pending deletion style
@@ -342,14 +314,12 @@ export const useDataTableStore = defineStore('dataTable', () => {
         if (currentPage.value > totalPages.value) {
           currentPage.value = Math.max(1, totalPages.value) // Adjust page if out of bounds
         }
-        console.log(`Workspaceed documents for ${currentView.value} view:`, data.length)
       } else {
         throw new Error(error || 'Failed to fetch documents')
       }
     } catch (err: any) {
       errorMessage.value = `Error fetching documents: ${err.message}`
       documents.value = [] // Clear documents on error
-      console.error(err)
     } finally {
       isLoading.value = false
     }
@@ -371,13 +341,11 @@ export const useDataTableStore = defineStore('dataTable', () => {
   // Fetch options for a referenced collection
   async function fetchReferenceOptions(refCollectionName: string, force = false) {
     if (!force && referenceOptions.value[refCollectionName]?.length > 0) {
-      console.log(`Using cached options for ${refCollectionName}`)
       return // Already fetched or has data
     }
     if (loadingReferences.value[refCollectionName]) return // Already loading
 
     loadingReferences.value[refCollectionName] = true
-    console.log(`Workspaceing reference options for: ${refCollectionName}`)
 
     try {
       // 1. Fetch Schema to determine the best label field
@@ -402,7 +370,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
         const commonLabels = ['label', 'name', 'title', 'username']
         labelField = commonLabels.find((f) => properties[f]?.bsonType === 'string') || '_id'
       }
-      console.log(`Using label field '${labelField}' for ${refCollectionName}`)
 
       // 2. Fetch Documents to populate options
       const docsResponse = await fetch(
@@ -416,9 +383,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
           id: doc._id.$oid, // Assuming MongoDB ObjectId structure
           label: doc[labelField] || doc._id.$oid, // Use determined label or fallback to ID
         }))
-        console.log(
-          `Workspaceed ${referenceOptions.value[refCollectionName].length} options for ${refCollectionName}`
-        )
         if (referenceOptions.value[refCollectionName].length === 0) {
           toast({
             title: 'No Reference Options',
@@ -436,7 +400,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
         variant: 'destructive',
       })
       referenceOptions.value[refCollectionName] = [] // Ensure it's an empty array on error
-      console.error(err)
     } finally {
       loadingReferences.value[refCollectionName] = false
     }
@@ -474,7 +437,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     // });
 
     newDocument.value = doc
-    console.log('Initialized new document structure:', newDocument.value)
   }
 
   // Get default value based on BSON type
@@ -529,8 +491,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     errorColumn.value = null
     addingRowError.value = false
 
-    console.log('Attempting to save new document:', newDocument.value)
-
     try {
       const response = await fetch(`${API_BASE}/collections/${collectionName.value}/documents`, {
         method: 'POST',
@@ -572,7 +532,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
         throw new Error(result.error || 'Failed to create document (API indicated failure)')
       }
     } catch (err: any) {
-      console.error('Save new document error:', err)
       errorMessage.value = err.message || 'Failed to create document'
       addingRowError.value = true // Indicate error on the add row
 
@@ -638,8 +597,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     } else {
       editValue.value = String(currentValue ?? '') // Handle null/undefined
     }
-
-    console.log(`Start editing: Row ${rowIndex}, Header ${header}, Value:`, editValue.value)
   }
 
   // Cancel editing a cell
@@ -649,8 +606,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
   }
 
   function updateDocument(docId: string, updatedDoc: any) {
-    console.log(`Updating document ${docId} in store:`, updatedDoc)
-
     // Find document index in the main documents array
     const docIndex = documents.value.findIndex((doc) => doc._id.$oid === docId)
 
@@ -658,11 +613,10 @@ export const useDataTableStore = defineStore('dataTable', () => {
       // Replace the document with the updated version
       documents.value = documents.value.map((doc, index) => (index === docIndex ? updatedDoc : doc))
 
-      console.log(`Document updated successfully at index ${docIndex}`)
       // No need to update paginatedDocuments as it's a computed property
       // that will automatically update based on the documents array
     } else {
-      console.warn(`Document with ID ${docId} not found in local state`)
+      // Document with ID not found in local state
     }
   }
 
@@ -717,12 +671,9 @@ export const useDataTableStore = defineStore('dataTable', () => {
       // --- Check if value actually changed ---
       // Note: Deep comparison might be needed for objects/arrays if stringify isn't sufficient
       if (JSON.stringify(valueToSave) === JSON.stringify(originalValue)) {
-        console.log('No changes detected, skipping save.')
         cancelEdit() // Exit edit mode
         return
       }
-
-      console.log(`Saving edit for Doc ID: ${docId}, Header: ${header}, New Value:`, valueToSave)
 
       const update = { [header]: valueToSave }
       const response = await fetch(
@@ -757,7 +708,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
         cancelEdit() // Exit edit mode on success
       } else if (result.success && result.data?.modified_count === 0) {
         // API succeeded but didn't modify (e.g., value was the same)
-        console.log('Update sent, but no changes made in DB.')
         cancelEdit()
       } else {
         throw new Error(result.error || 'Update failed (API indicated failure)')
@@ -765,7 +715,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     } catch (err: any) {
       errorMessage.value = `Error updating field '${header}': ${err.message}`
       toast({ title: 'Update Error', description: errorMessage.value, variant: 'destructive' })
-      console.error('Save edit error:', err)
     } finally {
       isSaving.value = false
     }
@@ -808,7 +757,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     } catch (err: any) {
       errorMessage.value = `Error deleting document ${docId}: ${err.message}`
       toast({ title: 'Delete Error', description: errorMessage.value, variant: 'destructive' })
-      console.error(err)
     } finally {
       // Clear pending style regardless of success/failure *after* potential fetchDocuments
       // If fetchDocuments is called on success, it resets loading and pending ID
@@ -870,7 +818,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     if (!collectionName.value) return
 
     errorMessage.value = ''
-    console.log(`Updating document ${documentId}, field ${field} to:`, value)
 
     try {
       const update = { [field]: value }
@@ -910,7 +857,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     } catch (err: any) {
       errorMessage.value = `Error updating field '${field}': ${err.message}`
       toast({ title: 'Update Error', description: errorMessage.value, variant: 'destructive' })
-      console.error('Update document field error:', err)
       return false
     }
   }
@@ -944,7 +890,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
       if (!response.ok) throw new Error('Failed to update UI metadata')
       await fetchSchema() // Refresh schema to get updated UI metadata
     } catch (error) {
-      console.error('Error updating UI metadata:', error)
       throw error
     }
   }
@@ -965,16 +910,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
       hiddenColumns.value.splice(index, 1)
     }
 
-    // Add debugging logs
-    console.log('Column visibility updated:', {
-      header,
-      isNowHidden: hiddenColumns.value.includes(header),
-      hiddenColumns: [...hiddenColumns.value], // Clone for logging
-      visibleColumnsCount: tableHeaders.value.length - hiddenColumns.value.length,
-      allColumns: tableHeaders.value.length,
-      visibleColumns: tableHeaders.value.filter((h) => !hiddenColumns.value.includes(h)),
-    })
-
     if (previewMode.value) {
       savePreviewState()
     } else {
@@ -991,7 +926,7 @@ export const useDataTableStore = defineStore('dataTable', () => {
         hiddenColumns: hiddenColumns.value, // Override hiddenColumns
       })
     } catch (error) {
-      console.error('Error saving column visibility:', error)
+      // Error handling without console.log
     }
   }
 
@@ -1022,26 +957,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     }
   }
 
-  const loadPreviewState = () => {
-    if (!collectionName.value) return
-
-    // Load UI settings
-    const savedUI = sessionStorage.getItem(`previewState-${collectionName.value}`)
-    if (savedUI) {
-      const parsedUI = JSON.parse(savedUI)
-      collectionSchema.value.ui = {
-        ...collectionSchema.value.ui,
-        ...parsedUI,
-      }
-    }
-
-    // Load hidden columns
-    const savedHidden = sessionStorage.getItem(`previewHidden-${collectionName.value}`)
-    if (savedHidden) {
-      hiddenColumns.value = JSON.parse(savedHidden)
-    }
-  }
-
   const savePreviewState = useDebounceFn(() => {
     if (!collectionName.value) return
 
@@ -1058,19 +973,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     )
   }, 500)
 
-  const clearPreviewState = async () => {
-    if (!collectionName.value) return
-
-    sessionStorage.removeItem(`previewState-${collectionName.value}`)
-    sessionStorage.removeItem(`previewHidden-${collectionName.value}`)
-    sessionStorage.removeItem(`previewRowHeights-${collectionName.value}`)
-
-    await fetchSchema()
-    await fetchDocuments()
-  }
-
-  const previewMode = ref(sessionStorage.getItem('previewMode') === 'true')
-
   // Save column widths to backend (called by debounced function in component)
   async function saveColumnWidthsToBackend() {
     if (!collectionName.value) return
@@ -1082,10 +984,8 @@ export const useDataTableStore = defineStore('dataTable', () => {
         columnWidths: columnWidths.value,
       }
       sessionStorage.setItem(`previewState-${collectionName.value}`, JSON.stringify(previewState))
-      console.log('Column widths saved to sessionStorage for preview mode')
     } else {
       try {
-        console.log('Saving column widths to backend:', columnWidths.value)
         const response = await fetch(
           `${API_BASE}/collections/${collectionName.value}/ui-metadata`,
           {
@@ -1106,10 +1006,7 @@ export const useDataTableStore = defineStore('dataTable', () => {
         }
 
         const result = await response.json()
-        if (result.success) {
-          console.log('Column widths saved successfully.')
-          // Optionally show a success toast
-        } else {
+        if (!result.success) {
           throw new Error(result.error || 'Failed to save column widths (API Error)')
         }
       } catch (err: any) {
@@ -1118,7 +1015,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
           description: `Could not save column widths: ${err.message}`,
           variant: 'destructive',
         })
-        console.error('Error saving column widths:', err)
       }
     }
   }

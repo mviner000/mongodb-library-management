@@ -1,24 +1,39 @@
 <!-- src/components/MongoDBDataTable.vue -->
 <script setup lang="ts">
-  // --- Script Section (Pinia Integrated) ---
-  import { ref, computed, watch, onMounted, Ref, inject, nextTick, onBeforeUnmount } from 'vue'
-  import { useRoute, useRouter } from 'vue-router'
-  import { storeToRefs } from 'pinia'
-  import { useDataTableStore } from '@/store/dataTableStore' // Make sure this path is correct
-  import { useDebounceFn } from '@vueuse/core'
+  // ==========================================================================
+  // Imports
+  // ==========================================================================
+  import {
+    ref,
+    computed,
+    watch,
+    onMounted,
+    Ref,
+    inject,
+    nextTick,
+    onBeforeUnmount,
+    reactive,
+  } from 'vue' // [cite: 1]
+  import { useRoute, useRouter } from 'vue-router' // [cite: 1]
+  import { storeToRefs } from 'pinia' // [cite: 1]
+  import { useDebounceFn } from '@vueuse/core' // [cite: 1]
 
-  // Import UI Components as used in your *original* template
+  // Store Imports
+  import { useDataTableStore } from '@/store/dataTableStore' // [cite: 1]
+  import { useUserStore } from '@/store/useUserStore' // [cite: 4]
+
+  // UI Component Imports
   import { Cross2Icon, ReloadIcon, PlusCircledIcon } from '@radix-icons/vue' // [cite: 1]
   import { Button } from '@/components/ui/button' // [cite: 1]
-  import { Input } from '@/components/ui/input' // [cite: 41]
-  import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table' // Used implicitly by <Table...> tags in old template
+  import { Input } from '@/components/ui/input' // [cite: 1]
+  import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table' // [cite: 2]
   import {
     Select,
     SelectContent,
     SelectItem,
     SelectTrigger,
     SelectValue,
-  } from '@/components/ui/select' // [cite: 39, 82]
+  } from '@/components/ui/select' // [cite: 2]
   import {
     Pagination,
     PaginationList,
@@ -27,39 +42,35 @@
     PaginationLast,
     PaginationNext,
     PaginationPrev,
-  } from '@/components/ui/pagination' // [cite: 79]
+  } from '@/components/ui/pagination' // [cite: 2]
   import {
     NavigationMenu,
     NavigationMenuContent,
     NavigationMenuItem,
-    NavigationMenuLink,
     NavigationMenuList,
     NavigationMenuTrigger,
-    navigationMenuTriggerStyle,
-  } from './ui/navigation-menu'
-  import Checkbox from './ui/checkbox/Checkbox.vue'
+  } from './ui/navigation-menu' // [cite: 3]
+  import { ScrollArea } from '@/components/ui/scroll-area' // [cite: 3]
+  import Switch from './ui/switch/Switch.vue' // [cite: 4]
+  import Label from './ui/label/Label.vue' // [cite: 4]
 
-  import { ScrollArea } from '@/components/ui/scroll-area' // [cite: 40]
-  // Remove toast import if not used directly in setup, it's in the store
-  // import { useToast } from '@/components/ui/toast/use-toast';
-  import ExcelCellReference from './ExcelCellReference.vue' // [cite: 2]
-  import TableActions from './mongodbtable/TableActions.vue' // [cite: 57]
-  import StickyTableActions from './mongodbtable/StickyTableActions.vue' // [cite: 59]
-  import MongoDBDataTableNavbar from './MongoDBDataTableNavbar.vue' // [cite: 1]
-  import StickyLeftSidebar from './StickyLeftSidebar.vue'
-  import { useUserStore } from '@/store/useUserStore'
-  import { reactive } from 'vue'
-  import Switch from './ui/switch/Switch.vue'
-  import Label from './ui/label/Label.vue'
-  // Remove FooterTabsBar import if not used in old template
-  // import FooterTabsBar from './FooterTabsBar.vue';
+  // Custom Component Imports
+  import ExcelCellReference from './ExcelCellReference.vue' // [cite: 4]
+  import TableActions from './mongodbtable/TableActions.vue' // [cite: 4]
+  import StickyTableActions from './mongodbtable/StickyTableActions.vue' // [cite: 4]
+  import MongoDBDataTableNavbar from './MongoDBDataTableNavbar.vue' // [cite: 4]
+  import StickyLeftSidebar from './StickyLeftSidebar.vue' // [cite: 4]
 
-  // Store setup
-  const dataTableStore = useDataTableStore()
-  // Destructure state and getters into reactive refs
+  // ==========================================================================
+  // Store Setup
+  // ==========================================================================
+  const dataTableStore = useDataTableStore() // [cite: 4]
+  const userStore = useUserStore() // [cite: 7]
+
+  // Destructured State & Getters (Reactive Refs)
+  const { user } = storeToRefs(userStore) // [cite: 7]
   const {
     collectionName,
-    documents,
     collectionSchema,
     isLoading,
     errorMessage,
@@ -78,16 +89,15 @@
     errorColumn,
     addingRowError,
     totalPages,
-    paginatedDocuments,
     tableHeaders,
     columnWidths,
     allSelected,
     hiddenColumns,
     visibleHeaders,
     previewMode,
-  } = storeToRefs(dataTableStore)
+  } = storeToRefs(dataTableStore) // [cite: 4, 5]
 
-  // Destructure actions (they are just functions)
+  // Destructured Actions (Functions)
   const {
     fetchCollections,
     setCollection,
@@ -114,28 +124,51 @@
     getReferencedCollection,
     updateUIMetadata,
     toggleColumnVisibility,
+    updateDocumentField, // Added [cite: 55]
+    pinDocument, // Added [cite: 43]
+    unpinDocument, // Added [cite: 43]
     // fetchSchema, // Optional direct access
-  } = dataTableStore
+  } = dataTableStore // [cite: 5, 6, 7, 43, 47, 55, 61]
 
-  const userStore = useUserStore()
-  const { user } = storeToRefs(userStore)
+  // ==========================================================================
+  // Props
+  // ==========================================================================
+  const props = defineProps<{
+    selectedCollection?: string
+    name?: string
+    previewData?: any[]
+  }>() // [cite: 11]
 
-  // Local component state
-  const route = useRoute()
-  const router = useRouter()
-  const isSplit = inject<Ref<boolean>>('isSplit')!
-  const scrollContainer = ref<HTMLElement | null>(null) // [cite: 2]
-  // const filterQuery = ref('{}'); // Kept local filter state
+  // ==========================================================================
+  // Local Component State
+  // ==========================================================================
+  const route = useRoute() // [cite: 7]
+  const router = useRouter() // [cite: 7]
+  const isSplit = inject<Ref<boolean>>('isSplit')! // [cite: 7]
+  const scrollContainer = ref<HTMLElement | null>(null) // [cite: 8]
+  const isSidebarOpen = ref(false) // [cite: 9]
+  const searchQuery = ref<Record<string, string>>({}) // [cite: 9]
+  const selectedCell = ref<{ colIndex: number; rowNumber: number } | null>(null) // [cite: 10]
+  const timeoutId = ref<number | null>(null) // For error message timeout [cite: 11]
+  const showPinTooltip = ref(false) // [cite: 11]
+  const highlightedColumn = ref<string | null>(null) // [cite: 62]
+  const showContextMenu = ref(false) // [cite: 40]
+  const contextMenuPosition = ref({ x: 0, y: 0 }) // [cite: 40]
+  const selectedCellInfo = ref<{ rowIndex: number; header: string } | null>(null) // [cite: 41]
+  const highlightedDocumentId = ref<string | null>(null) // [cite: 49]
+  let highlightTimeout: ReturnType<typeof setTimeout> | null = null // [cite: 49]
+  const fileInput = ref<HTMLInputElement | null>(null) // [cite: 71]
+  const editingHeader = ref<string | null>(null) // [cite: 59]
+  const editedShortName = ref('') // [cite: 59]
 
-  const isSidebarOpen = ref(false)
-  const searchQuery = ref<Record<string, string>>({}) // [cite: 41]
+  // Resizing States
   const resizingState = ref({
     isResizing: false,
     header: '',
     startX: 0,
     startWidth: 0,
     currentWidth: 0,
-  }) // [cite: 20]
+  }) // [cite: 9]
   const alphaResizingState = ref({
     isResizing: false,
     columnIndex: -1,
@@ -143,96 +176,114 @@
     startWidth: 0,
     currentWidth: 0,
   }) // [cite: 9]
-  const selectedCell = ref<{ colIndex: number; rowNumber: number } | null>(null) // [cite: 2]
-  const timeoutId = ref<number | null>(null) // For error message timeout [cite: 1] - Keep or remove based on preference
-  const showPinTooltip = ref(false)
-  // Props
-  const props = defineProps<{
-    selectedCollection?: string
-    name?: string
-  }>()
+  const rowResizingState = ref({
+    isResizing: false,
+    documentId: '',
+    startY: 0,
+    startHeight: 40, // Default row height
+    currentHeight: 40,
+  }) // [cite: 51, 52]
 
-  // --- Computed properties specific to component ---
-  const getColumnLabel = (index: number): string => {
-    let label = ''
-    let i = index
-    do {
-      const remainder = i % 26
-      label = String.fromCharCode(65 + remainder) + label
-      i = Math.floor(i / 26) - 1
-    } while (i >= 0)
-    return label
-  } // [cite: 9]
+  // Drag State
+  const dragState = reactive({
+    isDragging: false,
+    draggedIndex: -1,
+    targetIndex: -1,
+  }) // [cite: 65]
+
+  // ==========================================================================
+  // Computed Properties
+  // ==========================================================================
+  const documents = computed(() => {
+    return props.previewData || dataTableStore.documents // [cite: 69, 70]
+  })
+
+  const paginatedDocuments = computed(() => {
+    if (props.previewData) {
+      // Preview mode: Show all data without pagination
+      return documents.value // [cite: 72]
+    } else {
+      // Regular mode: Use store pagination
+      const start = (currentPage.value - 1) * pageSize.value // [cite: 72]
+      const end = start + pageSize.value // [cite: 72]
+      return documents.value.slice(start, end) // [cite: 72]
+    }
+  })
 
   const columnLetters = computed(() => {
-    return visibleHeaders.value.map((_, index) => getColumnLabel(index))
+    return visibleHeaders.value.map((_, index) => getColumnLabel(index)) // [cite: 12]
   })
 
   const numberColumnWidth = computed(() => {
-    const maxDigits = documents.value.length > 0 ? String(documents.value.length).length : 1
-    return `${Math.max(3, maxDigits + 1)}ch`
-  }) // [cite: 18] adjusted logic slightly
+    const maxDigits = documents.value.length > 0 ? String(documents.value.length).length : 1 // [cite: 12]
+    return `${Math.max(3, maxDigits + 1)}ch` // [cite: 12]
+  })
 
   const totalTableWidth = computed(() => {
     // Calculate the total width of visible data columns
     const dataColumnsWidth = visibleHeaders.value.reduce(
-      (acc, header) => acc + (columnWidths.value[header] || 200), // Default width if not specified
+      (acc, header) => acc + (columnWidths.value[header] || 200), // Default width if not specified [cite: 13, 14]
       0
     )
 
-    const selectColWidth = 40 // Width for the selection column
-    const rowNumColWidth = 30 // Width for the row number column
-    const actionsColWidth = 60 // Width for the actions column
+    const selectColWidth = 40 // Width for the selection column [cite: 14]
+    const rowNumColWidth = 30 // Width for the row number column [cite: 14]
+    const actionsColWidth = 60 // Width for the actions column [cite: 14]
 
     // Return the total width including only visible columns
-    return selectColWidth + rowNumColWidth + dataColumnsWidth + actionsColWidth + 1 // +1 for border
+    return selectColWidth + rowNumColWidth + dataColumnsWidth + actionsColWidth + 1 // +1 for border [cite: 14]
   })
-  // --- Utility Functions ---
-  const isFieldRequired = (field: string): boolean => {
-    return collectionSchema.value.required?.includes(field) || false
-  } // [cite: 22]
 
-  const formatSchemaValue = (value: any, bsonType?: string | string[]) => {
-    if (value === undefined || value === null) return ''
-    const type = bsonType ? (Array.isArray(bsonType) ? bsonType[0] : bsonType) : typeof value
-
-    if (type === 'date' && value instanceof Date) {
-      // Check if it's already a Date object
-      return value.toLocaleString()
-    } else if (type === 'date') {
-      // Try parsing if it's not a Date object
-      try {
-        return new Date(value).toLocaleString()
-      } catch {
-        return String(value) // Fallback
-      }
+  const isSelectedArchived = computed(() => {
+    if (!selectedCellInfo.value) {
+      return false // [cite: 45]
     }
-    if (typeof value === 'object') {
-      return JSON.stringify(value, null, 2) // Keep original formatting [cite: 57]
-    }
-    return String(value)
-  } // [cite: 56, 57]
 
-  const filteredOptions = (field: string) => {
-    const refCollection = getReferencedCollection(field)
-    if (!refCollection) return []
-    const options = referenceOptions.value[refCollection] || []
-    const query = (searchQuery.value[field] || '').toLowerCase()
-    return options.filter((opt) => opt.label.toLowerCase().includes(query))
-  } // [cite: 42]
+    const rowIndex = selectedCellInfo.value.rowIndex // [cite: 45]
+    const document = paginatedDocuments.value[rowIndex] // [cite: 45]
+    const isArchived = document?.is_archive === true // [cite: 46]
 
-  // --- Watchers ---
+    return isArchived // [cite: 46]
+  })
+
+  const selectedDocumentIsPinned = computed(() => {
+    if (!selectedCellInfo.value) return false // [cite: 46]
+    if (!user.value) return false // Add this check for null user [cite: 46]
+
+    const doc = paginatedDocuments.value[selectedCellInfo.value.rowIndex] // [cite: 46]
+    return doc?.pinned_by?.includes(user.value.id) // [cite: 46]
+  })
+
+  const pinnedDocuments = computed(() => {
+    if (!user.value) return [] // [cite: 47]
+    return documents.value.filter((doc) => doc.pinned_by?.includes(user.value?.id)) // [cite: 47]
+  })
+
+  const previewRowHeights = computed(() => {
+    if (!previewMode.value || !collectionName.value) return {} // [cite: 55, 56]
+    const heights = sessionStorage.getItem(`previewRowHeights-${collectionName.value}`) // [cite: 56]
+    return heights ? JSON.parse(heights) : {} // [cite: 56, 57]
+  })
+
+  const isPreviewMode = computed(() => previewMode.value) // [cite: 70]
+  const showImportInPreview = computed(() => isPreviewMode.value && props.previewData) // [cite: 70]
+  const isImportRoute = computed(() => route.path.includes('/import-csv')) // [cite: 71]
+
+  // ==========================================================================
+  // Watchers
+  // ==========================================================================
 
   // Watch route parameter 'name'
   watch(
     () => route.params.name,
     (newName) => {
-      const nameStr = Array.isArray(newName) ? newName[0] : newName
+      if (previewMode.value) return // Skip in preview [cite: 18]
+      const nameStr = Array.isArray(newName) ? newName[0] : newName // [cite: 18]
       if (nameStr && nameStr !== collectionName.value) {
-        setCollection(nameStr)
+        setCollection(nameStr) // [cite: 18]
       }
     },
-    { immediate: true }
+    { immediate: true } // [cite: 19]
   )
 
   // Watch the prop 'selectedCollection'
@@ -240,9 +291,9 @@
     () => props.selectedCollection,
     (newVal) => {
       if (newVal && newVal !== collectionName.value) {
-        setCollection(newVal)
+        setCollection(newVal) // [cite: 19]
         if (route.params.name !== newVal) {
-          router.push(`/collection/${newVal}`)
+          router.push(`/collection/${newVal}`) // [cite: 19]
         }
       }
     }
@@ -251,87 +302,206 @@
   // Watch the store's collectionName to sync the route if needed
   watch(collectionName, (newName, oldName) => {
     if (newName && newName !== oldName && route.params.name !== newName) {
-      router.push(`/collection/${newName}`)
+      router.push(`/collection/${newName}`) // [cite: 20]
     }
   })
 
-  // Watch for error message to auto-clear (optional, kept from original logic)
+  // Watch for error message to auto-clear
   watch(errorMessage, (newVal) => {
     if (newVal) {
       if (timeoutId.value) {
-        clearTimeout(timeoutId.value)
+        clearTimeout(timeoutId.value) // [cite: 20]
       }
       timeoutId.value = setTimeout(() => {
-        clearError() // Use store action
-        timeoutId.value = null
-      }, 2500) as unknown as number // [cite: 1] matching timeout
+        clearError() // Use store action [cite: 21]
+        timeoutId.value = null // [cite: 21]
+      }, 2500) as unknown as number // [cite: 21]
     }
   })
 
-  // Watch isAdding to prefetch reference options (kept from original logic)
+  // Watch isAdding to prefetch reference options
   watch(isAdding, async (newVal) => {
     if (newVal) {
       tableHeaders.value.forEach((field) => {
-        // Use tableHeaders getter
-        const refCollection = getReferencedCollection(field)
+        // Use tableHeaders getter [cite: 21]
+        const refCollection = getReferencedCollection(field) // [cite: 21]
         if (refCollection && !referenceOptions.value[refCollection]) {
-          fetchReferenceOptions(refCollection) // Use store action
+          // [cite: 22]
+          fetchReferenceOptions(refCollection) // Use store action [cite: 22]
         }
       })
     }
-  }) // [cite: 67] reference fetching logic
+  }) // [cite: 22]
 
-  // --- Lifecycle Hooks ---
+  // Watch pinnedDocuments (removed console.log)
+  const debouncedLogPinnedDocuments = useDebounceFn((newVal) => {
+    // Empty function now that console.log is removed [cite: 47]
+  }, 500)
+
+  watch(pinnedDocuments, (newVal) => debouncedLogPinnedDocuments(newVal), {
+    immediate: true, // [cite: 48]
+    deep: true, // [cite: 48]
+  })
+
+  // Watch previewMode (removed console.log)
+  watch(
+    previewMode,
+    (newVal, oldVal) => {
+      // All console.log statements removed [cite: 69]
+    },
+    { immediate: true } // [cite: 69]
+  )
+
+  // Watch route to set preview mode
+  watch(
+    isImportRoute,
+    (newVal) => {
+      previewMode.value = newVal // [cite: 71]
+    },
+    { immediate: true } // [cite: 71]
+  )
+
+  // ==========================================================================
+  // Lifecycle Hooks
+  // ==========================================================================
   onMounted(async () => {
-    console.log('MongoDBDataTable mounted (Pinia + Old Style).')
+    if (previewMode.value) return // Skip fetching in preview mode [cite: 22]
 
-    await fetchCollections()
-    const routeName = Array.isArray(route.params.name) ? route.params.name[0] : route.params.name
-    const initialCollection = routeName || props.selectedCollection
+    await fetchCollections() // [cite: 22]
+    const routeName = Array.isArray(route.params.name) ? route.params.name[0] : route.params.name // [cite: 23]
+    const initialCollection = routeName || props.selectedCollection // [cite: 24]
 
-    if (
-      initialCollection &&
-      typeof initialCollection === 'string' &&
-      initialCollection !== collectionName.value
-    ) {
-      await setCollection(initialCollection)
+    if (initialCollection && initialCollection !== collectionName.value) {
+      await setCollection(initialCollection) // [cite: 24]
     } else if (collectionName.value && documents.value.length === 0 && !isLoading.value) {
       try {
-        await dataTableStore.fetchSchema()
-        await dataTableStore.fetchDocuments()
-
-        // Add this code to log and count column names after data is loaded
-        console.log('Column names:', tableHeaders.value)
-        console.log('Total columns:', tableHeaders.value.length)
+        await dataTableStore.fetchSchema() // [cite: 24]
+        await dataTableStore.fetchDocuments() // [cite: 24]
       } catch (error) {
-        console.error('Error fetching initial schema/documents in onMounted:', error)
+        // Handle error [cite: 24]
       }
+    }
+
+    // Event listeners
+    window.addEventListener('click', closeContextMenu) // [cite: 45]
+    document.addEventListener('click', checkClickOutsideHeaders) // [cite: 45]
+  })
+
+  onBeforeUnmount(() => {
+    // Cleanup listeners
+    document.removeEventListener('click', checkClickOutsideHeaders) // [cite: 45]
+    window.removeEventListener('click', closeContextMenu) // [cite: 45]
+
+    // Clear any pending timeouts
+    if (timeoutId.value) {
+      clearTimeout(timeoutId.value)
+    }
+    if (highlightTimeout) {
+      clearTimeout(highlightTimeout)
     }
   })
 
-  // --- Methods ---
+  // ==========================================================================
+  // Utility Functions
+  // ==========================================================================
+  const getColumnLabel = (index: number): string => {
+    let label = '' // [cite: 11]
+    let i = index // [cite: 11]
+    do {
+      const remainder = i % 26 // [cite: 11]
+      label = String.fromCharCode(65 + remainder) + label // [cite: 12]
+      i = Math.floor(i / 26) - 1 // [cite: 12]
+    } while (i >= 0)
+    return label // [cite: 12]
+  } // [cite: 12]
 
-  // Error closing (if keeping the manual close button)
+  const isFieldRequired = (field: string): boolean => {
+    return collectionSchema.value.required?.includes(field) || false // [cite: 15]
+  } // [cite: 15]
+
+  const formatSchemaValue = (value: any, bsonType?: string | string[]) => {
+    if (value === undefined || value === null) return '' // [cite: 15]
+    const type = bsonType ? (Array.isArray(bsonType) ? bsonType[0] : bsonType) : typeof value // [cite: 15, 16]
+
+    if (type === 'date' && value instanceof Date) {
+      // Check if it's already a Date object [cite: 16]
+      return value.toLocaleString() // [cite: 16]
+    } else if (type === 'date') {
+      // Try parsing if it's not a Date object [cite: 16]
+      try {
+        return new Date(value).toLocaleString() // [cite: 16]
+      } catch {
+        return String(value) // Fallback [cite: 16]
+      }
+    }
+    if (typeof value === 'object') {
+      return JSON.stringify(value, null, 2) // Keep original formatting [cite: 17]
+    }
+    return String(value) // [cite: 17]
+  } // [cite: 17]
+
+  const filteredOptions = (field: string) => {
+    const refCollection = getReferencedCollection(field) // [cite: 17]
+    if (!refCollection) return [] // [cite: 17]
+    const options = referenceOptions.value[refCollection] || [] // [cite: 17, 18]
+    const query = (searchQuery.value[field] || '').toLowerCase() // [cite: 18]
+    return options.filter((opt) => opt.label.toLowerCase().includes(query)) // [cite: 18]
+  } // [cite: 18]
+
+  const shortName = (header: string) => {
+    return collectionSchema.value.ui?.short_names?.[header] || header // [cite: 59, 60]
+  }
+
+  function getActualIndex(visibleIndex: number) {
+    let actualIndex = 0 // [cite: 65]
+    let visibleCount = 0 // [cite: 65]
+
+    while (visibleCount <= visibleIndex && actualIndex < tableHeaders.value.length) {
+      // [cite: 65]
+      if (!hiddenColumns.value.includes(tableHeaders.value[actualIndex])) {
+        // [cite: 65]
+        visibleCount++ // [cite: 65]
+      }
+      actualIndex++ // [cite: 65]
+    }
+
+    return actualIndex - 1 // [cite: 66]
+  }
+
+  // ==========================================================================
+  // Debounced Functions
+  // ==========================================================================
+  const debouncedSaveWidths = useDebounceFn(async () => {
+    await saveColumnWidthsToBackend() // Call store action [cite: 25]
+  }, 750) // Keep debounce consistent [cite: 25]
+
+  const debouncedRowHeightSave = useDebounceFn(async (documentId: string, height: number) => {
+    try {
+      // [cite: 54]
+      await updateDocumentField(documentId, 'row_height', height) // [cite: 55]
+    } catch (error) {
+      // Error handling without console.error [cite: 55]
+    }
+  }, 500) // 500ms delay [cite: 55]
+
+  // ==========================================================================
+  // Methods
+  // ==========================================================================
+
+  // --- Error Handling ---
   const closeErrorManual = () => {
     if (timeoutId.value) {
-      clearTimeout(timeoutId.value)
-      timeoutId.value = null
+      clearTimeout(timeoutId.value) // [cite: 25]
+      timeoutId.value = null // [cite: 25]
     }
-    clearError() // Use store action
-  } // Matches original @click="closeError" [cite: 1]
+    clearError() // Use store action [cite: 25]
+  } // Matches original @click="closeError" [cite: 25]
 
-  // Debounced function for saving widths
-  const debouncedSaveWidths = useDebounceFn(async () => {
-    await saveColumnWidthsToBackend() // Call store action
-  }, 750) // Keep debounce consistent
-
-  // --- Column Resizing Handlers ---
-  // These call store actions now but retain the local state for visual feedback during drag
-
+  // --- Column Resizing ---
   const startAlphaResize = (columnIndex: number, event: MouseEvent) => {
-    const header = tableHeaders.value[columnIndex] // Use getter
-    if (!header) return
-    const currentWidth = columnWidths.value[header] || 200 // Use getter
+    const header = tableHeaders.value[columnIndex] // Use getter [cite: 26]
+    if (!header) return // [cite: 26]
+    const currentWidth = columnWidths.value[header] || 200 // Use getter [cite: 26, 27]
 
     alphaResizingState.value = {
       isResizing: true,
@@ -339,671 +509,483 @@
       startX: event.clientX,
       startWidth: currentWidth,
       currentWidth: currentWidth,
-    }
-    document.addEventListener('mousemove', handleAlphaMouseMove)
-    document.addEventListener('mouseup', stopAlphaResize)
-    event.preventDefault()
-  } // [cite: 14]
+    } // [cite: 27]
+    document.addEventListener('mousemove', handleAlphaMouseMove) // [cite: 27]
+    document.addEventListener('mouseup', stopAlphaResize) // [cite: 27]
+    event.preventDefault() // [cite: 27]
+  } // [cite: 27]
 
   const handleAlphaMouseMove = (event: MouseEvent) => {
-    if (!alphaResizingState.value.isResizing) return
-    const delta = event.clientX - alphaResizingState.value.startX
-    const newWidth = Math.max(50, alphaResizingState.value.startWidth + delta)
-    alphaResizingState.value.currentWidth = newWidth
+    if (!alphaResizingState.value.isResizing) return // [cite: 27]
+    const delta = event.clientX - alphaResizingState.value.startX // [cite: 27]
+    const newWidth = Math.max(50, alphaResizingState.value.startWidth + delta) // [cite: 27]
+    alphaResizingState.value.currentWidth = newWidth // [cite: 28]
 
-    const header = tableHeaders.value[alphaResizingState.value.columnIndex]
+    const header = tableHeaders.value[alphaResizingState.value.columnIndex] // [cite: 28]
     if (header && collectionSchema.value.ui) {
-      // Temporarily update local schema for visual feedback
+      // Temporarily update local schema for visual feedback [cite: 28]
       collectionSchema.value.ui.columnWidths = {
         ...collectionSchema.value.ui.columnWidths,
         [header]: newWidth,
-      }
+      } // [cite: 28]
     }
   }
 
   const stopAlphaResize = async () => {
-    if (!alphaResizingState.value.isResizing) return
-    const header = tableHeaders.value[alphaResizingState.value.columnIndex]
-    const finalWidth = alphaResizingState.value.currentWidth
-    alphaResizingState.value.isResizing = false
-    document.removeEventListener('mousemove', handleAlphaMouseMove)
-    document.removeEventListener('mouseup', stopAlphaResize)
+    if (!alphaResizingState.value.isResizing) return // [cite: 28]
+    const header = tableHeaders.value[alphaResizingState.value.columnIndex] // [cite: 28]
+    const finalWidth = alphaResizingState.value.currentWidth // [cite: 28]
+    alphaResizingState.value.isResizing = false // [cite: 29]
+    document.removeEventListener('mousemove', handleAlphaMouseMove) // [cite: 29]
+    document.removeEventListener('mouseup', stopAlphaResize) // [cite: 29]
 
     if (header) {
-      await updateColumnWidth(header, finalWidth) // Update store
-      debouncedSaveWidths() // Trigger debounced save
+      await updateColumnWidth(header, finalWidth) // Update store [cite: 29]
+      debouncedSaveWidths() // Trigger debounced save [cite: 29]
     }
   }
 
   const resetAlphaColumnWidth = async (columnIndex: number) => {
-    const header = tableHeaders.value[columnIndex]
+    const header = tableHeaders.value[columnIndex] // [cite: 29]
     if (header) {
-      await resetColumnWidth(header) // Update store
-      debouncedSaveWidths() // Trigger save
+      await resetColumnWidth(header) // Update store [cite: 29]
+      debouncedSaveWidths() // Trigger save [cite: 29]
     }
-  } // [cite: 14]
+  } // [cite: 29]
 
   const startResize = (header: string, event: MouseEvent) => {
-    const currentWidth = columnWidths.value[header] || 200
+    const currentWidth = columnWidths.value[header] || 200 // [cite: 30, 31]
     resizingState.value = {
       isResizing: true,
       header,
       startX: event.clientX,
       startWidth: currentWidth,
       currentWidth: currentWidth,
-    }
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', stopResize)
-    event.preventDefault()
-  } // [cite: 25]
+    } // [cite: 31]
+    document.addEventListener('mousemove', handleMouseMove) // [cite: 31]
+    document.addEventListener('mouseup', stopResize) // [cite: 31]
+    event.preventDefault() // [cite: 31]
+  } // [cite: 31]
 
   const handleMouseMove = (event: MouseEvent) => {
-    if (!resizingState.value.isResizing) return
-    const delta = event.clientX - resizingState.value.startX
-    const newWidth = Math.max(50, resizingState.value.startWidth + delta)
-    resizingState.value.currentWidth = newWidth
+    if (!resizingState.value.isResizing) return // [cite: 31]
+    const delta = event.clientX - resizingState.value.startX // [cite: 31]
+    const newWidth = Math.max(50, resizingState.value.startWidth + delta) // [cite: 31]
+    resizingState.value.currentWidth = newWidth // [cite: 32]
 
-    const header = resizingState.value.header
+    const header = resizingState.value.header // [cite: 32]
     if (header && collectionSchema.value.ui) {
-      // Temporarily update local schema for visual feedback
+      // Temporarily update local schema for visual feedback [cite: 32]
       collectionSchema.value.ui.columnWidths = {
         ...collectionSchema.value.ui.columnWidths,
         [header]: newWidth,
-      }
+      } // [cite: 32]
     }
   }
 
   const stopResize = async () => {
-    if (!resizingState.value.isResizing) return
-    const header = resizingState.value.header
-    const finalWidth = resizingState.value.currentWidth
-    resizingState.value.isResizing = false
-    document.removeEventListener('mousemove', handleMouseMove)
-    document.removeEventListener('mouseup', stopResize)
+    if (!resizingState.value.isResizing) return // [cite: 32]
+    const header = resizingState.value.header // [cite: 32]
+    const finalWidth = resizingState.value.currentWidth // [cite: 32]
+    resizingState.value.isResizing = false // [cite: 33]
+    document.removeEventListener('mousemove', handleMouseMove) // [cite: 33]
+    document.removeEventListener('mouseup', stopResize) // [cite: 33]
 
     if (header) {
-      await updateColumnWidth(header, finalWidth) // Update store
-      debouncedSaveWidths() // Trigger save
+      await updateColumnWidth(header, finalWidth) // Update store [cite: 33]
+      debouncedSaveWidths() // Trigger save [cite: 33]
     }
   }
 
+  // Commented out original reset function as it might clash with store action name
   // const resetColumnWidth = async (header: string) => { // Renamed from original resetDataColumnWidth for clarity
-  //   await resetColumnWidth(header); // Call store action (make sure names don't clash)
-  //   debouncedSaveWidths();
-  // }; // [cite: 25]
+  //   await resetColumnWidth(header); // Call store action (make sure names don't clash) [cite: 33]
+  //   debouncedSaveWidths(); // [cite: 34]
+  // }; // [cite: 35]
 
-  // --- Cell Click/Edit Handling ---
-
-  const handleCellClick = (rowIndex: number, header: string, value: any) => {
-    // Value param from original template [cite: 52]
-    if (isSaving.value || ['_id', 'created_at', 'updated_at'].includes(header)) return
-
-    // Use the original value passed from the template click event
-    startEditingCell(rowIndex, header, value) // Use store action
-
-    // Update selectedCell for visual feedback (Excel-like)
-    const actualRowNumber = (currentPage.value - 1) * pageSize.value + rowIndex + 1
-    const colIndex = tableHeaders.value.indexOf(header)
-    selectedCell.value = { colIndex, rowNumber: actualRowNumber } // [cite: 2]
-
-    // Focus logic can be kept if desired
-    nextTick(() => {
-      // Simplified focus selector - adjust if needed
-      const inputElement = scrollContainer.value?.querySelector<
-        HTMLInputElement | HTMLTextAreaElement
-      >(
-        `tr:nth-child(${rowIndex + 1}) td[class*='excel-cell'] textarea, tr:nth-child(${rowIndex + 1}) td[class*='excel-cell'] input`
-      )
-      inputElement?.focus()
-      if (inputElement && (inputElement.tagName === 'TEXTAREA' || inputElement.type === 'text')) {
-        inputElement.select()
-      }
-    })
-  } // Combines original template call [cite: 52] with store logic
-
-  // Handle blur event on editable inputs/textareas - uses store action
-  const handleEditBlur = async () => {
-    setTimeout(async () => {
-      const activeElement = document.activeElement
-      // Basic check if focus is still within the editing area (might need refinement)
-      const isStillEditing =
-        editingCell.value &&
-        activeElement &&
-        (activeElement.closest('.excel-cell-selected') ||
-          activeElement.closest('[data-radix-popper-content-wrapper]')) // Consider Radix poppers for Select
-
-      if (editingCell.value && !isStillEditing) {
-        await saveEdit() // Use store action
-      } else if (!isStillEditing) {
-        cancelEdit() // Use store action
-      }
-    }, 100)
-  } // Connects to @blur event [cite: 50]
-
-  // --- Template specific handlers ---
-  // Handle view change from ExcelCellReference component
-  const handleViewChange = (view: string) => {
-    changeView(view) // Use store action
-  } // [cite: 4]
-
-  // Handler for pagination component update event
-  const onPageChange = (page: number) => {
-    setPage(page) // Use store action
-  } // [cite: 79]
-
-  // Handlers for delete start/end from actions components
-  const handleDeleteStart = (id: string) => {
-    dataTableStore.pendingDeleteId = id
-  } // [cite: 3, 58, 60]
-  const handleDeleteEnd = () => {
-    dataTableStore.pendingDeleteId = null
-  } // [cite: 4, 59, 60]
-
-  // Expose methods (less common with Pinia but kept if original template needed it)
-  defineExpose({
-    fetchDocuments: dataTableStore.fetchDocuments,
-    fetchCollections: dataTableStore.fetchCollections,
-    setCollection: dataTableStore.setCollection,
-  })
-
-  const showContextMenu = ref(false)
-  const contextMenuPosition = ref({ x: 0, y: 0 })
-  const selectedCellInfo = ref<{ rowIndex: number; header: string } | null>(null)
-
-  // methods for context menu
-  const handleRightClick = (rowIndex: number, header: string, event: MouseEvent) => {
-    event.preventDefault()
-    selectedCellInfo.value = { rowIndex, header }
-
-    // Calculate actual row number and column index for highlighting
-    const actualRowNumber = (currentPage.value - 1) * pageSize.value + rowIndex + 1
-    const colIndex = tableHeaders.value.indexOf(header)
-    selectedCell.value = { colIndex, rowNumber: actualRowNumber }
-
-    // Position context menu
-    const offset = 55
-    contextMenuPosition.value = {
-      x: event.clientX,
-      y: event.clientY - offset,
-    }
-    showContextMenu.value = true
-  }
-
-  const closeContextMenu = () => {
-    showContextMenu.value = false
-    selectedCellInfo.value = null
-  }
-
-  const pinCell = async () => {
-    console.log('pinCell: Function called')
-    if (!selectedCellInfo.value) {
-      console.warn('pinCell: No cell selected')
-      return
-    }
-    if (isSelectedArchived.value) {
-      console.warn('pinCell: Selected document is archived, cannot pin/unpin')
-      return
-    }
-    // Add check for null user
-    if (!user.value) {
-      console.warn('pinCell: User not authenticated')
-      return
-    }
-    const rowIndex = selectedCellInfo.value.rowIndex
-    console.log(`pinCell: Selected row index: ${rowIndex}`)
-    const doc = paginatedDocuments.value[rowIndex]
-    if (!doc) {
-      console.warn(`pinCell: No document found at row index ${rowIndex}`)
-      return
-    }
-    const isPinned = doc.pinned_by?.includes(user.value.id)
-    console.log(
-      `pinCell: Document ID: ${doc._id.$oid}, Current pin state: ${isPinned ? 'pinned' : 'unpinned'}`
-    )
-    try {
-      if (isPinned) {
-        console.log(`pinCell: Document is currently pinned, attempting to unpin`)
-        await dataTableStore.unpinDocument(doc._id.$oid)
-        console.log(`pinCell: Unpin operation completed`)
-      } else {
-        console.log(`pinCell: Document is currently unpinned, attempting to pin`)
-        await dataTableStore.pinDocument(doc._id.$oid)
-        console.log(`pinCell: Pin operation completed`)
-      }
-
-      // Add this critical line to refresh documents after pin/unpin operation
-      console.log('pinCell: Refreshing documents to ensure pin state consistency across users')
-      await dataTableStore.fetchDocuments()
-      console.log('pinCell: Document refresh completed')
-    } catch (error) {
-      console.error('pinCell: Pin/Unpin error:', error)
-    }
-    console.log('pinCell: Closing context menu')
-    closeContextMenu()
-  }
-
-  const bookmarkCell = () => {
-    if (!selectedCellInfo.value) return
-    console.log('Bookmarking cell:', selectedCellInfo.value)
-    closeContextMenu()
-  }
-
-  const checkClickOutsideHeaders = (event: MouseEvent) => {
-    const target = event.target as HTMLElement
-    const isHeaderClick = target.closest('.excel-column-letter, .excel-column-header')
-    if (!isHeaderClick) {
-      highlightedColumn.value = null
-    }
-  }
-
-  // Add window click listener (in onMounted)
-  onMounted(() => {
-    window.addEventListener('click', closeContextMenu)
-    document.addEventListener('click', checkClickOutsideHeaders)
-  })
-
-  // Add cleanup (if using beforeUnmount)
-  onBeforeUnmount(() => {
-    document.removeEventListener('click', checkClickOutsideHeaders)
-    window.removeEventListener('click', closeContextMenu)
-  })
-
-  const isSelectedArchived = computed(() => {
-    console.log('Computing isSelectedArchived')
-
-    if (!selectedCellInfo.value) {
-      console.log('No selectedCellInfo, returning false')
-      return false
-    }
-
-    const rowIndex = selectedCellInfo.value.rowIndex
-    console.log('Selected row index:', rowIndex)
-
-    const document = paginatedDocuments.value[rowIndex]
-    console.log('Selected document:', document)
-
-    const isArchived = document?.is_archive === true
-    console.log('Is document archived:', isArchived)
-
-    return isArchived
-  })
-
-  const selectedDocumentIsPinned = computed(() => {
-    if (!selectedCellInfo.value) return false
-    if (!user.value) return false // Add this check for null user
-
-    const doc = paginatedDocuments.value[selectedCellInfo.value.rowIndex]
-    return doc?.pinned_by?.includes(user.value.id)
-  })
-
-  const togglePinStatus = async (docId: string, currentPinStatus: boolean): Promise<void> => {
-    try {
-      if (currentPinStatus) {
-        await dataTableStore.unpinDocument(docId)
-      } else {
-        await dataTableStore.pinDocument(docId)
-      }
-    } catch (error) {
-      console.error('Error toggling pin status:', error)
-    }
-  }
-
-  // --- New Computed Property ---
-  const pinnedDocuments = computed(() => {
-    if (!user.value) return []
-    return documents.value.filter((doc) => doc.pinned_by?.includes(user.value?.id))
-  })
-
-  // --- New Watcher ---
-  const debouncedLogPinnedDocuments = useDebounceFn((newVal) => {
-    console.log('Pinned Documents:', newVal)
-  }, 500)
-
-  watch(pinnedDocuments, (newVal) => debouncedLogPinnedDocuments(newVal), {
-    immediate: true,
-    deep: true,
-  })
-
-  const highlightedDocumentId = ref<string | null>(null)
-  let highlightTimeout: ReturnType<typeof setTimeout> | null = null
-
-  const handleDocumentNavigation = (docId: string) => {
-    // Clear existing timeout if any
-    if (highlightTimeout) clearTimeout(highlightTimeout)
-
-    // Find document index in full dataset
-    const index = documents.value.findIndex((doc) => doc._id.$oid === docId)
-    if (index === -1) return
-
-    // Calculate and set correct page
-    const page = Math.ceil((index + 1) / pageSize.value)
-    setPage(page)
-
-    // Set highlight and auto-clear after 3s
-    highlightedDocumentId.value = docId
-    highlightTimeout = setTimeout(() => {
-      highlightedDocumentId.value = null
-    }, 2000)
-
-    // Scroll to row after DOM update
-    nextTick(() => {
-      const row = scrollContainer.value?.querySelector(`[data-document-id="${docId}"]`)
-      if (row) {
-        row.scrollIntoView({
-          behavior: 'smooth',
-          block: 'nearest',
-          inline: 'nearest',
-        })
-
-        // Add visual pulse effect
-        row.classList.add('highlight-pulse')
-        setTimeout(() => row.classList.remove('highlight-pulse'), 1000)
-      }
-    })
-  }
-
-  // row resizing state
-  const rowResizingState = ref({
-    isResizing: false,
-    documentId: '',
-    startY: 0,
-    startHeight: 40, // Default row height
-    currentHeight: 40,
-  })
-
+  // --- Row Resizing ---
   const startRowResize = (documentId: string, event: MouseEvent) => {
-    const doc = documents.value.find((d) => d._id.$oid === documentId)
-    if (!doc) return
+    const doc = documents.value.find((d) => d._id.$oid === documentId) // [cite: 52]
+    if (!doc) return // [cite: 52]
 
-    const currentHeight = doc.row_height || 40
+    const currentHeight = doc.row_height || 40 // [cite: 52, 53]
     rowResizingState.value = {
       isResizing: true,
       documentId,
       startY: event.clientY,
       startHeight: currentHeight,
       currentHeight,
-    }
+    } // [cite: 53]
 
-    document.addEventListener('mousemove', handleRowMouseMove)
-    document.addEventListener('mouseup', stopRowResize)
+    document.addEventListener('mousemove', handleRowMouseMove) // [cite: 53]
+    document.addEventListener('mouseup', stopRowResize) // [cite: 53]
   }
 
   const handleRowMouseMove = (event: MouseEvent) => {
-    if (!rowResizingState.value.isResizing) return
+    if (!rowResizingState.value.isResizing) return // [cite: 53]
 
-    const delta = event.clientY - rowResizingState.value.startY
-    const newHeight = Math.max(40, rowResizingState.value.startHeight + delta)
+    const delta = event.clientY - rowResizingState.value.startY // [cite: 53]
+    const newHeight = Math.max(40, rowResizingState.value.startHeight + delta) // [cite: 53]
 
-    rowResizingState.value.currentHeight = newHeight
+    rowResizingState.value.currentHeight = newHeight // [cite: 53]
 
     // Update local document for visual feedback
     const docIndex = documents.value.findIndex(
-      (d) => d._id.$oid === rowResizingState.value.documentId
+      (d) => d._id.$oid === rowResizingState.value.documentId // [cite: 54]
     )
     if (docIndex !== -1) {
       const updatedDoc = {
         ...documents.value[docIndex],
         row_height: newHeight,
-      }
-      documents.value.splice(docIndex, 1, updatedDoc)
+      } // [cite: 54]
+      documents.value.splice(docIndex, 1, updatedDoc) // [cite: 54]
     }
   }
 
-  // Row height debouncing
-  const debouncedRowHeightSave = useDebounceFn(async (documentId: string, height: number) => {
-    try {
-      await dataTableStore.updateDocumentField(documentId, 'row_height', height)
-    } catch (error) {
-      console.error('Error saving row height:', error)
-    }
-  }, 500) // 500ms delay
-
-  const previewRowHeights = computed(() => {
-    if (!previewMode.value || !collectionName.value) return {}
-    const heights = sessionStorage.getItem(`previewRowHeights-${collectionName.value}`)
-    return heights ? JSON.parse(heights) : {}
-  })
-
   const stopRowResize = async () => {
-    if (!rowResizingState.value.isResizing) return
-    const { documentId, currentHeight } = rowResizingState.value
+    if (!rowResizingState.value.isResizing) return // [cite: 57]
+    const { documentId, currentHeight } = rowResizingState.value // [cite: 57]
 
-    rowResizingState.value.isResizing = false
-    document.removeEventListener('mousemove', handleRowMouseMove)
-    document.removeEventListener('mouseup', stopRowResize)
+    rowResizingState.value.isResizing = false // [cite: 57]
+    document.removeEventListener('mousemove', handleRowMouseMove) // [cite: 57]
+    document.removeEventListener('mouseup', stopRowResize) // [cite: 57]
 
     if (previewMode.value) {
       const newHeights = {
         ...previewRowHeights.value,
         [documentId]: currentHeight,
-      }
+      } // [cite: 57]
       sessionStorage.setItem(
         `previewRowHeights-${collectionName.value}`,
-        JSON.stringify(newHeights)
+        JSON.stringify(newHeights) // [cite: 58]
       )
     } else {
-      debouncedRowHeightSave(documentId, currentHeight)
+      debouncedRowHeightSave(documentId, currentHeight) // [cite: 58]
     }
   }
 
-  // New reactive state
-  const editingHeader = ref<string | null>(null)
-  const editedShortName = ref('')
+  // --- Cell Click/Edit Handling ---
+  const handleCellClick = (rowIndex: number, header: string, value: any) => {
+    // Value param from original template [cite: 35]
+    if (isSaving.value || ['_id', 'created_at', 'updated_at'].includes(header)) return // [cite: 35]
 
-  const shortName = (header: string) => {
-    return collectionSchema.value.ui?.short_names?.[header] || header
-  }
+    // Use the original value passed from the template click event
+    startEditingCell(rowIndex, header, value) // Use store action [cite: 35]
 
+    // Update selectedCell for visual feedback (Excel-like)
+    const actualRowNumber = (currentPage.value - 1) * pageSize.value + rowIndex + 1 // [cite: 35]
+    const colIndex = tableHeaders.value.indexOf(header) // [cite: 35]
+    selectedCell.value = { colIndex, rowNumber: actualRowNumber } // [cite: 36]
+
+    // Focus logic
+    nextTick(() => {
+      // Simplified focus selector - adjust if needed [cite: 36]
+      const inputElement = scrollContainer.value?.querySelector<
+        HTMLInputElement | HTMLTextAreaElement
+      >(
+        `tr:nth-child(${rowIndex + 1}) td[class*='excel-cell'] textarea, tr:nth-child(${rowIndex + 1}) td[class*='excel-cell'] input` // [cite: 36]
+      )
+      inputElement?.focus() // [cite: 36]
+      if (inputElement && (inputElement.tagName === 'TEXTAREA' || inputElement.type === 'text')) {
+        // [cite: 37]
+        inputElement.select() // [cite: 37]
+      }
+    })
+  } // Combines original template call [cite: 37] with store logic
+
+  const handleEditBlur = async () => {
+    setTimeout(async () => {
+      const activeElement = document.activeElement // [cite: 37]
+      // Basic check if focus is still within the editing area (might need refinement) [cite: 37]
+      const isStillEditing =
+        editingCell.value && // [cite: 38]
+        activeElement && // [cite: 38]
+        (activeElement.closest('.excel-cell-selected') || // [cite: 38]
+          activeElement.closest('[data-radix-popper-content-wrapper]')) // Consider Radix poppers for Select [cite: 38]
+
+      if (editingCell.value && !isStillEditing) {
+        await saveEdit() // Use store action [cite: 38]
+      } else if (!isStillEditing) {
+        cancelEdit() // Use store action [cite: 38]
+      }
+    }, 100) // [cite: 39]
+  } // Connects to @blur event [cite: 39]
+
+  // --- Header Editing ---
   const startEditingHeader = (header: string) => {
-    editingHeader.value = header
-    editedShortName.value = shortName(header)
+    editingHeader.value = header // [cite: 60]
+    editedShortName.value = shortName(header) // [cite: 60]
   }
 
   const isEditingHeader = (header: string) => {
-    return editingHeader.value === header
+    return editingHeader.value === header // [cite: 60]
   }
 
   const saveShortName = async (header: string) => {
-    if (!editedShortName.value.trim()) return
+    if (!editedShortName.value.trim()) return // [cite: 60]
 
     const newShortNames = {
       ...collectionSchema.value.ui?.short_names,
       [header]: editedShortName.value,
-    }
+    } // [cite: 60]
 
     try {
-      await updateUIMetadata({ short_names: newShortNames })
-      editingHeader.value = null
+      await updateUIMetadata({ short_names: newShortNames }) // [cite: 60]
+      editingHeader.value = null // [cite: 61]
     } catch (error) {
-      // Handle error
+      // Handle error [cite: 61]
     }
   }
 
   const cancelEditTextHead = () => {
-    editingHeader.value = null
+    editingHeader.value = null // [cite: 61]
   }
 
-  // highlighted column state
-  const highlightedColumn = ref<string | null>(null)
-
-  // highlighted column methods section
+  // --- Column Highlighting ---
   const handleColumnHighlight = (index: number) => {
-    console.log(`[HIGHLIGHT DEBUG] handleColumnHighlight: Called with index ${index}`)
-
-    // Count hidden columns before the visible index to get the actual index in tableHeaders
-    let hiddenColumnsCount = 0
+    // Count hidden columns before the visible index to get the actual index in tableHeaders [cite: 62]
+    let hiddenColumnsCount = 0 // [cite: 62]
     for (let i = 0; i <= index; i++) {
-      const visibleIndex = i + hiddenColumnsCount
+      const visibleIndex = i + hiddenColumnsCount // [cite: 62]
       if (
-        visibleIndex < tableHeaders.value.length &&
-        hiddenColumns.value.includes(tableHeaders.value[visibleIndex])
+        visibleIndex < tableHeaders.value.length && // [cite: 62]
+        hiddenColumns.value.includes(tableHeaders.value[visibleIndex]) // [cite: 62]
       ) {
-        hiddenColumnsCount++
-        i-- // Stay at the same visible index since we found a hidden column
+        hiddenColumnsCount++ // [cite: 63]
+        i-- // Stay at the same visible index since we found a hidden column [cite: 63]
       }
     }
 
     // Adjust index to account for hidden columns
-    const adjustedIndex = index + hiddenColumnsCount
-    const header = tableHeaders.value[adjustedIndex]
-
-    console.log(
-      `[HIGHLIGHT DEBUG] handleColumnHighlight: Hidden columns count: ${hiddenColumnsCount}`
-    )
-    console.log(`[HIGHLIGHT DEBUG] handleColumnHighlight: Adjusted index: ${adjustedIndex}`)
-    console.log(
-      `[HIGHLIGHT DEBUG] handleColumnHighlight: Header at adjusted index ${adjustedIndex} is "${header}"`
-    )
-    console.log(
-      `[HIGHLIGHT DEBUG] handleColumnHighlight: Current highlighted column: "${highlightedColumn.value}"`
-    )
+    const adjustedIndex = index + hiddenColumnsCount // [cite: 63]
+    const header = tableHeaders.value[adjustedIndex] // [cite: 63]
 
     // Clear both selected cell and editing state
-    selectedCell.value = null
-    cancelEdit() // This clears editingCell in the store
+    selectedCell.value = null // [cite: 63]
+    cancelEdit() // This clears editingCell in the store [cite: 63]
 
     if (selectedRows.value.size > 0) {
-      console.log(
-        `[HIGHLIGHT DEBUG] handleColumnHighlight: ${selectedRows.value.size} rows are selected`
-      )
-      const confirmed = confirm('You have selected rows. Unselect them to highlight the column?')
-      console.log(`[HIGHLIGHT DEBUG] handleColumnHighlight: User confirmation: ${confirmed}`)
+      const confirmed = confirm('You have selected rows. Unselect them to highlight the column?') // [cite: 64]
 
       if (confirmed) {
-        console.log(
-          `[HIGHLIGHT DEBUG] handleColumnHighlight: Resetting selection and highlighting column "${header}"`
-        )
-        resetSelection()
-        highlightedColumn.value = header
+        resetSelection() // [cite: 64]
+        highlightedColumn.value = header // [cite: 64]
       }
     } else {
-      console.log(`[HIGHLIGHT DEBUG] handleColumnHighlight: No rows selected`)
-
       if (header === highlightedColumn.value) {
-        console.log(`[HIGHLIGHT DEBUG] handleColumnHighlight: Unhighlighting column "${header}"`)
-        highlightedColumn.value = null
+        highlightedColumn.value = null // [cite: 64]
       } else {
-        console.log(`[HIGHLIGHT DEBUG] handleColumnHighlight: Highlighting column "${header}"`)
-        highlightedColumn.value = header
+        highlightedColumn.value = header // [cite: 64]
       }
-    }
-
-    console.log(
-      `[HIGHLIGHT DEBUG] handleColumnHighlight: Final highlighted column state: "${highlightedColumn.value}"`
-    )
-  }
-  // drag state
-  const dragState = reactive({
-    isDragging: false,
-    draggedIndex: -1,
-    targetIndex: -1,
-  })
-
-  function getActualIndex(visibleIndex: number) {
-    let actualIndex = 0
-    let visibleCount = 0
-
-    while (visibleCount <= visibleIndex && actualIndex < tableHeaders.value.length) {
-      if (!hiddenColumns.value.includes(tableHeaders.value[actualIndex])) {
-        visibleCount++
-      }
-      actualIndex++
-    }
-
-    return actualIndex - 1
+    } // [cite: 65]
   }
 
+  const checkClickOutsideHeaders = (event: MouseEvent) => {
+    const target = event.target as HTMLElement // [cite: 44]
+    const isHeaderClick = target.closest('.excel-column-letter, .excel-column-header') // [cite: 44]
+    if (!isHeaderClick) {
+      highlightedColumn.value = null // [cite: 45]
+    }
+  }
+
+  // --- Drag and Drop Columns ---
   function onDragStart(event: DragEvent, visibleIndex: number) {
-    const actualIndex = getActualIndex(visibleIndex)
-    console.log(`Drag start from visible index ${visibleIndex} (actual ${actualIndex})`)
-
-    dragState.isDragging = true
-    dragState.draggedIndex = actualIndex
-    event.dataTransfer?.setData('text/plain', '')
-    highlightedColumn.value = tableHeaders.value[actualIndex]
+    const actualIndex = getActualIndex(visibleIndex) // [cite: 66]
+    dragState.isDragging = true // [cite: 66]
+    dragState.draggedIndex = actualIndex // [cite: 66]
+    event.dataTransfer?.setData('text/plain', '') // [cite: 66]
+    highlightedColumn.value = tableHeaders.value[actualIndex] // [cite: 66]
   }
 
   function onDragOver(event: DragEvent, visibleIndex: number) {
-    if (!dragState.isDragging) return
-    event.preventDefault()
+    if (!dragState.isDragging) return // [cite: 66]
+    event.preventDefault() // [cite: 66]
 
-    const actualIndex = getActualIndex(visibleIndex)
+    const actualIndex = getActualIndex(visibleIndex) // [cite: 66]
     if (dragState.targetIndex !== actualIndex) {
-      dragState.targetIndex = actualIndex
-      console.log(`Drag over at visible index ${visibleIndex} (actual ${actualIndex})`)
+      dragState.targetIndex = actualIndex // [cite: 66]
     }
   }
 
   function onDrop(event: DragEvent, visibleIndex: number) {
-    event.preventDefault()
-    if (!dragState.isDragging) return
+    event.preventDefault() // [cite: 66]
+    if (!dragState.isDragging) return // [cite: 67]
 
-    const targetActualIndex = getActualIndex(visibleIndex)
-    const draggedIndex = dragState.draggedIndex
-
-    console.log(`Dropping from actual index ${draggedIndex} to ${targetActualIndex}`)
+    const targetActualIndex = getActualIndex(visibleIndex) // [cite: 67]
+    const draggedIndex = dragState.draggedIndex // [cite: 67]
 
     // Existing column order logic
-    const currentUI = collectionSchema.value.ui || {}
-    let columnOrder = currentUI.columnOrder ? [...currentUI.columnOrder] : [...tableHeaders.value]
-    const allHeaders = Object.keys(collectionSchema.value.properties || {})
+    const currentUI = collectionSchema.value.ui || {} // [cite: 67, 68]
+    let columnOrder = currentUI.columnOrder ? [...currentUI.columnOrder] : [...tableHeaders.value] // [cite: 68]
+    const allHeaders = Object.keys(collectionSchema.value.properties || {}) // [cite: 68]
 
     // Clean and reorder
-    columnOrder = columnOrder.filter((h) => allHeaders.includes(h))
-    const missing = allHeaders.filter((h) => !columnOrder.includes(h))
-    columnOrder.push(...missing)
+    columnOrder = columnOrder.filter((h) => allHeaders.includes(h)) // [cite: 68]
+    const missing = allHeaders.filter((h) => !columnOrder.includes(h)) // [cite: 68]
+    columnOrder.push(...missing) // [cite: 68]
 
     // Perform the move using actual indices
-    const [moved] = columnOrder.splice(draggedIndex, 1)
-    columnOrder.splice(targetActualIndex, 0, moved)
+    const [moved] = columnOrder.splice(draggedIndex, 1) // [cite: 68]
+    columnOrder.splice(targetActualIndex, 0, moved) // [cite: 68]
 
     // Update UI metadata
-    updateUIMetadata({ columnOrder })
+    updateUIMetadata({ columnOrder }) // [cite: 68]
 
     // Reset state
-    dragState.isDragging = false
-    dragState.draggedIndex = -1
-    dragState.targetIndex = -1
-    highlightedColumn.value = null
+    dragState.isDragging = false // [cite: 68]
+    dragState.draggedIndex = -1 // [cite: 69]
+    dragState.targetIndex = -1 // [cite: 69]
+    highlightedColumn.value = null // [cite: 69]
   }
 
   function onDragEnd() {
-    console.log(`[DRAG DEBUG] onDragEnd: Drag operation ended or canceled`)
+    dragState.isDragging = false // [cite: 69]
+    dragState.draggedIndex = -1 // [cite: 69]
+    dragState.targetIndex = -1 // [cite: 69]
+  }
 
-    if (dragState.isDragging) {
-      console.log(
-        `[DRAG DEBUG] onDragEnd: Final indices - dragged: ${dragState.draggedIndex}, target: ${dragState.targetIndex}`
-      )
+  // --- Context Menu ---
+  const handleRightClick = (rowIndex: number, header: string, event: MouseEvent) => {
+    event.preventDefault() // [cite: 41]
+    selectedCellInfo.value = { rowIndex, header } // [cite: 41]
+
+    // Calculate actual row number and column index for highlighting
+    const actualRowNumber = (currentPage.value - 1) * pageSize.value + rowIndex + 1 // [cite: 41]
+    const colIndex = tableHeaders.value.indexOf(header) // [cite: 41]
+    selectedCell.value = { colIndex, rowNumber: actualRowNumber } // [cite: 41]
+
+    // Position context menu
+    const offset = 55 // [cite: 41]
+    contextMenuPosition.value = {
+      x: event.clientX, // [cite: 42]
+      y: event.clientY - offset, // [cite: 42]
     }
-
-    dragState.isDragging = false
-    dragState.draggedIndex = -1
-    dragState.targetIndex = -1
-    console.log(`[DRAG DEBUG] onDragEnd: Reset drag state:`, { ...dragState })
+    showContextMenu.value = true // [cite: 42]
   }
 
-  // Add a more verbose debugging approach
-  watch(
-    previewMode,
-    (newVal, oldVal) => {
-      // Multiple logging approaches to ensure visibility
-      console.log('PREVIEW MODE CHANGED:', newVal)
-      console.log(`Preview mode changed from ${oldVal} to ${newVal}`)
-      console.warn(`Preview toggle state: ${newVal ? 'ACTIVE' : 'INACTIVE'}`) // Using warn to make it more visible
-
-      // You can also try adding an alert for testing
-      // alert(`Preview mode is now ${newVal ? 'active' : 'inactive'}`)
-    },
-    { immediate: true }
-  )
-
-  // You could also add a method that gets called on click for additional debugging
-  const togglePreviewMode = () => {
-    previewMode.value = !previewMode.value
-    console.log('Toggle function called, new value:', previewMode.value)
+  const closeContextMenu = () => {
+    showContextMenu.value = false // [cite: 42]
+    selectedCellInfo.value = null // [cite: 42]
   }
+
+  const pinCell = async () => {
+    if (!selectedCellInfo.value) {
+      return // [cite: 42]
+    }
+    if (isSelectedArchived.value) {
+      return // [cite: 42]
+    }
+    // Add check for null user
+    if (!user.value) {
+      // [cite: 43]
+      return // [cite: 43]
+    }
+    const rowIndex = selectedCellInfo.value.rowIndex // [cite: 43]
+    const doc = paginatedDocuments.value[rowIndex] // [cite: 43]
+    if (!doc) {
+      return // [cite: 43]
+    }
+    const isPinned = doc.pinned_by?.includes(user.value.id) // [cite: 43]
+    try {
+      if (isPinned) {
+        await unpinDocument(doc._id.$oid) // [cite: 43]
+      } else {
+        await pinDocument(doc._id.$oid) // [cite: 43]
+      }
+
+      // Add this critical line to refresh documents after pin/unpin operation
+      await fetchDocuments() // [cite: 44]
+    } catch (error) {
+      // Error handling without console.error [cite: 44]
+    }
+    closeContextMenu() // [cite: 44]
+  }
+
+  const bookmarkCell = () => {
+    if (!selectedCellInfo.value) return // [cite: 44]
+    closeContextMenu() // [cite: 44]
+  }
+
+  const togglePinStatus = async (docId: string, currentPinStatus: boolean): Promise<void> => {
+    try {
+      if (currentPinStatus) {
+        await unpinDocument(docId) // [cite: 46]
+      } else {
+        await pinDocument(docId) // [cite: 47]
+      }
+    } catch (error) {
+      // Error handling without console.error [cite: 47]
+    }
+  }
+
+  // --- Document Navigation/Highlighting ---
+  const handleDocumentNavigation = (docId: string) => {
+    // Clear existing timeout if any
+    if (highlightTimeout) clearTimeout(highlightTimeout) // [cite: 49]
+
+    // Find document index in full dataset
+    const index = documents.value.findIndex((doc) => doc._id.$oid === docId) // [cite: 49]
+    if (index === -1) return // [cite: 49]
+
+    // Calculate and set correct page
+    const page = Math.ceil((index + 1) / pageSize.value) // [cite: 49]
+    setPage(page) // [cite: 49]
+
+    // Set highlight and auto-clear after 2s
+    highlightedDocumentId.value = docId // [cite: 49, 50]
+    highlightTimeout = setTimeout(() => {
+      highlightedDocumentId.value = null // [cite: 50]
+    }, 2000) // [cite: 50]
+
+    // Scroll to row after DOM update
+    nextTick(() => {
+      const row = scrollContainer.value?.querySelector(`[data-document-id="${docId}"]`) // [cite: 50]
+      if (row) {
+        row.scrollIntoView({
+          behavior: 'smooth',
+          block: 'nearest',
+          inline: 'nearest', // [cite: 50]
+        })
+
+        // Add visual pulse effect [cite: 51]
+        row.classList.add('highlight-pulse') // [cite: 51]
+        setTimeout(() => row.classList.remove('highlight-pulse'), 1000) // [cite: 51]
+      }
+    })
+  }
+
+  // --- Template specific handlers ---
+  const handleViewChange = (view: string) => {
+    changeView(view) // Use store action [cite: 39]
+  } // [cite: 39]
+
+  const onPageChange = (page: number) => {
+    setPage(page) // Use store action [cite: 39]
+  } // [cite: 39]
+
+  const handleDeleteStart = (id: string) => {
+    dataTableStore.pendingDeleteId = id // [cite: 39, 40]
+  } // [cite: 40]
+  const handleDeleteEnd = () => {
+    dataTableStore.pendingDeleteId = null // [cite: 40]
+  } // [cite: 40]
+
+  const triggerFileImport = () => {
+    fileInput.value?.click() // [cite: 71]
+  }
+
+  // --- Emit events ---
+  const emit = defineEmits(['preview-data-update']) // [cite: 71]
+
+  // ==========================================================================
+  // Expose (if needed by parent components)
+  // ==========================================================================
+  defineExpose({
+    fetchDocuments: dataTableStore.fetchDocuments, // [cite: 40]
+    fetchCollections: dataTableStore.fetchCollections, // [cite: 40]
+    setCollection: dataTableStore.setCollection, // [cite: 40]
+  })
 </script>
-
 <template>
   <!-- MongoDBDataTable main div -->
   <div
@@ -1099,10 +1081,10 @@
             <Switch
               id="preview-live-toggle"
               :modelValue="previewMode"
+              :disabled="isImportRoute"
               @update:modelValue="
                 (value) => {
-                  previewMode = value
-                  console.log('Switch toggled via update:modelValue to:', value)
+                  if (!isImportRoute) previewMode = value
                 }
               "
             />
@@ -1110,9 +1092,24 @@
               class="text-white cursor-pointer"
               for="preview-live-toggle"
             >
-              {{ previewMode ? 'Mode: Preview' : 'Mode: Mode' }}
+              {{ previewMode ? 'Mode: Preview' : 'Mode: Live' }}
             </Label>
           </div>
+
+          <template v-if="showImportInPreview">
+            <Button @click="triggerFileImport"> Import CSV </Button>
+          </template>
+          <router-link
+            :to="`/collection/${collectionName}/import-csv`"
+            class="ml-4"
+          >
+            <Button
+              variant="outline"
+              size="sm"
+            >
+              Link to Import CSV Page
+            </Button>
+          </router-link>
         </div>
 
         <table
@@ -1787,9 +1784,10 @@
         </div>
 
         <div
-          v-if="!isAdding"
+          v-if="!isAdding && !previewMode"
           class="excel-footer"
         >
+          <!-- Only show footer controls when not in preview mode -->
           <span class="excel-page-size-label">Rows per page:</span>
           <Select
             :modelValue="String(pageSize)"
@@ -1798,16 +1796,21 @@
           >
             <SelectTrigger class="w-16"> <SelectValue /> </SelectTrigger>
             <SelectContent>
-              <SelectItem value="5">5</SelectItem> <SelectItem value="10">10</SelectItem>
-              <SelectItem value="20">20</SelectItem> <SelectItem value="50">50</SelectItem>
+              <SelectItem value="5">5</SelectItem>
+              <SelectItem value="10">10</SelectItem>
+              <SelectItem value="20">20</SelectItem>
+              <SelectItem value="50">50</SelectItem>
               <SelectItem value="100">100</SelectItem>
             </SelectContent>
           </Select>
-
           <span class="excel-status-info">
-            Showing {{ paginatedDocuments.length ? (currentPage - 1) * pageSize + 1 : 0 }} to
-            {{ (currentPage - 1) * pageSize + paginatedDocuments.length }} of
-            {{ documents.length }} entries
+            {{
+              props.previewData
+                ? `Showing all ${documents.length} entries`
+                : `Showing ${paginatedDocuments.length ? (currentPage - 1) * pageSize + 1 : 0} to
+           ${(currentPage - 1) * pageSize + paginatedDocuments.length} of
+           ${documents.length} entries`
+            }}
           </span>
         </div>
       </div>
