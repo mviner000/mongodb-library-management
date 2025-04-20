@@ -60,6 +60,7 @@
   import StickyTableActions from './mongodbtable/StickyTableActions.vue' // [cite: 4]
   import MongoDBDataTableNavbar from './MongoDBDataTableNavbar.vue' // [cite: 4]
   import StickyLeftSidebar from './StickyLeftSidebar.vue' // [cite: 4]
+  import CSVCellReference from './CSVCellReference.vue'
 
   // ==========================================================================
   // Store Setup
@@ -997,10 +998,7 @@
       class="sticky top-0 z-50"
       :preview-mode="previewMode"
     />
-    <div
-      class="excel-container w-full"
-      :class="{ '-mt-10': previewMode }"
-    >
+    <div class="excel-container w-full">
       <StickyLeftSidebar
         :isOpen="isSidebarOpen"
         :pinnedDocuments="pinnedDocuments"
@@ -1033,6 +1031,13 @@
         ref="scrollContainer"
         class="w-full overflow-auto table-scroll-container"
       >
+        <CSVCellReference
+          :selectedCell="selectedCell"
+          :selectedRows="selectedRows"
+          :isSidebarOpen="isSidebarOpen"
+          :previewMode="false"
+          @reset-selection=""
+        />
         <ExcelCellReference
           :preview-mode="previewMode"
           :is-sidebar-open="isSidebarOpen"
