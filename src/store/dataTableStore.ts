@@ -4,6 +4,7 @@ import { ref, computed } from 'vue'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { getApiBaseUrl } from '@/utils/api'
 import { documentService } from '@/services/documentService'
+import { useDebounceFn } from '@vueuse/core'
 const API_BASE = getApiBaseUrl()
 
 // Define the structure of a document (adjust based on your actual data)
@@ -264,17 +265,22 @@ export const useDataTableStore = defineStore('dataTable', () => {
       if (success) {
         console.log(`Loaded schema for ${collectionName.value}:`, data)
         collectionSchema.value = data
+
+        // Apply preview state if in preview mode
+        if (previewMode.value) {
+          const savedUI = sessionStorage.getItem(`previewState-${collectionName.value}`)
+          if (savedUI) {
+            collectionSchema.value.ui = {
+              ...collectionSchema.value.ui,
+              ...JSON.parse(savedUI),
+            }
+          }
+        }
+
         initializeNewDocument() // Initialize based on new schema
       } else {
         throw new Error(error || 'Schema fetch failed')
       }
-
-      // --- Fallback using invoke (keep if API endpoint isn't ready) ---
-      // collectionSchema.value = await invoke('get_collection_schema', {
-      //   collectionName: collectionName.value
-      // });
-      // console.log('Schema fetch successful (invoke):', collectionSchema.value);
-      // initializeNewDocument(); // Initialize based on new schema
     } catch (err: any) {
       errorMessage.value = `Schema error: ${err.message}`
       collectionSchema.value = {} // Reset schema on error
@@ -909,9 +915,25 @@ export const useDataTableStore = defineStore('dataTable', () => {
     }
   }
 
-  const updateUIMetadata = async (uiUpdate: Record<string, any>) => {
+  async function updateUIMetadata(uiUpdate: Record<string, any>) {
     if (!collectionName.value) return
 
+    if (previewMode.value) {
+      // Preview mode: save to sessionStorage
+      const previewStateKey = `previewState-${collectionName.value}`
+      const currentPreviewState = JSON.parse(sessionStorage.getItem(previewStateKey) || '{}')
+      const updatedPreviewState = { ...currentPreviewState, ...uiUpdate }
+      sessionStorage.setItem(previewStateKey, JSON.stringify(updatedPreviewState))
+
+      // Update local schema without API call
+      collectionSchema.value.ui = {
+        ...collectionSchema.value.ui,
+        ...uiUpdate,
+      }
+      return
+    }
+
+    // Regular mode: save to backend
     try {
       const response = await fetch(`${API_BASE}/collections/${collectionName.value}/ui-metadata`, {
         method: 'PUT',
@@ -953,7 +975,11 @@ export const useDataTableStore = defineStore('dataTable', () => {
       visibleColumns: tableHeaders.value.filter((h) => !hiddenColumns.value.includes(h)),
     })
 
-    saveColumnVisibilityToBackend()
+    if (previewMode.value) {
+      savePreviewState()
+    } else {
+      saveColumnVisibilityToBackend()
+    }
   }
 
   // Add action to save to backend
@@ -996,39 +1022,104 @@ export const useDataTableStore = defineStore('dataTable', () => {
     }
   }
 
+  const loadPreviewState = () => {
+    if (!collectionName.value) return
+
+    // Load UI settings
+    const savedUI = sessionStorage.getItem(`previewState-${collectionName.value}`)
+    if (savedUI) {
+      const parsedUI = JSON.parse(savedUI)
+      collectionSchema.value.ui = {
+        ...collectionSchema.value.ui,
+        ...parsedUI,
+      }
+    }
+
+    // Load hidden columns
+    const savedHidden = sessionStorage.getItem(`previewHidden-${collectionName.value}`)
+    if (savedHidden) {
+      hiddenColumns.value = JSON.parse(savedHidden)
+    }
+  }
+
+  const savePreviewState = useDebounceFn(() => {
+    if (!collectionName.value) return
+
+    // Save UI settings
+    sessionStorage.setItem(
+      `previewState-${collectionName.value}`,
+      JSON.stringify(collectionSchema.value.ui)
+    )
+
+    // Save hidden columns
+    sessionStorage.setItem(
+      `previewHidden-${collectionName.value}`,
+      JSON.stringify(hiddenColumns.value)
+    )
+  }, 500)
+
+  const clearPreviewState = async () => {
+    if (!collectionName.value) return
+
+    sessionStorage.removeItem(`previewState-${collectionName.value}`)
+    sessionStorage.removeItem(`previewHidden-${collectionName.value}`)
+    sessionStorage.removeItem(`previewRowHeights-${collectionName.value}`)
+
+    await fetchSchema()
+    await fetchDocuments()
+  }
+
+  const previewMode = ref(sessionStorage.getItem('previewMode') === 'true')
+
   // Save column widths to backend (called by debounced function in component)
   async function saveColumnWidthsToBackend() {
     if (!collectionName.value) return
-    console.log('Saving column widths to backend:', columnWidths.value)
-    try {
-      const response = await fetch(`${API_BASE}/collections/${collectionName.value}/ui-metadata`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ columnWidths: columnWidths.value }),
-      })
-      if (!response.ok) {
-        let errorData
-        try {
-          errorData = await response.json()
-        } catch {
-          /* ignore */
+
+    if (previewMode.value) {
+      // Save to sessionStorage for Preview Mode
+      const previewState = {
+        ...collectionSchema.value.ui,
+        columnWidths: columnWidths.value,
+      }
+      sessionStorage.setItem(`previewState-${collectionName.value}`, JSON.stringify(previewState))
+      console.log('Column widths saved to sessionStorage for preview mode')
+    } else {
+      try {
+        console.log('Saving column widths to backend:', columnWidths.value)
+        const response = await fetch(
+          `${API_BASE}/collections/${collectionName.value}/ui-metadata`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ columnWidths: columnWidths.value }),
+          }
+        )
+
+        if (!response.ok) {
+          let errorData
+          try {
+            errorData = await response.json()
+          } catch {
+            /* ignore */
+          }
+          throw new Error(errorData?.error || `Save widths failed: HTTP ${response.status}`)
         }
-        throw new Error(errorData?.error || `Save widths failed: HTTP ${response.status}`)
+
+        const result = await response.json()
+        if (result.success) {
+          console.log('Column widths saved successfully.')
+          // Optionally show a success toast
+        } else {
+          throw new Error(result.error || 'Failed to save column widths (API Error)')
+        }
+      } catch (err: any) {
+        toast({
+          title: 'Save Error',
+          description: `Could not save column widths: ${err.message}`,
+          variant: 'destructive',
+        })
+        console.error('Error saving column widths:', err)
       }
-      const result = await response.json()
-      if (result.success) {
-        console.log('Column widths saved successfully.')
-        // Optionally show a success toast
-      } else {
-        throw new Error(result.error || 'Failed to save column widths (API Error)')
-      }
-    } catch (err: any) {
-      toast({
-        title: 'Save Error',
-        description: `Could not save column widths: ${err.message}`,
-        variant: 'destructive',
-      })
-      console.error('Error saving column widths:', err)
     }
   }
 
@@ -1067,6 +1158,7 @@ export const useDataTableStore = defineStore('dataTable', () => {
     addingRowError,
     hiddenColumns,
     visibleHeaders,
+    previewMode,
 
     // Getters
     totalDocuments,

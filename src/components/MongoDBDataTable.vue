@@ -84,6 +84,7 @@
     allSelected,
     hiddenColumns,
     visibleHeaders,
+    previewMode,
   } = storeToRefs(dataTableStore)
 
   // Destructure actions (they are just functions)
@@ -757,6 +758,12 @@
     }
   }, 500) // 500ms delay
 
+  const previewRowHeights = computed(() => {
+    if (!previewMode.value || !collectionName.value) return {}
+    const heights = sessionStorage.getItem(`previewRowHeights-${collectionName.value}`)
+    return heights ? JSON.parse(heights) : {}
+  })
+
   const stopRowResize = async () => {
     if (!rowResizingState.value.isResizing) return
     const { documentId, currentHeight } = rowResizingState.value
@@ -765,8 +772,18 @@
     document.removeEventListener('mousemove', handleRowMouseMove)
     document.removeEventListener('mouseup', stopRowResize)
 
-    // Use debounced save instead of immediate
-    debouncedRowHeightSave(documentId, currentHeight)
+    if (previewMode.value) {
+      const newHeights = {
+        ...previewRowHeights.value,
+        [documentId]: currentHeight,
+      }
+      sessionStorage.setItem(
+        `previewRowHeights-${collectionName.value}`,
+        JSON.stringify(newHeights)
+      )
+    } else {
+      debouncedRowHeightSave(documentId, currentHeight)
+    }
   }
 
   // New reactive state
@@ -965,8 +982,6 @@
     console.log(`[DRAG DEBUG] onDragEnd: Reset drag state:`, { ...dragState })
   }
 
-  const previewMode = ref(false)
-
   // Add a more verbose debugging approach
   watch(
     previewMode,
@@ -1095,7 +1110,7 @@
               class="text-white cursor-pointer"
               for="preview-live-toggle"
             >
-              {{ previewMode ? 'Preview Mode' : 'Live Mode' }}
+              {{ previewMode ? 'Mode: Preview' : 'Mode: Mode' }}
             </Label>
           </div>
         </div>
@@ -1275,7 +1290,11 @@
                 v-for="(doc, rowIndex) in paginatedDocuments"
                 :key="doc._id.$oid"
                 :data-document-id="doc._id.$oid"
-                :style="{ height: (doc.row_height || 40) + 'px' }"
+                :style="{
+                  height: previewMode
+                    ? `${previewRowHeights[doc._id.$oid] || doc.row_height || 40}px`
+                    : `${doc.row_height || 40}px`,
+                }"
                 class="excel-data-row relative"
                 :class="{
                   'highlight-row': highlightedDocumentId === doc._id.$oid,
@@ -1315,7 +1334,7 @@
                     "
                     :class="[
                       { 'hover:bg-gray-100': !doc.is_archive },
-                      { 'cursor-auto': previewMode },
+                      { 'cursor-default': previewMode },
                     ]"
                     :title="
                       previewMode
