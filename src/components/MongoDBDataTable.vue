@@ -995,8 +995,12 @@
     <MongoDBDataTableNavbar
       :isSplitActive="isSplit"
       class="sticky top-0 z-50"
+      :preview-mode="previewMode"
     />
-    <div class="excel-container w-full">
+    <div
+      class="excel-container w-full"
+      :class="{ '-mt-10': previewMode }"
+    >
       <StickyLeftSidebar
         :isOpen="isSidebarOpen"
         :pinnedDocuments="pinnedDocuments"
@@ -1030,6 +1034,7 @@
         class="w-full overflow-auto table-scroll-container"
       >
         <ExcelCellReference
+          :preview-mode="previewMode"
           :is-sidebar-open="isSidebarOpen"
           :selected-cell="selectedCell"
           :selected-rows="selectedRows"
@@ -1096,9 +1101,6 @@
             </Label>
           </div>
 
-          <template v-if="showImportInPreview">
-            <Button @click="triggerFileImport"> Import CSV </Button>
-          </template>
           <router-link
             :to="`/collection/${collectionName}/import-csv`"
             class="ml-4"
@@ -1348,7 +1350,7 @@
                     <span
                       v-if="user && doc.pinned_by?.includes(user.id)"
                       class="text-xl left-2 bottom-2 absolute z-10"
-                      :class="previewMode ? 'hidden' : ''"
+                      :class="{ hidden: previewMode }"
                     >
                       📌
                     </span>
@@ -1530,7 +1532,7 @@
               <div
                 v-if="showContextMenu"
                 class="fixed z-50 bg-white shadow-lg border rounded-md p-1 min-w-[120px] context-menu"
-                :class="previewMode ? 'hidden' : ''"
+                :class="{ hidden: previewMode }"
                 :style="{
                   left: `${contextMenuPosition.x}px`,
                   top: `${contextMenuPosition.y}px`,

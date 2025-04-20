@@ -34,6 +34,7 @@
     currentPage: number
     pageSize: number
     isSidebarOpen: boolean
+    previewMode?: boolean
   }>()
 
   const emit = defineEmits<{
@@ -479,7 +480,7 @@
   <!-- ExcelCellReference main div -->
   <div
     class="fixed h-[42px] z-30 top-14 w-screen flex items-center bg-white border-b border-b-gray-400 transition-all duration-300 ease-in-out"
-    :class="isSidebarOpen ? 'left-[280px]' : 'left-0'"
+    :class="[isSidebarOpen ? 'left-[280px]' : 'left-0', { hidden: previewMode }]"
   >
     <!-- Cell reference box (e.g., A1) -->
     <div class="flex items-center px-2">
