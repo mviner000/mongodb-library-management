@@ -16,7 +16,7 @@
   } from 'vue' // [cite: 1]
   import { useRoute, useRouter } from 'vue-router' // [cite: 1]
   import { storeToRefs } from 'pinia' // [cite: 1]
-  import { useDebounceFn } from '@vueuse/core' // [cite: 1]
+  import { useDebounceFn, useThrottleFn } from '@vueuse/core' // [cite: 1]
 
   // Store Imports
   import { useDataTableStore } from '@/store/dataTableStore' // [cite: 1]
@@ -146,7 +146,8 @@
   const route = useRoute() // [cite: 7]
   const router = useRouter() // [cite: 7]
   const isSplit = inject<Ref<boolean>>('isSplit')! // [cite: 7]
-  const scrollContainer = ref<HTMLElement | null>(null) // [cite: 8]
+  const scrollContainer = ref<HTMLElement | null>(null)
+  const isLoadingMore = ref(false)
   const isSidebarOpen = ref(false) // [cite: 9]
   const searchQuery = ref<Record<string, string>>({}) // [cite: 9]
   const selectedCell = ref<{ colIndex: number; rowNumber: number } | null>(null) // [cite: 10]
@@ -969,6 +970,49 @@
     fetchCollections: dataTableStore.fetchCollections, // [cite: 40]
     setCollection: dataTableStore.setCollection, // [cite: 40]
   })
+
+  const localAllSelected = computed({
+    get: () => {
+      if (documents.value.length === 0) return false
+      return documents.value.every((doc) => selectedRows.value.has(doc._id.$oid))
+    },
+    set: (val: boolean) => {
+      if (val) {
+        const ids = documents.value.map((doc) => doc._id.$oid)
+        selectedRows.value = new Set(ids)
+      } else {
+        selectedRows.value.clear()
+      }
+    },
+  })
+
+  const handleScroll = useThrottleFn(async () => {
+    if (!scrollContainer.value || isLoading.value || !dataTableStore.hasMore) return
+
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainer.value
+    const threshold = 100 // pixels from bottom
+
+    if (scrollHeight - (scrollTop + clientHeight) < threshold) {
+      isLoadingMore.value = true
+      try {
+        await dataTableStore.loadNextPage()
+      } finally {
+        isLoadingMore.value = false
+      }
+    }
+  }, 200)
+
+  onMounted(() => {
+    if (scrollContainer.value) {
+      scrollContainer.value.addEventListener('scroll', handleScroll)
+    }
+  })
+
+  onBeforeUnmount(() => {
+    if (scrollContainer.value) {
+      scrollContainer.value.removeEventListener('scroll', handleScroll)
+    }
+  })
 </script>
 <template>
   <!-- MongoDBDataTable main div -->
@@ -1018,7 +1062,7 @@
           :selectedCell="selectedCell"
           :selectedRows="selectedRows"
           :isSidebarOpen="isSidebarOpen"
-          :previewMode="false"
+          :previewMode="!previewMode"
           @reset-selection=""
         />
         <ExcelCellReference
@@ -1116,10 +1160,11 @@
                   maxWidth: '40px',
                 }"
               >
+                <!-- Select All/Unselect All -->
                 <input
                   type="checkbox"
-                  :checked="allSelected"
-                  @change="allSelected = !allSelected"
+                  :checked="localAllSelected"
+                  @change="localAllSelected = !localAllSelected"
                   :disabled="documents.length === 0"
                   class="excel-checkbox"
                 />
@@ -1729,79 +1774,12 @@
           </Button>
         </div>
 
+        <!-- Loading indicator -->
         <div
-          v-if="totalPages > 1"
-          class="excel-pagination"
+          v-if="isLoadingMore"
+          class="loading-indicator"
         >
-          <Pagination
-            :page="currentPage"
-            :itemsPerPage="pageSize"
-            :total="documents.length"
-            @update:page="onPageChange"
-            :siblingCount="1"
-          >
-            <PaginationList>
-              <PaginationListItem :value="1">
-                <PaginationFirst
-                  :disabled="currentPage === 1"
-                  @click="setPage(1)"
-                  class="excel-pagination-button"
-                />
-              </PaginationListItem>
-              <PaginationListItem :value="Math.max(1, currentPage - 1)">
-                <PaginationPrev
-                  :disabled="currentPage === 1"
-                  @click="setPage(currentPage - 1)"
-                  class="excel-pagination-button"
-                />
-              </PaginationListItem>
-              <PaginationListItem :value="Math.min(totalPages, currentPage + 1)">
-                <PaginationNext
-                  :disabled="currentPage === totalPages"
-                  @click="setPage(currentPage + 1)"
-                  class="excel-pagination-button"
-                />
-              </PaginationListItem>
-              <PaginationListItem :value="totalPages">
-                <PaginationLast
-                  :disabled="currentPage === totalPages"
-                  @click="setPage(totalPages)"
-                  class="excel-pagination-button"
-                />
-              </PaginationListItem>
-            </PaginationList>
-          </Pagination>
-        </div>
-
-        <div
-          v-if="!isAdding && !previewMode"
-          class="excel-footer"
-        >
-          <!-- Only show footer controls when not in preview mode -->
-          <span class="excel-page-size-label">Rows per page:</span>
-          <Select
-            :modelValue="String(pageSize)"
-            @update:modelValue="(val) => setPageSize(Number(val))"
-            class="excel-page-size-select"
-          >
-            <SelectTrigger class="w-16"> <SelectValue /> </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="5">5</SelectItem>
-              <SelectItem value="10">10</SelectItem>
-              <SelectItem value="20">20</SelectItem>
-              <SelectItem value="50">50</SelectItem>
-              <SelectItem value="100">100</SelectItem>
-            </SelectContent>
-          </Select>
-          <span class="excel-status-info">
-            {{
-              props.previewData
-                ? `Showing all ${documents.length} entries`
-                : `Showing ${paginatedDocuments.length ? (currentPage - 1) * pageSize + 1 : 0} to
-           ${(currentPage - 1) * pageSize + paginatedDocuments.length} of
-           ${documents.length} entries`
-            }}
-          </span>
+          <ReloadIcon class="h-6 w-6 animate-spin text-gray-500" />
         </div>
       </div>
     </div>
@@ -1809,6 +1787,11 @@
 </template>
 
 <style scoped>
+  .loading-indicator {
+    display: flex;
+    justify-content: center;
+    padding: 1rem;
+  }
   .pending-delete-outline {
     background-color: #fee2e2;
     border: 2px solid #ef4444;
@@ -2497,19 +2480,19 @@
 
   /* Add green scrollbar to the table container */
   .table-scroll-container::-webkit-scrollbar {
-    height: 12px; /* [cite: 141] */
+    height: 16px; /* [cite: 141] */
     width: 12px; /* Added width */
     background-color: #f0fdf4; /* [cite: 141] */
   }
 
   .table-scroll-container::-webkit-scrollbar-track {
     background: #f0fdf4; /* [cite: 142] */
-    border-radius: 6px; /* [cite: 142] */
+    border-radius: 10px; /* [cite: 142] */
   }
 
   .table-scroll-container::-webkit-scrollbar-thumb {
     background: #16a34a; /* [cite: 142] */
-    border-radius: 6px; /* [cite: 142] */
+    border-radius: 10px; /* [cite: 142] */
     border: 2px solid #f0fdf4; /* [cite: 142] */
   }
 

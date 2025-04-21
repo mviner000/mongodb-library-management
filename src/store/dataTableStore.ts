@@ -29,8 +29,9 @@ export const useDataTableStore = defineStore('dataTable', () => {
   const collectionSchema = ref<any>({}) // Consider defining a stricter type
   const isLoading = ref<boolean>(false)
   const errorMessage = ref<string>('')
-  const pageSize = ref<number>(10)
+  const pageSize = ref<number>(20)
   const currentPage = ref<number>(1)
+  const hasMore = ref<boolean>(true)
   const filterQuery = ref<string>('{}') // Keep filter query local or move if needed globally
   const newDocument = ref<Record<string, any>>({})
   const isAdding = ref<boolean>(false)
@@ -47,7 +48,7 @@ export const useDataTableStore = defineStore('dataTable', () => {
   const addingRowError = ref<boolean>(false)
 
   // --- Getters (Computed) ---
-  const totalDocuments = computed(() => documents.value.length)
+  const totalDocuments = ref<number>(0)
   const totalPages = computed(() => Math.ceil(totalDocuments.value / pageSize.value))
 
   const paginatedDocuments = computed(() => {
@@ -262,22 +263,21 @@ export const useDataTableStore = defineStore('dataTable', () => {
 
   // Fetch documents for the current collection and view
   async function fetchDocuments() {
-    if (previewMode.value) return // Skip in preview
+    if (previewMode.value) return
     if (!collectionName.value) return
 
     isLoading.value = true
     errorMessage.value = ''
-    pendingDeleteId.value = null // Clear pending deletion style
+    pendingDeleteId.value = null
 
     try {
       let filter = {}
       try {
-        filter = JSON.parse(filterQuery.value) // Use the filter from state
+        filter = JSON.parse(filterQuery.value)
       } catch (e: any) {
         throw new Error(`Invalid filter JSON: ${e.message}`)
       }
 
-      // Build endpoint based on current view
       let endpoint
       switch (currentView.value) {
         case 'archives':
@@ -289,9 +289,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
         case 'empty-or-recovered':
           endpoint = `${API_BASE}/collections/${collectionName.value}/empty-or-recovered`
           break
-        case 'pins':
-          endpoint = `${API_BASE}/collections/${collectionName.value}/pins`
-          break
         case 'all':
         default:
           endpoint = `${API_BASE}/collections/${collectionName.value}/documents`
@@ -300,28 +297,57 @@ export const useDataTableStore = defineStore('dataTable', () => {
 
       const params = new URLSearchParams()
       params.append('filter', JSON.stringify(filter))
-      // Add pagination/sorting params if your API supports them
-      // params.append('page', currentPage.value.toString());
-      // params.append('limit', pageSize.value.toString());
+      params.append('page', currentPage.value.toString())
+      params.append('limit', pageSize.value.toString())
 
       const url = `${endpoint}?${params.toString()}`
       const response = await fetch(url)
+
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
-      const { success, data, error } = await response.json()
+
+      const { success, data: responseData, error } = await response.json()
 
       if (success) {
-        documents.value = data
-        if (currentPage.value > totalPages.value) {
-          currentPage.value = Math.max(1, totalPages.value) // Adjust page if out of bounds
+        // Append new documents or replace if first page
+        if (currentPage.value === 1) {
+          documents.value = responseData.items
+        } else {
+          documents.value.push(...responseData.items)
+        }
+
+        totalDocuments.value = responseData.total
+        hasMore.value = currentPage.value * pageSize.value < responseData.total
+
+        // Reset page if no results
+        if (currentPage.value > 1 && responseData.items.length === 0) {
+          currentPage.value--
         }
       } else {
         throw new Error(error || 'Failed to fetch documents')
       }
     } catch (err: any) {
       errorMessage.value = `Error fetching documents: ${err.message}`
-      documents.value = [] // Clear documents on error
+      if (currentPage.value > 1) currentPage.value--
     } finally {
       isLoading.value = false
+    }
+  }
+
+  // --- New function to load next page ---
+  async function loadNextPage() {
+    if (!hasMore.value || isLoading.value) return
+    currentPage.value++
+    await fetchDocuments()
+  }
+
+  // --- Reset pagination when view changes ---
+  function changeView(view: string) {
+    if (currentView.value !== view) {
+      currentView.value = view
+      currentPage.value = 1
+      documents.value = []
+      hasMore.value = true
+      fetchDocuments()
     }
   }
 
@@ -379,10 +405,14 @@ export const useDataTableStore = defineStore('dataTable', () => {
       const { success: docsSuccess, data: docsData, error: docsError } = await docsResponse.json()
 
       if (docsSuccess) {
-        referenceOptions.value[refCollectionName] = docsData.map((doc: any) => ({
+        // Check if paginated structure exists
+        const items = docsData.items || docsData
+
+        referenceOptions.value[refCollectionName] = items.map((doc: any) => ({
           id: doc._id.$oid, // Assuming MongoDB ObjectId structure
           label: doc[labelField] || doc._id.$oid, // Use determined label or fallback to ID
         }))
+
         if (referenceOptions.value[refCollectionName].length === 0) {
           toast({
             title: 'No Reference Options',
@@ -787,15 +817,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     editingCell.value = null // Also cancel any active edit
   }
 
-  // Change the current view (all, archives, etc.)
-  function changeView(view: string) {
-    if (currentView.value !== view) {
-      currentView.value = view
-      currentPage.value = 1 // Reset to first page on view change
-      fetchDocuments() // Refetch documents for the new view
-    }
-  }
-
   // Set current page
   function setPage(page: number) {
     const newPage = Math.max(1, Math.min(page, totalPages.value))
@@ -1031,6 +1052,7 @@ export const useDataTableStore = defineStore('dataTable', () => {
   // Return state, getters, and actions
   return {
     // State
+    hasMore,
     collectionName,
     documents,
     collectionSchema,
@@ -1084,6 +1106,7 @@ export const useDataTableStore = defineStore('dataTable', () => {
     toggleRow,
     resetSelection,
     changeView,
+    loadNextPage,
     setPage,
     setPageSize,
     updateDocumentField,

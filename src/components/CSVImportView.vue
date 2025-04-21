@@ -45,11 +45,9 @@
       const shortNameMap = createShortNameMap(schema)
       const transformedData = transformCSVData(csvData, shortNameMap)
 
+      // After transforming data
       previewData.value = transformedData
-
-      // Auto-select all rows
-      const ids = transformedData.map((doc: any) => doc._id.$oid)
-      dataTableStore.selectedRows = new Set(ids)
+      dataTableStore.selectedRows = new Set(transformedData.map((doc: any) => doc._id.$oid))
 
       localStorage.setItem(
         `csv-import-${collectionName.value}`,

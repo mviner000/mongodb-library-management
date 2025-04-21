@@ -56,3 +56,11 @@ pub fn error_response<T: Serialize>(status: StatusCode, message: String) -> (Sta
         error: Some(message),
     }))
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct PaginatedDocuments {
+    pub items: Vec<Document>,
+    pub total: u64,
+    pub page: u64,
+    pub page_size: u64,
+}

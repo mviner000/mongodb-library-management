@@ -650,7 +650,10 @@
       </DialogContent>
     </Dialog>
   </div>
-  <div class="sheets-tabs-container">
+  <div
+    class="sheets-tabs-container"
+    :class="{ hidden: previewMode }"
+  >
     <div class="sheets-tabs-wrapper">
       <button class="nav-button">
         <span class="nav-icon">◀</span>

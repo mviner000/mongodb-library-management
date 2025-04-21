@@ -1,4 +1,4 @@
-// src/api_server/handlers/document_handlers.rs
+// new src/api_server/handlers/document_handlers.rs
 
 use axum::{
     http::StatusCode,
@@ -14,7 +14,8 @@ use mongodb::{
     bson::{doc, Document, oid::ObjectId}, 
     Cursor
 };
-use mongodb::options::{FindOneAndUpdateOptions, ReturnDocument};
+use mongodb::options::{FindOptions, FindOneAndUpdateOptions, ReturnDocument};
+use crate::api_server::models::PaginatedDocuments;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -40,39 +41,59 @@ pub async fn find_documents_handler(
 ) -> impl IntoResponse {
     let mongodb_state = &state.lock().await.mongodb_state;
     
-    // Extract filter from query parameters - fixed temporary value issue
     let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
-    
-    // Parse the JSON string into a Document
     let filter: Document = match serde_json::from_str(&filter_str) {
         Ok(f) => f,
-        Err(e) => return error_response::<Vec<Document>>(
+        Err(e) => return error_response::<PaginatedDocuments>(
             StatusCode::BAD_REQUEST, 
             format!("Invalid filter JSON: {}", e)
         ),
     };
     
+    let page = params.get("page").and_then(|p| p.parse::<u64>().ok()).unwrap_or(1);
+    let page_size = params.get("page_size").and_then(|ps| ps.parse::<u64>().ok()).unwrap_or(10);
+    let skip = (page - 1) * page_size;
+    
     match get_database(mongodb_state).await {
         Ok(db) => {
             let collection = db.collection::<Document>(&collection_name);
             
-            match collection.find(filter, None).await {
+            let total = match collection.count_documents(filter.clone(), None).await {
+                Ok(count) => count,
+                Err(e) => return error_response::<PaginatedDocuments>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            };
+            
+            let options = FindOptions::builder()
+                .skip(skip)
+                .limit(page_size as i64)
+                .build();
+            
+            match collection.find(filter, Some(options)).await {
                 Ok(cursor) => {
                     match process_cursor(cursor).await {
-                        Ok(documents) => {
+                        Ok(items) => {
+                            let paginated_data = PaginatedDocuments {
+                                items,
+                                total,
+                                page,
+                                page_size,
+                            };
                             (StatusCode::OK, Json(ApiResponse {
                                 success: true,
-                                data: Some(documents),
+                                data: Some(paginated_data),
                                 error: None,
                             }))
                         },
-                        Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e),
+                        Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e),
                     }
                 },
-                Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+                Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             }
         },
-        Err((status, e)) => error_response::<Vec<Document>>(status, e),
+        Err((status, e)) => error_response::<PaginatedDocuments>(status, e),
     }
 }
 
@@ -84,39 +105,60 @@ pub async fn find_archived_documents_handler(
     let mongodb_state = &state.lock().await.mongodb_state;
     
     let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
-    
     let mut filter: Document = match serde_json::from_str(&filter_str) {
         Ok(f) => f,
-        Err(e) => return error_response::<Vec<Document>>(
+        Err(e) => return error_response::<PaginatedDocuments>(
             StatusCode::BAD_REQUEST, 
             format!("Invalid filter JSON: {}", e)
         ),
     };
     
-    // Filter for archived documents
     filter.insert("is_archive", true);
+    
+    let page = params.get("page").and_then(|p| p.parse::<u64>().ok()).unwrap_or(1);
+    let page_size = params.get("page_size").and_then(|ps| ps.parse::<u64>().ok()).unwrap_or(10);
+    let skip = (page - 1) * page_size;
     
     match get_database(mongodb_state).await {
         Ok(db) => {
             let collection = db.collection::<Document>(&collection_name);
             
-            match collection.find(filter, None).await {
+            let total = match collection.count_documents(filter.clone(), None).await {
+                Ok(count) => count,
+                Err(e) => return error_response::<PaginatedDocuments>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            };
+            
+            let options = FindOptions::builder()
+                .skip(skip)
+                .limit(page_size as i64)
+                .build();
+            
+            match collection.find(filter, Some(options)).await {
                 Ok(cursor) => {
                     match process_cursor(cursor).await {
-                        Ok(documents) => {
+                        Ok(items) => {
+                            let paginated_data = PaginatedDocuments {
+                                items,
+                                total,
+                                page,
+                                page_size,
+                            };
                             (StatusCode::OK, Json(ApiResponse {
                                 success: true,
-                                data: Some(documents),
+                                data: Some(paginated_data),
                                 error: None,
                             }))
                         },
-                        Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e),
+                        Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e),
                     }
                 },
-                Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+                Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             }
         },
-        Err((status, e)) => error_response::<Vec<Document>>(status, e),
+        Err((status, e)) => error_response::<PaginatedDocuments>(status, e),
     }
 }
 
@@ -128,16 +170,14 @@ pub async fn find_recovered_documents_handler(
     let mongodb_state = &state.lock().await.mongodb_state;
     
     let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
-    
     let mut filter: Document = match serde_json::from_str(&filter_str) {
         Ok(f) => f,
-        Err(e) => return error_response::<Vec<Document>>(
+        Err(e) => return error_response::<PaginatedDocuments>(
             StatusCode::BAD_REQUEST, 
             format!("Invalid filter JSON: {}", e)
         ),
     };
     
-    // Correctly filter for documents where the latest archive action is "recover"
     filter.insert("is_archive", false);
     filter.insert("$expr", doc! {
         "$eq": [
@@ -146,27 +186,50 @@ pub async fn find_recovered_documents_handler(
         ]
     });
     
+    let page = params.get("page").and_then(|p| p.parse::<u64>().ok()).unwrap_or(1);
+    let page_size = params.get("page_size").and_then(|ps| ps.parse::<u64>().ok()).unwrap_or(10);
+    let skip = (page - 1) * page_size;
+    
     match get_database(mongodb_state).await {
         Ok(db) => {
             let collection = db.collection::<Document>(&collection_name);
             
-            match collection.find(filter, None).await {
+            let total = match collection.count_documents(filter.clone(), None).await {
+                Ok(count) => count,
+                Err(e) => return error_response::<PaginatedDocuments>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            };
+            
+            let options = FindOptions::builder()
+                .skip(skip)
+                .limit(page_size as i64)
+                .build();
+            
+            match collection.find(filter, Some(options)).await {
                 Ok(cursor) => {
                     match process_cursor(cursor).await {
-                        Ok(documents) => {
+                        Ok(items) => {
+                            let paginated_data = PaginatedDocuments {
+                                items,
+                                total,
+                                page,
+                                page_size,
+                            };
                             (StatusCode::OK, Json(ApiResponse {
                                 success: true,
-                                data: Some(documents),
+                                data: Some(paginated_data),
                                 error: None,
                             }))
                         },
-                        Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e),
+                        Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e),
                     }
                 },
-                Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+                Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             }
         },
-        Err((status, e)) => error_response::<Vec<Document>>(status, e),
+        Err((status, e)) => error_response::<PaginatedDocuments>(status, e),
     }
 }
 
@@ -226,28 +289,22 @@ pub async fn find_empty_or_recovered_documents_handler(
 ) -> impl IntoResponse {
     let mongodb_state = &state.lock().await.mongodb_state;
     
-    // Extract filter from query parameters
     let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
-    
-    // Parse the JSON string into a Document
     let mut filter: Document = match serde_json::from_str(&filter_str) {
         Ok(f) => f,
-        Err(e) => return error_response::<Vec<Document>>(
+        Err(e) => return error_response::<PaginatedDocuments>(
             StatusCode::BAD_REQUEST, 
             format!("Invalid filter JSON: {}", e)
         ),
     };
     
-    // Build the combined $or condition
     filter.insert("$or", vec![
-        // Condition 1: Empty archive history (either doesn't exist or array is empty)
         doc! {
             "$or": [
                 { "archive_history": { "$exists": false } },
                 { "archive_history": { "$size": 0 } }
             ]
         },
-        // Condition 2: Latest archive action is 'recover' and array is not empty
         doc! {
             "archive_history.0": { "$exists": true },
             "$expr": {
@@ -259,28 +316,50 @@ pub async fn find_empty_or_recovered_documents_handler(
         }
     ]);
     
-    // Execute the query with the combined filter
+    let page = params.get("page").and_then(|p| p.parse::<u64>().ok()).unwrap_or(1);
+    let page_size = params.get("page_size").and_then(|ps| ps.parse::<u64>().ok()).unwrap_or(10);
+    let skip = (page - 1) * page_size;
+    
     match get_database(mongodb_state).await {
         Ok(db) => {
             let collection = db.collection::<Document>(&collection_name);
             
-            match collection.find(filter, None).await {
+            let total = match collection.count_documents(filter.clone(), None).await {
+                Ok(count) => count,
+                Err(e) => return error_response::<PaginatedDocuments>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            };
+            
+            let options = FindOptions::builder()
+                .skip(skip)
+                .limit(page_size as i64)
+                .build();
+            
+            match collection.find(filter, Some(options)).await {
                 Ok(cursor) => {
                     match process_cursor(cursor).await {
-                        Ok(documents) => {
+                        Ok(items) => {
+                            let paginated_data = PaginatedDocuments {
+                                items,
+                                total,
+                                page,
+                                page_size,
+                            };
                             (StatusCode::OK, Json(ApiResponse {
                                 success: true,
-                                data: Some(documents),
+                                data: Some(paginated_data),
                                 error: None,
                             }))
                         },
-                        Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e),
+                        Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e),
                     }
                 },
-                Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+                Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             }
         },
-        Err((status, e)) => error_response::<Vec<Document>>(status, e),
+        Err((status, e)) => error_response::<PaginatedDocuments>(status, e),
     }
 }
 
