@@ -196,7 +196,15 @@
   // Computed Properties
   // ==========================================================================
   const documents = computed(() => {
-    return props.previewData || dataTableStore.documents // [cite: 69, 70]
+    if (props.previewData) {
+      // Directly use previewData from SQLite backend
+      return props.previewData.map((doc) => ({
+        ...doc,
+        // Ensure proper ObjectID format
+        _id: doc._id?.$oid ? doc._id : { $oid: doc._id },
+      }))
+    }
+    return dataTableStore.documents
   })
 
   const paginatedDocuments = computed(() => {

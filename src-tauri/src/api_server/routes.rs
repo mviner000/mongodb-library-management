@@ -45,6 +45,11 @@ use crate::api_server::{
             health_check_handler,
             initialize_library_collections_handler,
         },
+        csv_temp_handlers::{
+            load_csv_temp,
+            save_csv_temp,
+            delete_csv_temp
+        }
     },
 };
 
@@ -78,6 +83,11 @@ pub fn create_api_router() -> (Router<Arc<Mutex<ApiServerState>>>, Vec<String>) 
     add_route!(Method::GET, "/collections/:collection_name/schema", get_collection_schema_handler);
     add_route!(Method::PUT, "/collections/:collection_name/ui-metadata", update_ui_metadata_handler);
     
+    // route for temp sqlite3 csv temporary storage
+    add_route!(Method::POST, "/api/csv-temp/:collection", save_csv_temp);
+    add_route!(Method::GET, "/api/csv-temp/:collection", load_csv_temp);
+    add_route!(Method::DELETE, "/api/csv-temp/:collection", delete_csv_temp);
+
     // Document routes
     add_route!(Method::GET, "/collections/:collection_name/documents", find_documents_handler);
     add_route!(

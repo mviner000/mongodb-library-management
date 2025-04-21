@@ -7,6 +7,7 @@
   import MongoDBDataTable from '@/components/MongoDBDataTable.vue'
   import { parseCSV } from '@/utils/parseCSV'
   import { useDataTableStore } from '@/store/dataTableStore'
+  import { getApiBaseUrl } from '@/utils/api'
 
   const route = useRoute()
   const { toast } = useToast()
@@ -45,20 +46,26 @@
       const shortNameMap = createShortNameMap(schema)
       const transformedData = transformCSVData(csvData, shortNameMap)
 
-      // After transforming data
-      previewData.value = transformedData
-      dataTableStore.selectedRows = new Set(transformedData.map((doc: any) => doc._id.$oid))
-
-      localStorage.setItem(
-        `csv-import-${collectionName.value}`,
-        JSON.stringify({
-          collection: collectionName.value,
-          data: transformedData,
+      try {
+        // Save to SQLite backend instead of localStorage
+        const response = await fetch(`${getApiBaseUrl()}/api/csv-temp/${collectionName.value}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(transformedData),
         })
-      )
 
-      hasImportedData.value = true
-      toast({ title: 'CSV Validated', description: 'Data successfully imported' })
+        if (!response.ok) throw new Error('Failed to save temporary data')
+
+        // After transforming data
+        previewData.value = transformedData
+        dataTableStore.selectedRows = new Set(transformedData.map((doc: any) => doc._id.$oid))
+        hasImportedData.value = true
+        toast({ title: 'CSV Validated', description: 'Data successfully imported' })
+      } catch (error: any) {
+        toast({ title: 'Save Failed', description: error.message, variant: 'destructive' })
+      }
     } catch (error: any) {
       // Handle parsing/validation errors
       toast({ title: 'Import Failed', description: error.message, variant: 'destructive' })
@@ -162,22 +169,24 @@
     return result
   }
 
-  onMounted(() => {
-    const savedData = localStorage.getItem(`csv-import-${collectionName.value}`)
-    if (savedData) {
-      try {
-        const csvData = JSON.parse(savedData)
-        previewData.value = csvData.data
+  onMounted(async () => {
+    try {
+      // Load from SQLite backend instead of localStorage
+      const response = await fetch(`${getApiBaseUrl()}/api/csv-temp/${collectionName.value}`)
+
+      if (response.ok) {
+        const data = await response.json()
+        previewData.value = data
         hasImportedData.value = true
 
         // Auto-select all rows when loading saved data
-        const ids = csvData.data.map((doc: any) => doc._id.$oid)
+        const ids = data.map((doc: any) => doc._id?.$oid)
         dataTableStore.selectedRows = new Set(ids)
 
-        console.log(`Loaded saved CSV data with ${csvData.data.length} rows`)
-      } catch (error) {
-        console.error('Error loading saved CSV data:', error)
+        console.log(`Loaded saved CSV data with ${data.length} rows`)
       }
+    } catch (error) {
+      console.error('Error loading saved CSV data:', error)
     }
   })
 
@@ -185,16 +194,22 @@
     fileInput.value?.click()
   }
 
-  const resetImport = () => {
-    localStorage.removeItem(`csv-import-${collectionName.value}`)
-    previewData.value = []
-    hasImportedData.value = false
-    // Clear selected rows when resetting
-    dataTableStore.selectedRows = new Set()
-    if (fileInput.value) {
-      fileInput.value.value = ''
+  const resetImport = async () => {
+    try {
+      // Delete from SQLite backend instead of localStorage
+      await fetch(`${getApiBaseUrl()}/api/csv-temp/${collectionName.value}`, { method: 'DELETE' })
+
+      previewData.value = []
+      hasImportedData.value = false
+      // Clear selected rows when resetting
+      dataTableStore.selectedRows = new Set()
+      if (fileInput.value) {
+        fileInput.value.value = ''
+      }
+      toast({ title: 'Reset Complete', description: 'Temporary data cleared' })
+    } catch (error: any) {
+      toast({ title: 'Reset Failed', description: error.message, variant: 'destructive' })
     }
-    toast({ title: 'Reset Complete', description: 'CSV data has been cleared' })
   }
 
   onUnmounted(() => {

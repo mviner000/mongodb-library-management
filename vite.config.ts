@@ -1,11 +1,10 @@
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig } from "vite";
+import { defineConfig } from 'vite'
 import autoprefixer from 'autoprefixer'
 import tailwind from 'tailwindcss'
-import vue from "@vitejs/plugin-vue";
+import vue from '@vitejs/plugin-vue'
 
-
-const host = process.env.TAURI_DEV_HOST || '0.0.0.0';
+const host = process.env.TAURI_DEV_HOST || '0.0.0.0'
 
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
@@ -18,8 +17,8 @@ export default defineConfig(async () => ({
 
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
-    }
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
@@ -33,14 +32,14 @@ export default defineConfig(async () => ({
     host: host || false,
     hmr: host
       ? {
-          protocol: "ws",
+          protocol: 'ws',
           host,
           port: 1421,
         }
       : undefined,
     watch: {
       // 3. tell vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      ignored: ['**/src-tauri/**'],
     },
   },
-}));
+}))
