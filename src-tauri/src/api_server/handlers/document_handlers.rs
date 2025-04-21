@@ -1,7 +1,7 @@
-// new src/api_server/handlers/document_handlers.rs
+// src/api_server/handlers/document_handlers.rs
 
 use axum::{
-    http::StatusCode,
+    http::{StatusCode, header},
     Json, 
     extract::{State, Path, Query},
     response::IntoResponse,
@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 use futures_util::StreamExt;
 use std::collections::HashMap;
 use chrono;
-
+use crate::api_server::services::get_collection_schema_with_ui;
 use crate::api_server::services::schema_service::get_collection_schema_internal;
 use crate::api_server::state::ApiServerState;
 use crate::api_server::models::{
@@ -1374,6 +1374,227 @@ pub async fn unpin_document_handler(
             error_response::<Document>(status, e)
         },
     }
+}
+
+pub async fn download_collection_csv_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> axum::response::Response {
+    println!("[DEBUG] download_collection_csv_handler called for collection: {}", collection_name);
+    let header_type = params.get("headers").map(|s| s.as_str()).unwrap_or("original");
+    let include_id = params.get("include_id").map(|s| s == "true").unwrap_or(false);
+    println!("[DEBUG] Header type requested: {}", header_type);
+    println!("[DEBUG] Include ID: {}", include_id);
+    
+    let mongodb_state = &state.lock().await.mongodb_state;
+    println!("[DEBUG] Acquired MongoDB state lock");
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            println!("[DEBUG] Successfully connected to database");
+            let collection = db.collection::<Document>(&collection_name);
+            println!("[DEBUG] Using collection: {}", collection_name);
+            
+            // Get schema with UI metadata
+            println!("[DEBUG] Fetching collection schema with UI metadata");
+            let schema = match get_collection_schema_with_ui(&db, &collection_name).await {
+                Ok(s) => {
+                    println!("[DEBUG] Schema fetched successfully");
+                    s
+                },
+                Err(e) => {
+                    println!("[ERROR] Failed to fetch schema: {}", e);
+                    let (status, json) = error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e);
+                    return error_to_response(status, json);
+                }
+            };
+            
+            // Get all documents
+            println!("[DEBUG] Executing find() to retrieve all documents");
+            let cursor = match collection.find(None, None).await {
+                Ok(c) => {
+                    println!("[DEBUG] Cursor obtained successfully");
+                    c
+                },
+                Err(e) => {
+                    println!("[ERROR] Failed to get cursor: {}", e);
+                    let (status, json) = error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+                    return error_to_response(status, json);
+                }
+            };
+            
+            println!("[DEBUG] Processing cursor to retrieve documents");
+            let documents = match process_cursor(cursor).await {
+                Ok(docs) => {
+                    println!("[DEBUG] Retrieved {} documents", docs.len());
+                    docs
+                },
+                Err(e) => {
+                    println!("[ERROR] Failed to process cursor: {}", e);
+                    let (status, json) = error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e);
+                    return error_to_response(status, json);
+                }
+            };
+            
+            // Generate CSV
+            println!("[DEBUG] Initializing CSV writer");
+            let mut wtr = csv::WriterBuilder::new()
+                .quote_style(csv::QuoteStyle::NonNumeric) // Only quote non-numeric fields
+                .double_quote(true) // Use standard CSV double-quoting
+                .from_writer(vec![]);
+            
+            // Get headers
+            println!("[DEBUG] Extracting properties from schema");
+            let properties = schema.get_document("properties").unwrap();
+            println!("[DEBUG] Found {} properties", properties.keys().count());
+            
+            // Create a longer-lived empty document
+            let empty_doc = Document::new();
+            
+            // Build field list
+            println!("[DEBUG] Building field list");
+            let mut fields: Vec<String> = properties.keys().map(|k| k.to_string()).collect();
+            if include_id && !fields.contains(&"_id".to_string()) {
+                println!("[DEBUG] Adding _id to field list");
+                fields.insert(0, "_id".to_string());
+            }
+            
+            println!("[DEBUG] Looking for short_names in UI metadata");
+            let short_names = schema.get_document("ui")
+                .and_then(|ui| ui.get_document("short_names"))
+                .unwrap_or(&empty_doc);
+            
+            // Generate headers with correct names
+            let headers: Vec<String> = fields.iter().map(|field| {
+                if header_type == "short" {
+                    let result = short_names.get_str(field).unwrap_or(field).to_string();
+                    println!("[DEBUG] Mapping header '{}' to short name '{}'", field, result);
+                    result
+                } else {
+                    println!("[DEBUG] Using original header name: {}", field);
+                    field.clone()
+                }
+            }).collect();
+            println!("[DEBUG] Final headers: {:?}", headers);
+            
+            // Write headers
+            println!("[DEBUG] Writing headers to CSV");
+            if let Err(e) = wtr.write_record(&headers) {
+                println!("[ERROR] Failed to write CSV headers: {}", e);
+                let (status, json) = error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+                return error_to_response(status, json);
+            }
+            
+            // Write rows
+            println!("[DEBUG] Writing document data to CSV rows");
+            let mut row_count = 0;
+            for doc in documents {
+                let mut row = Vec::new();
+                for field in &fields {
+                    let value = match doc.get(field) {
+                        Some(bson) => match bson {
+                            mongodb::bson::Bson::ObjectId(oid) => {
+                                println!("[DEBUG] Converting ObjectId value for field: {}", field);
+                                oid.to_hex()
+                            },
+                            mongodb::bson::Bson::DateTime(dt) => {
+                                println!("[DEBUG] Converting DateTime value for field: {}", field);
+                                let millis = dt.timestamp_millis();
+                                let datetime = chrono::DateTime::from_timestamp_millis(millis)
+                                    .unwrap_or_default();
+                                datetime.to_rfc3339()
+                            },
+                            mongodb::bson::Bson::String(s) => {
+                                println!("[DEBUG] Using String value directly for field: {}", field);
+                                s.clone()
+                            },
+                            mongodb::bson::Bson::Int32(i) => {
+                                println!("[DEBUG] Converting Int32 value for field: {}", field);
+                                i.to_string()
+                            },
+                            mongodb::bson::Bson::Int64(i) => {
+                                println!("[DEBUG] Converting Int64 value for field: {}", field);
+                                i.to_string()
+                            },
+                            mongodb::bson::Bson::Double(d) => {
+                                println!("[DEBUG] Converting Double value for field: {}", field);
+                                d.to_string()
+                            },
+                            mongodb::bson::Bson::Boolean(b) => {
+                                println!("[DEBUG] Converting Boolean value for field: {}", field);
+                                b.to_string()
+                            },
+                            _ => {
+                                println!("[DEBUG] Converting other BSON type for field: {}", field);
+                                bson.to_string()
+                            },
+                        },
+                        None => String::new(),
+                    };
+                    row.push(value);
+                }
+                
+                if let Err(e) = wtr.write_record(&row) {
+                    println!("[ERROR] Failed to write CSV row {}: {}", row_count, e);
+                    let (status, json) = error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+                    return error_to_response(status, json);
+                }
+                
+                row_count += 1;
+                if row_count % 100 == 0 {
+                    println!("[DEBUG] Processed {} rows", row_count);
+                }
+            }
+            println!("[DEBUG] Finished writing all {} rows", row_count);
+            
+            let data = match wtr.into_inner() {
+                Ok(d) => {
+                    println!("[DEBUG] Successfully finalized CSV writer, data size: {} bytes", d.len());
+                    d
+                },
+                Err(e) => {
+                    println!("[ERROR] Failed to finalize CSV writer: {}", e);
+                    let (status, json) = error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+                    return error_to_response(status, json);
+                }
+            };
+            
+            // Create filename
+            let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+            let filename = format!("{}_{}.csv", collection_name, timestamp);
+            println!("[DEBUG] Generated filename: {}", filename);
+
+            // Create and return a CSV response
+            println!("[DEBUG] Preparing HTTP response with CSV data");
+            let mut response = axum::response::Response::new(axum::body::Body::from(data));
+            response.headers_mut().insert(header::CONTENT_TYPE, header::HeaderValue::from_static("text/csv"));
+            response.headers_mut().insert(
+                header::CONTENT_DISPOSITION,
+                header::HeaderValue::from_str(&format!("attachment; filename=\"{}\"", filename)).unwrap(),
+            );
+            *response.status_mut() = StatusCode::OK;
+            println!("[DEBUG] CSV download response ready for collection: {}", collection_name);
+            response
+        },
+        Err((status, e)) => {
+            println!("[ERROR] Database connection failed: {}", e);
+            let (status_code, json_response) = error_response::<()>(status, e);
+            error_to_response(status_code, json_response)
+        }
+    }
+}
+
+// Helper function to convert error response to Axum response
+fn error_to_response(status: StatusCode, json: Json<ApiResponse<()>>) -> axum::response::Response {
+    let json_string = serde_json::to_string(&json.0).unwrap();
+    let mut response = axum::response::Response::new(axum::body::Body::from(json_string));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE, 
+        header::HeaderValue::from_static("application/json")
+    );
+    *response.status_mut() = status;
+    response
 }
 
 // Helper function to check if the schema includes the 'pinned_by' property

@@ -35,15 +35,6 @@
     SelectValue,
   } from '@/components/ui/select' // [cite: 2]
   import {
-    Pagination,
-    PaginationList,
-    PaginationListItem,
-    PaginationFirst,
-    PaginationLast,
-    PaginationNext,
-    PaginationPrev,
-  } from '@/components/ui/pagination' // [cite: 2]
-  import {
     NavigationMenu,
     NavigationMenuContent,
     NavigationMenuItem,
@@ -53,6 +44,7 @@
   import { ScrollArea } from '@/components/ui/scroll-area' // [cite: 3]
   import Switch from './ui/switch/Switch.vue' // [cite: 4]
   import Label from './ui/label/Label.vue' // [cite: 4]
+  import { useToast } from '@/components/ui/toast/use-toast'
 
   // Custom Component Imports
   import ExcelCellReference from './ExcelCellReference.vue' // [cite: 4]
@@ -61,6 +53,12 @@
   import MongoDBDataTableNavbar from './MongoDBDataTableNavbar.vue' // [cite: 4]
   import StickyLeftSidebar from './StickyLeftSidebar.vue' // [cite: 4]
   import CSVCellReference from './CSVCellReference.vue'
+  import { getApiBaseUrl, getAuthHeaders } from '@/utils/api'
+  import Dialog from './ui/dialog/Dialog.vue'
+  import DialogContent from './ui/dialog/DialogContent.vue'
+  import DialogTitle from './ui/dialog/DialogTitle.vue'
+  import DialogHeader from './ui/dialog/DialogHeader.vue'
+  import DialogFooter from './ui/dialog/DialogFooter.vue'
 
   // ==========================================================================
   // Store Setup
@@ -161,6 +159,7 @@
   let highlightTimeout: ReturnType<typeof setTimeout> | null = null // [cite: 49]
   const editingHeader = ref<string | null>(null) // [cite: 59]
   const editedShortName = ref('') // [cite: 59]
+  const { toast } = useToast()
 
   // Resizing States
   const resizingState = ref({
@@ -1021,6 +1020,72 @@
       scrollContainer.value.removeEventListener('scroll', handleScroll)
     }
   })
+
+  // state for download options
+  const showDownloadDialog = ref(false)
+  const downloadHeaderChoice = ref<'short' | 'original'>('short')
+  const includeId = ref(false) // New include _id option
+
+  const downloadCSV = async () => {
+    console.debug('downloadCSV: Handler called')
+    showDownloadDialog.value = false
+    try {
+      // Add include_id parameter to URL
+      const url = `${getApiBaseUrl()}/collections/${collectionName.value}/download-csv?headers=${downloadHeaderChoice.value}&include_id=${includeId.value}`
+      console.debug('downloadCSV: Fetching from URL:', url)
+
+      const response = await fetch(url, {
+        headers: getAuthHeaders(),
+      })
+
+      if (!response.ok) throw new Error('Download failed')
+
+      const blob = await response.blob()
+      const downloadUrl = window.URL.createObjectURL(blob)
+
+      // Generate dynamic filename
+      const now = new Date()
+      const timestamp = [
+        now.getFullYear(),
+        (now.getMonth() + 1).toString().padStart(2, '0'),
+        now.getDate().toString().padStart(2, '0'),
+        '_',
+        now.getHours().toString().padStart(2, '0'),
+        now.getMinutes().toString().padStart(2, '0'),
+        now.getSeconds().toString().padStart(2, '0'),
+      ].join('')
+
+      const headerType =
+        downloadHeaderChoice.value === 'short' ? 'short_name_is_used' : 'orig_name_is_used'
+      const idSuffix = includeId.value ? '_with_id' : ''
+
+      const filename = `${collectionName.value}_${timestamp}_${headerType}${idSuffix}.csv`
+
+      const a = document.createElement('a')
+      a.href = downloadUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(downloadUrl)
+      document.body.removeChild(a)
+
+      // Show success toast
+      toast({
+        title: 'Download Successful',
+        description: 'CSV file downloaded successfully',
+        variant: 'default',
+      })
+    } catch (error) {
+      // Error handling and toast
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      errorMessage.value = `Download failed: ${message}`
+      toast({
+        title: 'Download Error',
+        description: errorMessage.value,
+        variant: 'destructive',
+      })
+    }
+  }
 </script>
 <template>
   <!-- MongoDBDataTable main div -->
@@ -1152,6 +1217,56 @@
               Link to Import CSV Page
             </Button>
           </router-link>
+          <Button
+            variant="outline"
+            size="sm"
+            @click="showDownloadDialog = true"
+          >
+            Download CSV Data
+          </Button>
+          <!-- Download Dialog -->
+          <Dialog v-model:open="showDownloadDialog">
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Download Options</DialogTitle>
+              </DialogHeader>
+              <div class="space-y-4">
+                <div>
+                  <Label>Header Row Format:</Label>
+                  <Select v-model="downloadHeaderChoice">
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select header format" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="short">Short Names</SelectItem>
+                      <SelectItem value="original">Original Names</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div class="flex items-center space-x-2">
+                  <Switch
+                    id="include-id"
+                    :modelValue="includeId"
+                    @update:modelValue="(value) => (includeId = value)"
+                  />
+                  <Label
+                    for="include-id"
+                    class="cursor-pointer"
+                  >
+                    Include ID
+                  </Label>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button @click="downloadCSV">Download</Button>
+                <Button
+                  variant="outline"
+                  @click="showDownloadDialog = false"
+                  >Cancel</Button
+                >
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
 
         <table
