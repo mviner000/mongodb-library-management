@@ -73,7 +73,8 @@ async fn get_db_path_from_state(state: &Arc<Mutex<ApiServerState>>, collection: 
         .await
         .map_err(|e| anyhow!("Task join error: {}", e))??;
         
-        Ok(temp_dir.join("temp_data.sqlite"))
+        let db_path = temp_dir.join("temp_data.sqlite");
+        Ok(db_path)
     }
 }
 
@@ -89,11 +90,11 @@ async fn add_path_to_state(state: &Arc<Mutex<ApiServerState>>, collection: Strin
 async fn remove_path_from_state(state: &Arc<Mutex<ApiServerState>>, collection: &str) -> AnyhowResult<Option<PathBuf>> {
     let state = state.lock().await;
     let mut temp_dirs = state.temp_dirs.lock().await;
-    Ok(temp_dirs.remove(collection))
+    let result = temp_dirs.remove(collection);
+    Ok(result)
 }
 
-// Modified: Helper function to convert value to a rusqlite-compatible type
-// Now returns Option<String> to properly represent NULL values
+// Helper function to convert value to a rusqlite-compatible type
 fn value_to_param(value: &Value) -> rusqlite::Result<Option<String>> {
     match value {
         Value::Null => Ok(None),
@@ -107,14 +108,19 @@ fn value_to_param(value: &Value) -> rusqlite::Result<Option<String>> {
                 Ok(Some(s.clone()))
             }
         },
-        Value::Array(_) | Value::Object(_) => Ok(Some(value.to_string())),
+        Value::Array(_) | Value::Object(_) => {
+            let str_val = value.to_string();
+            Ok(Some(str_val))
+        },
     }
 }
 
-// Modified: Create table for valid data with _id TEXT as primary key
+// Create table for valid data with _id TEXT as primary key
 fn create_valid_table(conn: &Connection, data: &[Value]) -> Result<()> {
-    conn.execute("DROP TABLE IF EXISTS valid_data", [])
-        .map_err(|e| anyhow!("Failed to drop valid_data table: {}", e))?;
+    match conn.execute("DROP TABLE IF EXISTS valid_data", []) {
+        Ok(_) => {},
+        Err(e) => return Err(anyhow!("Failed to drop valid_data table: {}", e))
+    }
     
     if let Some(first) = data.first() {
         match first {
@@ -129,41 +135,56 @@ fn create_valid_table(conn: &Connection, data: &[Value]) -> Result<()> {
                 let mut create_sql = "CREATE TABLE valid_data (\"_id\" TEXT PRIMARY KEY".to_string();
                 for header in &headers {
                     // Escape column names to handle special characters
-                    create_sql.push_str(&format!(", \"{}\" TEXT", header.replace("\"", "\"\"")));
+                    let column_def = format!(", \"{}\" TEXT", header.replace("\"", "\"\""));
+                    create_sql.push_str(&column_def);
                 }
                 create_sql.push_str(")");
                 
-                conn.execute(&create_sql, [])
-                    .map_err(|e| anyhow!("Failed to create valid_data table: {}", e))?;
+                match conn.execute(&create_sql, []) {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(anyhow!("Failed to create valid_data table: {}", e))
+                }
             },
-            _ => return Err(anyhow!("First data item is not an object"))
+            _ => Err(anyhow!("First data item is not an object"))
         }
     } else {
         // Create empty table with just _id if no data
-        conn.execute("CREATE TABLE valid_data (\"_id\" TEXT PRIMARY KEY)", [])
-            .map_err(|e| anyhow!("Failed to create empty valid_data table: {}", e))?;
+        match conn.execute("CREATE TABLE valid_data (\"_id\" TEXT PRIMARY KEY)", []) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(anyhow!("Failed to create empty valid_data table: {}", e))
+        }
     }
-    Ok(())
 }
 
-// Modified: Create table for invalid data with _id TEXT as primary key
-fn create_invalid_table(conn: &Connection) -> Result<()> {
-    conn.execute("DROP TABLE IF EXISTS invalid_data", [])
-        .map_err(|e| anyhow!("Failed to drop invalid_data table: {}", e))?;
-        
-    conn.execute(
-        "CREATE TABLE invalid_data (
-            \"_id\" TEXT PRIMARY KEY,
-            row_data TEXT,
-            errors TEXT
-        )", 
-        []
-    ).map_err(|e| anyhow!("Failed to create invalid_data table: {}", e))?;
+// Create table for invalid data with CSV headers
+fn create_invalid_table(conn: &Connection, csv_columns: &[String]) -> Result<()> {
+    match conn.execute("DROP TABLE IF EXISTS invalid_data", []) {
+        Ok(_) => {},
+        Err(e) => return Err(anyhow!("Failed to drop invalid_data table: {}", e))
+    }
     
-    Ok(())
+    // Build the CREATE TABLE SQL statement
+    let mut create_sql = "CREATE TABLE invalid_data (\"_id\" TEXT PRIMARY KEY".to_string();
+    
+    // Add all CSV columns as TEXT
+    for column in csv_columns {
+        if column != "_id" {
+            let column_def = format!(", \"{}\" TEXT", column.replace("\"", "\"\""));
+            create_sql.push_str(&column_def);
+        }
+    }
+    
+    // Add errors column
+    create_sql.push_str(", errors TEXT)");
+    
+    // Execute the CREATE TABLE statement
+    match conn.execute(&create_sql, []) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(anyhow!("Failed to create invalid_data table: {}", e))
+    }
 }
 
-// Modified: Insert valid data with _id as primary key
+// Insert valid data with _id as primary key
 fn insert_valid_data(conn: &Connection, data: &[Value]) -> Result<()> {
     if data.is_empty() {
         return Ok(());
@@ -199,8 +220,10 @@ fn insert_valid_data(conn: &Connection, data: &[Value]) -> Result<()> {
     );
 
     // Prepare statement once for multiple executions
-    let mut stmt = conn.prepare(&insert_sql)
-        .map_err(|e| anyhow!("Failed to prepare statement: {}", e))?;
+    let mut stmt = match conn.prepare(&insert_sql) {
+        Ok(stmt) => stmt,
+        Err(e) => return Err(anyhow!("Failed to prepare statement: {}", e))
+    };
 
     // Insert each row
     for item in data {
@@ -221,58 +244,130 @@ fn insert_valid_data(conn: &Connection, data: &[Value]) -> Result<()> {
         
         // Extract values in the same order as headers
         let mut values: Vec<Option<String>> = vec![Some(mongo_id)]; // Start with _id
-        values.extend(headers.iter()
-            .map(|h| {
-                match obj.get(h) {
-                    Some(val) => value_to_param(val)
-                        .unwrap_or(None), // Convert to Option<String>
-                    None => None // Missing field becomes NULL
-                }
-            }));
+        
+        for h in &headers {
+            let value = match obj.get(h) {
+                Some(val) => {
+                    match value_to_param(val) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            return Err(anyhow!("Failed to convert value for {}: {}", h, e));
+                        }
+                    }
+                },
+                None => None // Missing field becomes NULL
+            };
+            values.push(value);
+        }
             
         // Convert values to params for the prepared statement
         let params_slice: Vec<&dyn rusqlite::ToSql> = values
             .iter()
             .map(|v| match v {
                 Some(s) => s as &dyn rusqlite::ToSql,
-                None => &Null as &dyn rusqlite::ToSql, // Use rusqlite::types::Null for NULL values
+                None => &Null as &dyn rusqlite::ToSql // Use rusqlite::types::Null for NULL values
             })
             .collect();
             
-        stmt.execute(params_slice.as_slice())
-            .map_err(|e| anyhow!("Failed to insert data: {}", e))?;
+        match stmt.execute(params_slice.as_slice()) {
+            Ok(_) => {},
+            Err(e) => return Err(anyhow!("Failed to insert data: {}", e))
+        }
     }
 
     Ok(())
 }
 
-// Modified: Insert invalid data with _id as primary key
-fn insert_invalid_data(conn: &Connection, data: &[Value]) -> Result<()> {
-    let mut stmt = conn.prepare(
-        "INSERT INTO invalid_data (\"_id\", row_data, errors) VALUES (?, ?, ?)"
-    ).map_err(|e| anyhow!("Failed to prepare invalid data statement: {}", e))?;
+// Insert invalid data with CSV columns
+fn insert_invalid_data(conn: &Connection, data: &[Value], csv_columns: &[String]) -> Result<()> {
+    if data.is_empty() {
+        return Ok(());
+    }
+    
+    // Build columns list
+    let mut columns = Vec::new();
+    columns.push("\"_id\"".to_string());
+    
+    for column in csv_columns {
+        if column != "_id" {
+            columns.push(format!("\"{}\"", column.replace("\"", "\"\"")));
+        }
+    }
+    
+    columns.push("errors".to_string());
+    
+    // Build placeholders
+    let placeholders: Vec<String> = (0..columns.len())
+        .map(|_| "?".to_string())
+        .collect();
+    
+    // Build INSERT statement    
+    let insert_sql = format!(
+        "INSERT INTO invalid_data ({}) VALUES ({})",
+        columns.join(", "),
+        placeholders.join(", ")
+    );
+
+    let mut stmt = match conn.prepare(&insert_sql) {
+        Ok(stmt) => stmt,
+        Err(e) => return Err(anyhow!("Failed to prepare invalid data statement: {}", e))
+    };
 
     for item in data {
+        let obj = match item {
+            Value::Object(obj) => obj,
+            _ => continue // Skip non-object items
+        };
+        
         // Extract or generate _id
-        let mongo_id = match item.get("_id") {
+        let mongo_id = match obj.get("_id") {
             Some(Value::String(id)) if !id.is_empty() => id.clone(),
-            _ => match item.get("id") {
+            _ => match obj.get("id") {
                 Some(Value::String(id)) if !id.is_empty() => id.clone(),
                 Some(Value::Number(n)) => n.to_string(),
                 _ => uuid::Uuid::new_v4().to_string() // Generate a UUID if no _id or id exists
             }
         };
         
-        let row_data = item.get("row")
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "{}".to_string());
+        // Extract values for each column
+        let mut values: Vec<Option<String>> = vec![Some(mongo_id)]; // Start with _id
+        
+        for column in csv_columns {
+            if column != "_id" {
+                // Try to get value from the object directly
+                let value = match obj.get(column) {
+                    Some(val) => {
+                        match value_to_param(val) {
+                            Ok(v) => v,
+                            Err(_) => None
+                        }
+                    },
+                    None => None
+                };
+                values.push(value);
+            }
+        }
+        
+        // Add errors 
+        let errors = match obj.get("errors") {
+            Some(v) => v.to_string(),
+            None => "[]".to_string()
+        };
+        values.push(Some(errors));
+        
+        // Convert values to params for the prepared statement
+        let params_slice: Vec<&dyn rusqlite::ToSql> = values
+            .iter()
+            .map(|v| match v {
+                Some(s) => s as &dyn rusqlite::ToSql,
+                None => &Null as &dyn rusqlite::ToSql
+            })
+            .collect();
             
-        let errors = item.get("errors")
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "[]".to_string());
-            
-        stmt.execute(params![mongo_id, row_data, errors])
-            .map_err(|e| anyhow!("Failed to insert invalid data: {}", e))?;
+        match stmt.execute(params_slice.as_slice()) {
+            Ok(_) => {},
+            Err(e) => return Err(anyhow!("Failed to insert invalid data: {}", e))
+        }
     }
     
     Ok(())
@@ -319,15 +414,31 @@ pub async fn save_csv_temp(
         let conn = Connection::open(&db_path_clone)
             .map_err(|e| anyhow!("Failed to open database: {}", e))?;
         
-        // Create tables for valid and invalid data
+        // Create valid data table
         create_valid_table(&conn, &data_clone.valid)?;
-        create_invalid_table(&conn)?;
+        
+        // Extract CSV columns from invalid data (all columns except errors)
+        let csv_columns = if let Some(first_invalid) = data_clone.invalid.first() {
+            if let Value::Object(obj) = first_invalid {
+                obj.keys()
+                    .filter(|&k| k != "errors")
+                    .map(|k| k.to_string())
+                    .collect::<Vec<_>>()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+        
+        // Create invalid table with CSV columns + errors
+        create_invalid_table(&conn, &csv_columns)?;
         
         // Insert valid data
         insert_valid_data(&conn, &data_clone.valid)?;
         
-        // Insert invalid data
-        insert_invalid_data(&conn, &data_clone.invalid)?;
+        // Insert invalid data with CSV columns
+        insert_invalid_data(&conn, &data_clone.invalid, &csv_columns)?;
 
         Ok(())
     })
@@ -338,7 +449,7 @@ pub async fn save_csv_temp(
     Ok(())
 }
 
-// Modified: Load CSV temp with improved _id handling in result processing
+// Load CSV temp with improved _id handling in result processing
 pub async fn load_csv_temp(
     State(state): State<Arc<Mutex<ApiServerState>>>,
     Path(collection): Path<String>,
@@ -367,7 +478,7 @@ pub async fn load_csv_temp(
         let valid_data = load_table_data(&conn, "valid_data")?;
         
         // Load invalid data
-        let invalid_data = load_invalid_data(&conn)?;
+        let invalid_data = load_table_data(&conn, "invalid_data")?;
         
         // Create response with both sets of data
         let mut response = Map::new();
@@ -383,7 +494,7 @@ pub async fn load_csv_temp(
     Ok(Json(results))
 }
 
-// Modified: Helper function with proper _id handling
+// Helper function with proper _id handling
 fn load_table_data(conn: &Connection, table_name: &str) -> Result<Vec<Value>> {
     // First check if table exists
     let table_exists = conn.query_row(
@@ -417,10 +528,19 @@ fn load_table_data(conn: &Connection, table_name: &str) -> Result<Vec<Value>> {
         
         // Process each column
         for (i, column_name) in columns.iter().enumerate() {
-            // Modified: Check if column value is NULL
+            // Check if column value is NULL
             let val: Option<String> = row.get(i)?;
             
             if let Some(s) = val {
+                // Special handling for errors column in invalid_data table
+                if table_name == "invalid_data" && column_name == "errors" {
+                    // Try to parse errors as JSON
+                    if let Ok(json_val) = serde_json::from_str::<Value>(&s) {
+                        obj.insert(column_name.clone(), json_val);
+                        continue;
+                    }
+                }
+                
                 // Try to parse as JSON if it looks like JSON
                 let json_val = if (s.starts_with('{') && s.ends_with('}')) || 
                    (s.starts_with('[') && s.ends_with(']')) ||
@@ -450,66 +570,6 @@ fn load_table_data(conn: &Connection, table_name: &str) -> Result<Vec<Value>> {
     let mut results = Vec::new();
     for row in rows {
         results.push(row.map_err(|e| anyhow!("Row error: {}", e))?);
-    }
-
-    Ok(results)
-}
-
-// Modified: Helper function to load invalid data with _id
-fn load_invalid_data(conn: &Connection) -> Result<Vec<Value>> {
-    // Check if table exists
-    let table_exists = conn.query_row(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='invalid_data'",
-        [],
-        |_| Ok(true)
-    ).unwrap_or(false);
-    
-    if !table_exists {
-        return Ok(Vec::new());
-    }
-    
-    let mut stmt = conn.prepare("SELECT \"_id\", row_data, errors FROM invalid_data")
-        .map_err(|e| anyhow!("Failed to prepare invalid data query: {}", e))?;
-        
-    let rows = stmt.query_map([], |row| {
-        let mongo_id: String = row.get(0)?;
-        let row_data: String = row.get(1)?;
-        let errors: String = row.get(2)?;
-        
-        let mut obj = Map::new();
-        obj.insert("_id".to_string(), Value::String(mongo_id.clone()));
-        obj.insert("id".to_string(), Value::String(mongo_id)); // For backward compatibility
-        
-        // Parse row_data JSON
-        let row_json = match serde_json::from_str::<Value>(&row_data) {
-            Ok(v) => v,
-            Err(_) => {
-                let mut map = Map::new();
-                map.insert("raw_data".to_string(), Value::String(row_data));
-                Value::Object(map)
-            }
-        };
-        
-        // Parse errors JSON
-        let errors_json = match serde_json::from_str::<Value>(&errors) {
-            Ok(v) => v,
-            Err(_) => {
-                let mut arr = Vec::new();
-                arr.push(Value::String(errors));
-                Value::Array(arr)
-            }
-        };
-        
-        obj.insert("row".to_string(), row_json);
-        obj.insert("errors".to_string(), errors_json);
-        
-        Ok(Value::Object(obj))
-    })
-    .map_err(|e| anyhow!("Invalid data query failed: {}", e))?;
-
-    let mut results = Vec::new();
-    for row in rows {
-        results.push(row.map_err(|e| anyhow!("Invalid data row error: {}", e))?);
     }
 
     Ok(results)

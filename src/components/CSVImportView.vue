@@ -4,6 +4,7 @@
   import { useRoute } from 'vue-router'
   import { useToast } from '@/components/ui/toast'
   import { Button } from '@/components/ui/button'
+  import { storeToRefs } from 'pinia'
   import MongoDBDataTable from '@/components/MongoDBDataTable.vue'
   import { parseCSV } from '@/utils/parseCSV'
   import { useDataTableStore } from '@/store/dataTableStore'
@@ -12,8 +13,11 @@
   const route = useRoute()
   const { toast } = useToast()
   const dataTableStore = useDataTableStore()
+  const { collectionSchema } = storeToRefs(dataTableStore)
   const collectionName = computed(() => route.params.name as string)
-  const collectionSchema = computed(() => dataTableStore.collectionSchema)
+  const primaryKey = computed(() => {
+    return collectionSchema.value?.primaryKey
+  })
   const previewData = ref<any[]>([])
   const fileInput = ref<HTMLInputElement | null>(null)
   const hasImportedData = ref(false)
@@ -25,6 +29,26 @@
     try {
       const { data: csvData } = await parseCSV(file)
       const schema = collectionSchema.value.properties || {}
+
+      // Create short name map for field mapping
+      const shortNameMap = createShortNameMap(schema)
+
+      // Check for required columns
+      const csvHeaders = csvData.length > 0 ? Object.keys(csvData[0]) : []
+      const missingRequired = primaryKey.value
+        ? !csvHeaders.includes(shortNameMap[primaryKey.value] || primaryKey.value)
+          ? [primaryKey.value]
+          : []
+        : []
+
+      if (missingRequired.length > 0) {
+        toast({
+          title: 'Invalid CSV Format',
+          description: `Missing primary key column: ${missingRequired.join(', ')}`,
+          variant: 'destructive',
+        })
+        return
+      }
 
       // Validate CSV data and split into valid/invalid
       const { valid: validData, invalid: invalidData } = validateCSVData(csvData, schema)
@@ -39,12 +63,23 @@
       })
 
       // Transform valid data for storage
-      const shortNameMap = createShortNameMap(schema)
       const transformedValid = transformCSVData(validData, shortNameMap, collectionSchema.value)
-      const transformedInvalid = invalidData.map((item) => ({
-        row: transformCSVData([item.row], shortNameMap, collectionSchema.value)[0],
-        errors: item.errors,
-      }))
+
+      // UPDATED: Transform invalid data to include all CSV columns
+      const transformedInvalid = invalidData.map(({ row, errors }) => {
+        const transformedRow: Record<string, string> = {}
+
+        // Use CSV headers to include all columns from the original CSV
+        csvHeaders.forEach((header) => {
+          const value = row[header]
+          transformedRow[header] = value !== undefined ? String(value) : ''
+        })
+
+        return {
+          ...transformedRow,
+          errors,
+        }
+      })
 
       // Send to backend
       const response = await fetch(`${getApiBaseUrl()}/api/csv-temp/${collectionName.value}`, {
@@ -74,18 +109,17 @@
   ): { valid: any[]; invalid: Array<{ row: any; errors: string[] }> } => {
     const valid: any[] = []
     const invalid: Array<{ row: any; errors: string[] }> = []
-    const requiredFields = collectionSchema.value.required || []
 
     data.forEach((row, index) => {
       const errors: string[] = []
 
-      // Required field checks
-      requiredFields.forEach((field: string) => {
-        const value = row[field]
+      // Primary key field check
+      if (primaryKey.value) {
+        const value = row[primaryKey.value]
         if (value === null || value === undefined || value === '') {
-          errors.push(`Missing required field: ${field}`)
+          errors.push(`Missing primary key field: ${primaryKey.value}`)
         }
-      })
+      }
 
       // Type validation
       Object.entries(row).forEach(([field, value]) => {
