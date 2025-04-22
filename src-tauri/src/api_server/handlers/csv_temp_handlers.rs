@@ -1,6 +1,5 @@
-// src/api_server/handlers/csv_temp_handlers.rs
 use axum::{extract::{Path, State}, http::StatusCode, Json};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, params, types::Null};
 use serde_json::{Value, Map};
 use serde::Deserialize;
 use std::{
@@ -91,25 +90,21 @@ async fn remove_path_from_state(state: &Arc<Mutex<ApiServerState>>, collection: 
     Ok(temp_dirs.remove(collection))
 }
 
-// Helper function to convert value to a rusqlite-compatible type
-fn value_to_param(value: &Value) -> rusqlite::Result<String> {
+// Modified: Helper function to convert value to a rusqlite-compatible type
+// Now returns Option<String> to properly represent NULL values
+fn value_to_param(value: &Value) -> rusqlite::Result<Option<String>> {
     match value {
-        Value::Null => Ok("".to_string()),
-        Value::Bool(b) => Ok(b.to_string()),
-        Value::Number(n) => Ok(n.to_string()),
-        Value::String(s) => Ok(s.clone()),
-        Value::Array(_) | Value::Object(_) => Ok(value.to_string()),
-    }
-}
-
-// Helper function to get headers from a JSON object
-fn get_headers(item: &Value) -> Vec<String> {
-    match item {
-        Value::Object(obj) => obj.keys()
-            .filter(|&k| k != "id") // exclude 'id' as we'll use SQLite's autoincrement
-            .map(|k| k.to_string())
-            .collect(),
-        _ => Vec::new(),
+        Value::Null => Ok(None), // NULL value in JSON becomes NULL in SQL
+        Value::Bool(b) => Ok(Some(b.to_string())),
+        Value::Number(n) => Ok(Some(n.to_string())),
+        Value::String(s) => {
+            if s.is_empty() {
+                Ok(None) // Treat empty strings as NULL
+            } else {
+                Ok(Some(s.clone()))
+            }
+        },
+        Value::Array(_) | Value::Object(_) => Ok(Some(value.to_string())),
     }
 }
 
@@ -165,7 +160,7 @@ fn create_invalid_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-// Insert valid data
+// Modified: Insert valid data with proper NULL handling
 fn insert_valid_data(conn: &Connection, data: &[Value]) -> Result<()> {
     if data.is_empty() {
         return Ok(());
@@ -212,12 +207,12 @@ fn insert_valid_data(conn: &Connection, data: &[Value]) -> Result<()> {
         };
         
         // Extract values in the same order as headers
-        let values: Vec<String> = headers.iter()
+        let values: Vec<Option<String>> = headers.iter()
             .map(|h| {
                 match obj.get(h) {
                     Some(val) => value_to_param(val)
-                        .unwrap_or_else(|_| "".to_string()),
-                    None => "".to_string()
+                        .unwrap_or(None), // Convert to Option<String>
+                    None => None // Missing field becomes NULL
                 }
             })
             .collect();
@@ -225,7 +220,10 @@ fn insert_valid_data(conn: &Connection, data: &[Value]) -> Result<()> {
         // Convert values to params for the prepared statement
         let params_slice: Vec<&dyn rusqlite::ToSql> = values
             .iter()
-            .map(|v| v as &dyn rusqlite::ToSql)
+            .map(|v| match v {
+                Some(s) => s as &dyn rusqlite::ToSql,
+                None => &Null as &dyn rusqlite::ToSql, // Use rusqlite::types::Null for NULL values
+            })
             .collect();
             
         stmt.execute(params_slice.as_slice())
@@ -235,7 +233,7 @@ fn insert_valid_data(conn: &Connection, data: &[Value]) -> Result<()> {
     Ok(())
 }
 
-// Insert invalid data
+// Modified: Insert invalid data with proper NULL handling
 fn insert_invalid_data(conn: &Connection, data: &[Value]) -> Result<()> {
     let mut stmt = conn.prepare(
         "INSERT INTO invalid_data (row_data, errors) VALUES (?, ?)"
@@ -317,6 +315,7 @@ pub async fn save_csv_temp(
     Ok(())
 }
 
+// Modified: Load CSV temp with improved NULL handling in result processing
 pub async fn load_csv_temp(
     State(state): State<Arc<Mutex<ApiServerState>>>,
     Path(collection): Path<String>,
@@ -361,7 +360,7 @@ pub async fn load_csv_temp(
     Ok(Json(results))
 }
 
-// Helper function to load data from a table
+// Modified: Helper function with proper NULL handling
 fn load_table_data(conn: &Connection, table_name: &str) -> Result<Vec<Value>> {
     // First check if table exists
     let table_exists = conn.query_row(
@@ -401,23 +400,24 @@ fn load_table_data(conn: &Connection, table_name: &str) -> Result<Vec<Value>> {
         for (i, column_name) in columns.iter().enumerate() {
             if i == 0 { continue; } // Skip id column which we already handled
             
+            // Modified: Check if column value is NULL
             let val: Option<String> = row.get(i)?;
-            let json_val = match val {
-                Some(s) => {
-                    // Try to parse as JSON if it looks like JSON
-                    if (s.starts_with('{') && s.ends_with('}')) || 
-                       (s.starts_with('[') && s.ends_with(']')) ||
-                       (s == "true" || s == "false" || s == "null") ||
-                       s.parse::<f64>().is_ok() {
-                        serde_json::from_str(&s).unwrap_or(Value::String(s))
-                    } else {
-                        Value::String(s)
-                    }
-                },
-                None => Value::Null
-            };
-            
-            obj.insert(column_name.clone(), json_val);
+            if let Some(s) = val {
+                // Try to parse as JSON if it looks like JSON
+                let json_val = if (s.starts_with('{') && s.ends_with('}')) || 
+                   (s.starts_with('[') && s.ends_with(']')) ||
+                   (s == "true" || s == "false" || s == "null") ||
+                   s.parse::<f64>().is_ok() {
+                    serde_json::from_str(&s).unwrap_or(Value::String(s))
+                } else {
+                    Value::String(s)
+                };
+                
+                obj.insert(column_name.clone(), json_val);
+            } else {
+                // Insert explicit null for NULL values from DB
+                obj.insert(column_name.clone(), Value::Null);
+            }
         }
         
         Ok(Value::Object(obj))
