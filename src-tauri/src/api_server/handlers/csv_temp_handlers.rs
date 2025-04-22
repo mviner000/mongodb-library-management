@@ -1,7 +1,7 @@
 // src/api_server/handlers/csv_temp_handlers.rs
 use axum::{extract::{Path, State}, http::StatusCode, Json};
-use rusqlite::{Connection, params};
-use serde_json::Value;
+use rusqlite::{Connection, params, named_params};
+use serde_json::{Value, Map};
 use std::{
     fs,
     path::PathBuf,
@@ -83,11 +83,26 @@ async fn remove_path_from_state(state: &Arc<Mutex<ApiServerState>>, collection: 
     Ok(temp_dirs.remove(collection))
 }
 
+// Helper function to convert value to a rusqlite-compatible type
+fn value_to_param(value: &Value) -> rusqlite::Result<String> {
+    match value {
+        Value::Null => Ok("".to_string()),
+        Value::Bool(b) => Ok(b.to_string()),
+        Value::Number(n) => Ok(n.to_string()),
+        Value::String(s) => Ok(s.clone()),
+        Value::Array(_) | Value::Object(_) => Ok(value.to_string()),
+    }
+}
+
 pub async fn save_csv_temp(
     State(state): State<Arc<Mutex<ApiServerState>>>,
     Path(collection): Path<String>,
     Json(data): Json<Vec<Value>>,
 ) -> Result<(), (StatusCode, String)> {
+    if data.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "No data provided".to_string()));
+    }
+
     // Get app data directory in a non-blocking way
     let app_data_dir = task::spawn_blocking(get_app_data_dir)
         .await
@@ -124,19 +139,77 @@ pub async fn save_csv_temp(
         conn.execute("DROP TABLE IF EXISTS temp_data", [])
             .map_err(|e| anyhow!("Failed to drop table: {}", e))?;
         
-        conn.execute(
-            "CREATE TABLE temp_data (id INTEGER PRIMARY KEY, data TEXT)",
-            [],
-        ).map_err(|e| anyhow!("Failed to create table: {}", e))?;
+        // Extract headers from the first item
+        let first_item = match &data_clone[0] {
+            Value::Object(obj) => obj,
+            _ => return Err(anyhow!("Data items must be objects"))
+        };
+        
+        // Get headers and exclude 'id' field if present as we'll use SQLite's auto-increment
+        let mut headers: Vec<String> = first_item.keys()
+            .filter(|&k| k != "id")
+            .map(|k| k.to_string())
+            .collect();
+        
+        // Build CREATE TABLE SQL
+        let mut create_sql = "CREATE TABLE temp_data (id INTEGER PRIMARY KEY".to_string();
+        for header in &headers {
+            // Escape column names to handle special characters
+            create_sql.push_str(&format!(", \"{}\" TEXT", header.replace("\"", "\"\"")));
+        }
+        create_sql.push_str(")");
+        
+        conn.execute(&create_sql, [])
+            .map_err(|e| anyhow!("Failed to create table: {}", e))?;
 
-        for item in data_clone {
-            let json_str = serde_json::to_string(&item)
-                .map_err(|e| anyhow!("Failed to serialize JSON: {}", e))?;
+        // Build placeholders for prepared statement
+        let placeholders: Vec<String> = (0..headers.len())
+            .map(|_| "?".to_string())
+            .collect();
             
-            conn.execute(
-                "INSERT INTO temp_data (data) VALUES (?)",
-                params![json_str],
-            ).map_err(|e| anyhow!("Failed to insert data: {}", e))?;
+        // Build columns for INSERT statement
+        let columns = headers.iter()
+            .map(|h| format!("\"{}\"", h.replace("\"", "\"\"")))
+            .collect::<Vec<_>>()
+            .join(", ");
+            
+        // Create INSERT SQL statement
+        let insert_sql = format!(
+            "INSERT INTO temp_data ({}) VALUES ({})",
+            columns,
+            placeholders.join(", ")
+        );
+
+        // Prepare statement once for multiple executions
+        let mut stmt = conn.prepare(&insert_sql)
+            .map_err(|e| anyhow!("Failed to prepare statement: {}", e))?;
+
+        // Insert each row
+        for item in data_clone {
+            let obj = match item {
+                Value::Object(obj) => obj,
+                _ => continue // Skip non-object items
+            };
+            
+            // Extract values in the same order as headers
+            let values: Vec<String> = headers.iter()
+                .map(|h| {
+                    match obj.get(h) {
+                        Some(val) => value_to_param(val)
+                            .unwrap_or_else(|_| "".to_string()),
+                        None => "".to_string()
+                    }
+                })
+                .collect();
+                
+            // Convert values to params for the prepared statement
+            let params_slice: Vec<&dyn rusqlite::ToSql> = values
+                .iter()
+                .map(|v| v as &dyn rusqlite::ToSql)
+                .collect();
+                
+            stmt.execute(params_slice.as_slice())
+                .map_err(|e| anyhow!("Failed to insert data: {}", e))?;
         }
 
         Ok(())
@@ -172,15 +245,55 @@ pub async fn load_csv_temp(
         let conn = Connection::open(&db_path)
             .map_err(|e| anyhow!("Failed to open database: {}", e))?;
         
-        let mut stmt = conn.prepare("SELECT data FROM temp_data")
-            .map_err(|e| anyhow!("Failed to prepare statement: {}", e))?;
+        // First get the column names
+        let mut stmt = conn.prepare("PRAGMA table_info(temp_data)")
+            .map_err(|e| anyhow!("Failed to get table info: {}", e))?;
+            
+        let columns: Vec<String> = stmt.query_map([], |row| {
+            let column_name: String = row.get(1)?;
+            Ok(column_name)
+        })
+        .map_err(|e| anyhow!("Failed to query columns: {}", e))?
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(|e| anyhow!("Column error: {}", e))?;
         
+        // Prepare and execute SELECT statement for all rows
+        let mut stmt = conn.prepare("SELECT * FROM temp_data")
+            .map_err(|e| anyhow!("Failed to prepare statement: {}", e))?;
+            
         let rows = stmt.query_map([], |row| {
-            let data: String = row.get(0)?;
-            let value: Value = serde_json::from_str(&data)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-            Ok(value)
-        }).map_err(|e| anyhow!("Query failed: {}", e))?;
+            let mut obj = Map::new();
+            
+            // Include SQLite rowid as 'id'
+            let id: i64 = row.get(0)?;
+            obj.insert("id".to_string(), Value::Number(id.into()));
+            
+            // Add all other columns
+            for (i, column_name) in columns.iter().enumerate() {
+                if i == 0 { continue; } // Skip id column which we already handled
+                
+                let val: Option<String> = row.get(i)?;
+                let json_val = match val {
+                    Some(s) => {
+                        // Try to parse as JSON if it looks like JSON
+                        if (s.starts_with('{') && s.ends_with('}')) || 
+                           (s.starts_with('[') && s.ends_with(']')) ||
+                           (s == "true" || s == "false" || s == "null") ||
+                           s.parse::<f64>().is_ok() {
+                            serde_json::from_str(&s).unwrap_or(Value::String(s))
+                        } else {
+                            Value::String(s)
+                        }
+                    },
+                    None => Value::Null
+                };
+                
+                obj.insert(column_name.clone(), json_val);
+            }
+            
+            Ok(Value::Object(obj))
+        })
+        .map_err(|e| anyhow!("Query failed: {}", e))?;
 
         let mut results = Vec::new();
         for row in rows {
@@ -200,41 +313,31 @@ pub async fn delete_csv_temp(
     State(state): State<Arc<Mutex<ApiServerState>>>,
     Path(collection): Path<String>,
 ) -> Result<(), (StatusCode, String)> {
+    // Get app data directory to find the collection directory
+    let app_data_dir = task::spawn_blocking(get_app_data_dir)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to spawn blocking task: {}", e)))?;
+    
+    // The collection directory is in "temp/{collection}"
+    let collection_dir = app_data_dir.join("temp").join(&collection);
+    
     // Remove path from state
-    let path_opt = remove_path_from_state(&state, &collection)
+    let _ = remove_path_from_state(&state, &collection)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    if let Some(path) = path_opt {
-        // Determine if path is a file or directory
-        let db_file = task::spawn_blocking(move || {
-            if path.is_file() {
-                path.clone()
-            } else {
-                path.join("temp_data.sqlite")
-            }
-        })
+    // Check if directory exists and remove it recursively
+    let collection_dir_clone = collection_dir.clone();
+    let dir_exists = task::spawn_blocking(move || collection_dir_clone.exists())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Task join error: {}", e)))?;
-        
-        // Check if file exists and remove it
-        let db_file_clone = db_file.clone();
-        let file_exists = task::spawn_blocking(move || db_file_clone.exists())
+    
+    if dir_exists {
+        // Remove the entire directory recursively
+        task::spawn_blocking(move || fs::remove_dir_all(&collection_dir))
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Task join error: {}", e)))?;
-        
-        if file_exists {
-            // Remove the file
-            let db_file_clone = db_file.clone();
-            task::spawn_blocking(move || fs::remove_file(&db_file_clone))
-                .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Task join error: {}", e)))?
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to remove file: {}", e)))?;
-        }
-        
-        // Try to remove the directory too
-        let dir = db_file.parent().unwrap_or(&db_file).to_path_buf();
-        let _ = task::spawn_blocking(move || fs::remove_dir(&dir)).await; // Optional cleanup, ignore errors
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Task join error: {}", e)))?
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to remove directory: {}", e)))?;
     }
     
     Ok(())

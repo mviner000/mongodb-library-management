@@ -112,6 +112,26 @@ pub async fn get_collection_schema_handler(
             
             match (schema_result, required_unique_result) {
                 (Ok(mut merged_schema), Ok(required_unique_fields)) => {
+                    // Add _id field to properties
+                    match merged_schema.get_document_mut("properties") {
+                        Ok(properties) => {
+                            if !properties.contains_key("_id") {
+                                properties.insert(
+                                    "_id", 
+                                    doc! { "bsonType": "objectId", "description": "Unique document ID" }
+                                );
+                            }
+                        },
+                        Err(_) => {
+                            let mut properties = Document::new();
+                            properties.insert(
+                                "_id", 
+                                doc! { "bsonType": "objectId", "description": "Unique document ID" }
+                            );
+                            merged_schema.insert("properties", properties);
+                        }
+                    }
+                    
                     // Add the first required and unique field to the schema (if any exists)
                     let primary_key = required_unique_fields.first().cloned();
                     

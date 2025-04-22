@@ -44,7 +44,7 @@
 
       // Proceed with transformation if validation passes
       const shortNameMap = createShortNameMap(schema)
-      const transformedData = transformCSVData(csvData, shortNameMap)
+      const transformedData = transformCSVData(csvData, shortNameMap, collectionSchema.value)
 
       try {
         // Save to SQLite backend instead of localStorage
@@ -60,7 +60,7 @@
 
         // After transforming data
         previewData.value = transformedData
-        dataTableStore.selectedRows = new Set(transformedData.map((doc: any) => doc._id.$oid))
+        dataTableStore.selectedRows = new Set(transformedData.map((doc: any) => doc._id))
         hasImportedData.value = true
         toast({ title: 'CSV Validated', description: 'Data successfully imported' })
       } catch (error: any) {
@@ -117,31 +117,31 @@
     )
   }
 
-  const transformCSVData = (data: any[], shortNameMap: Record<string, string>) => {
-    return data.map((row) => {
-      // Generate a new MongoDB-style ObjectId for each row
-      const newObjectId = generateMongoObjectId()
+  const transformCSVData = (data: any[], shortNameMap: Record<string, string>, schema: any) => {
+    const schemaFields = Object.keys(schema.properties || {})
 
-      const transformed = Object.entries(row).reduce(
-        (acc, [key, value]) => {
-          // Skip _id or id columns from the CSV
-          if (key === '_id' || key === 'id') {
-            return acc
-          }
+    return data.map((row, index) => {
+      const transformed: Record<string, any> = {}
 
-          const fieldName = Object.keys(shortNameMap).find((k) => shortNameMap[k] === key) || key
-          acc[fieldName] = value
-          return acc
-        },
-        {} as Record<string, any>
-      )
+      // Map all schema fields
+      schemaFields.forEach((field) => {
+        // Find the CSV column that corresponds to this schema field
+        const csvKey =
+          Object.entries(shortNameMap).find(([_, shortName]) => shortName === field)?.[0] || field
+        transformed[field] = row[csvKey] ?? ''
+      })
 
-      // Add the generated ObjectId
-      transformed._id = { $oid: newObjectId }
+      // Add generated ID as string (not ObjectId)
+      transformed.id = index + 1 // Use numeric ID (will be replaced by SQLite auto-increment)
 
-      // Add default fields if missing
-      if (!transformed.created_at) transformed.created_at = new Date().toISOString()
-      if (!transformed.updated_at) transformed.updated_at = new Date().toISOString()
+      // Add timestamps if they're part of the schema
+      if (schemaFields.includes('created_at')) {
+        transformed.created_at = transformed.created_at || new Date().toISOString()
+      }
+
+      if (schemaFields.includes('updated_at')) {
+        transformed.updated_at = transformed.updated_at || new Date().toISOString()
+      }
 
       return transformed
     })
@@ -180,7 +180,7 @@
         hasImportedData.value = true
 
         // Auto-select all rows when loading saved data
-        const ids = data.map((doc: any) => doc._id?.$oid)
+        const ids = data.map((doc: any) => doc.id)
         dataTableStore.selectedRows = new Set(ids)
 
         console.log(`Loaded saved CSV data with ${data.length} rows`)
