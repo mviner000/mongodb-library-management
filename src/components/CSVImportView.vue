@@ -1,4 +1,4 @@
-<!-- src/views/CSVImportView.vue -->
+<!-- updated src/views/CSVImportView.vue -->
 <script setup lang="ts">
   import { ref, computed, onMounted, onUnmounted } from 'vue'
   import { useRoute } from 'vue-router'
@@ -26,46 +26,40 @@
       const { data: csvData } = await parseCSV(file)
       const schema = collectionSchema.value.properties || {}
 
-      // Validate CSV data
-      const errors = validateCSVData(csvData, schema)
-      if (errors.length > 0) {
-        const errorList = errors
-          .slice(0, 3)
-          .map((e) => `Row ${e.row}: ${e.message}`)
-          .join('\n')
-        toast({
-          title: `Validation Failed (${errors.length} errors)`,
-          description: errorList + (errors.length > 3 ? '\n...' : ''),
-          variant: 'destructive',
-          duration: 10000, // Show longer for multiple errors
-        })
-        return // Don't proceed if errors exist
-      }
+      // Validate CSV data and split into valid/invalid
+      const { valid: validData, invalid: invalidData } = validateCSVData(csvData, schema)
 
-      // Proceed with transformation if validation passes
+      // Show upload counts in toast
+      const validCount = validData.length
+      const invalidCount = invalidData.length
+      toast({
+        title: `CSV Import Results`,
+        description: `Valid data: ${validCount}, Invalid data: ${invalidCount}`,
+        duration: 5000,
+      })
+
+      // Transform valid data for storage
       const shortNameMap = createShortNameMap(schema)
-      const transformedData = transformCSVData(csvData, shortNameMap, collectionSchema.value)
+      const transformedValid = transformCSVData(validData, shortNameMap, collectionSchema.value)
+      const transformedInvalid = invalidData.map((item) => ({
+        row: transformCSVData([item.row], shortNameMap, collectionSchema.value)[0],
+        errors: item.errors,
+      }))
 
-      try {
-        // Save to SQLite backend instead of localStorage
-        const response = await fetch(`${getApiBaseUrl()}/api/csv-temp/${collectionName.value}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(transformedData),
-        })
+      // Send to backend
+      const response = await fetch(`${getApiBaseUrl()}/api/csv-temp/${collectionName.value}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ valid: transformedValid, invalid: transformedInvalid }),
+      })
 
-        if (!response.ok) throw new Error('Failed to save temporary data')
+      if (!response.ok) throw new Error('Failed to save temporary data')
 
-        // After transforming data
-        previewData.value = transformedData
-        dataTableStore.selectedRows = new Set(transformedData.map((doc: any) => doc._id))
-        hasImportedData.value = true
-        toast({ title: 'CSV Validated', description: 'Data successfully imported' })
-      } catch (error: any) {
-        toast({ title: 'Save Failed', description: error.message, variant: 'destructive' })
-      }
+      // After transforming data
+      previewData.value = transformedValid
+      dataTableStore.selectedRows = new Set(transformedValid.map((doc: any) => doc._id))
+      hasImportedData.value = true
+      toast({ title: 'CSV Processed', description: 'Data successfully imported' })
     } catch (error: any) {
       // Handle parsing/validation errors
       toast({ title: 'Import Failed', description: error.message, variant: 'destructive' })
@@ -76,15 +70,18 @@
   const validateCSVData = (
     data: any[],
     schema: Record<string, any>
-  ): Array<{ row: number; message: string }> => {
-    const errors: Array<{ row: number; message: string }> = []
+  ): { valid: any[]; invalid: Array<{ row: any; errors: string[] }> } => {
+    const valid: any[] = []
+    const invalid: Array<{ row: any; errors: string[] }> = []
     const requiredFields = collectionSchema.value.required || []
 
     data.forEach((row, index) => {
-      // Check required fields
+      const errors: string[] = []
+
+      // Required field checks
       requiredFields.forEach((field: string) => {
         if (!(field in row) || row[field] === '') {
-          errors.push({ row: index + 1, message: `Missing required field: ${field}` })
+          errors.push(`Missing required field: ${field}`)
         }
       })
 
@@ -98,13 +95,19 @@
           : fieldSchema.bsonType
 
         if (type === 'number' && isNaN(Number(value))) {
-          errors.push({ row: index + 1, message: `Invalid number in ${field}` })
+          errors.push(`Invalid number in ${field}`)
         }
-        // Add more type checks as needed
+        // Add more type checks
       })
+
+      if (errors.length > 0) {
+        invalid.push({ row, errors })
+      } else {
+        valid.push(row)
+      }
     })
 
-    return errors
+    return { valid, invalid }
   }
 
   const createShortNameMap = (schema: Record<string, any>) => {
@@ -171,19 +174,19 @@
 
   onMounted(async () => {
     try {
-      // Load from SQLite backend instead of localStorage
+      // Load from SQLite backend
       const response = await fetch(`${getApiBaseUrl()}/api/csv-temp/${collectionName.value}`)
 
       if (response.ok) {
         const data = await response.json()
-        previewData.value = data
+        previewData.value = data.valid || data // Support both old and new format
         hasImportedData.value = true
 
         // Auto-select all rows when loading saved data
-        const ids = data.map((doc: any) => doc.id)
+        const ids = previewData.value.map((doc: any) => doc.id)
         dataTableStore.selectedRows = new Set(ids)
 
-        console.log(`Loaded saved CSV data with ${data.length} rows`)
+        console.log(`Loaded saved CSV data with ${previewData.value.length} rows`)
       }
     } catch (error) {
       console.error('Error loading saved CSV data:', error)
