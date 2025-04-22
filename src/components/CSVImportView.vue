@@ -1,4 +1,4 @@
-<!-- updated src/views/CSVImportView.vue -->
+<!-- src/views/CSVImportView.vue -->
 <script setup lang="ts">
   import { ref, computed, onMounted, onUnmounted } from 'vue'
   import { useRoute } from 'vue-router'
@@ -57,7 +57,8 @@
 
       // After transforming data
       previewData.value = transformedValid
-      dataTableStore.selectedRows = new Set(transformedValid.map((doc: any) => doc._id))
+      // Use MongoDB-compatible ObjectID for selection
+      dataTableStore.selectedRows = new Set(transformedValid.map((doc: any) => doc._id.$oid))
       hasImportedData.value = true
       toast({ title: 'CSV Processed', description: 'Data successfully imported' })
     } catch (error: any) {
@@ -80,7 +81,8 @@
 
       // Required field checks
       requiredFields.forEach((field: string) => {
-        if (!(field in row) || row[field] === '') {
+        const value = row[field]
+        if (value === null || value === undefined || value === '') {
           errors.push(`Missing required field: ${field}`)
         }
       })
@@ -88,16 +90,29 @@
       // Type validation
       Object.entries(row).forEach(([field, value]) => {
         const fieldSchema = schema[field]
-        if (!fieldSchema) return
+        if (!fieldSchema || value === null || value === '') return
 
         const type = Array.isArray(fieldSchema.bsonType)
           ? fieldSchema.bsonType[0]
           : fieldSchema.bsonType
 
-        if (type === 'number' && isNaN(Number(value))) {
+        if (
+          (type === 'number' || type === 'int' || type === 'double' || type === 'long') &&
+          isNaN(Number(value))
+        ) {
           errors.push(`Invalid number in ${field}`)
         }
-        // Add more type checks
+
+        if (
+          type === 'bool' &&
+          !['true', 'false', '0', '1', 'yes', 'no', ''].includes(String(value).toLowerCase())
+        ) {
+          errors.push(`Invalid boolean value in ${field}`)
+        }
+
+        if (type === 'date' && isNaN(Date.parse(String(value)))) {
+          errors.push(`Invalid date in ${field}`)
+        }
       })
 
       if (errors.length > 0) {
@@ -120,10 +135,39 @@
     )
   }
 
+  const convertValueBySchema = (value: any, fieldSchema: any) => {
+    if (value === null || value === undefined || value === '') return null
+
+    const type = Array.isArray(fieldSchema.bsonType)
+      ? fieldSchema.bsonType[0]
+      : fieldSchema.bsonType
+
+    switch (type) {
+      case 'bool':
+        if (value === '1' || value === 'yes' || String(value).toLowerCase() === 'true') return true
+        if (value === '0' || value === 'no' || String(value).toLowerCase() === 'false') return false
+        return null
+      case 'int':
+      case 'long':
+        return parseInt(value, 10)
+      case 'double':
+      case 'number':
+        return parseFloat(value)
+      case 'date':
+        try {
+          return new Date(value).toISOString()
+        } catch {
+          return null
+        }
+      default:
+        return value
+    }
+  }
+
   const transformCSVData = (data: any[], shortNameMap: Record<string, string>, schema: any) => {
     const schemaFields = Object.keys(schema.properties || {})
 
-    return data.map((row, index) => {
+    return data.map((row) => {
       const transformed: Record<string, any> = {}
 
       // Map all schema fields
@@ -131,19 +175,27 @@
         // Find the CSV column that corresponds to this schema field
         const csvKey =
           Object.entries(shortNameMap).find(([_, shortName]) => shortName === field)?.[0] || field
-        transformed[field] = row[csvKey] ?? ''
+
+        const rawValue = row[csvKey]
+        // Convert values based on schema type
+        transformed[field] = schema.properties[field]
+          ? convertValueBySchema(rawValue, schema.properties[field])
+          : rawValue === '' || rawValue === undefined
+            ? null
+            : rawValue
       })
 
-      // Add generated ID as string (not ObjectId)
-      transformed.id = index + 1 // Use numeric ID (will be replaced by SQLite auto-increment)
+      // Add MongoDB-compatible ObjectID instead of numeric ID
+      transformed._id = { $oid: generateMongoObjectId() }
 
       // Add timestamps if they're part of the schema
+      const now = new Date().toISOString()
       if (schemaFields.includes('created_at')) {
-        transformed.created_at = transformed.created_at || new Date().toISOString()
+        transformed.created_at = transformed.created_at || now
       }
 
       if (schemaFields.includes('updated_at')) {
-        transformed.updated_at = transformed.updated_at || new Date().toISOString()
+        transformed.updated_at = transformed.updated_at || now
       }
 
       return transformed
@@ -180,11 +232,11 @@
       if (response.ok) {
         const data = await response.json()
         previewData.value = data.valid || data // Support both old and new format
-        hasImportedData.value = true
+        hasImportedData.value = previewData.value.length > 0
 
-        // Auto-select all rows when loading saved data
-        const ids = previewData.value.map((doc: any) => doc.id)
-        dataTableStore.selectedRows = new Set(ids)
+        // Auto-select all rows when loading saved data - use MongoDB ObjectID format
+        const ids = previewData.value.map((doc: any) => doc._id?.$oid)
+        dataTableStore.selectedRows = new Set(ids.filter(Boolean)) // Filter out any undefined IDs
 
         console.log(`Loaded saved CSV data with ${previewData.value.length} rows`)
       }

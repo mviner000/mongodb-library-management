@@ -416,25 +416,29 @@
   } // [cite: 15]
 
   const formatSchemaValue = (value: any, bsonType?: string | string[]) => {
-    if (value === undefined || value === null) return '' // [cite: 15]
-    const type = bsonType ? (Array.isArray(bsonType) ? bsonType[0] : bsonType) : typeof value // [cite: 15, 16]
+    if (value === undefined || value === null) return '' // Handle null/undefined early
 
-    if (type === 'date' && value instanceof Date) {
-      // Check if it's already a Date object [cite: 16]
-      return value.toLocaleString() // [cite: 16]
-    } else if (type === 'date') {
-      // Try parsing if it's not a Date object [cite: 16]
+    const type = bsonType ? (Array.isArray(bsonType) ? bsonType[0] : bsonType) : typeof value
+
+    // Handle empty strings for non-string types
+    if (typeof value === 'string' && value.trim() === '') {
+      return ''
+    }
+
+    if (type === 'date') {
       try {
-        return new Date(value).toLocaleString() // [cite: 16]
+        return value instanceof Date ? value.toLocaleString() : new Date(value).toLocaleString()
       } catch {
-        return String(value) // Fallback [cite: 16]
+        return '' // Return empty for invalid dates
       }
     }
+
     if (typeof value === 'object') {
-      return JSON.stringify(value, null, 2) // Keep original formatting [cite: 17]
+      return JSON.stringify(value, null, 2)
     }
-    return String(value) // [cite: 17]
-  } // [cite: 17]
+
+    return String(value)
+  }
 
   const filteredOptions = (field: string) => {
     const refCollection = getReferencedCollection(field) // [cite: 17]
