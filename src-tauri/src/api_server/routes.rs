@@ -49,7 +49,8 @@ use crate::api_server::{
         csv_temp_handlers::{
             load_csv_temp,
             save_csv_temp,
-            delete_csv_temp
+            delete_csv_temp,
+            validate_csv_temp_handler
         }
     },
 };
@@ -88,6 +89,8 @@ pub fn create_api_router() -> (Router<Arc<Mutex<ApiServerState>>>, Vec<String>) 
     add_route!(Method::POST, "/api/csv-temp/:collection", save_csv_temp);
     add_route!(Method::GET, "/api/csv-temp/:collection", load_csv_temp);
     add_route!(Method::DELETE, "/api/csv-temp/:collection", delete_csv_temp);
+
+    add_route!(Method::POST, "/api/csv-validate/:collection", validate_csv_temp_handler);
 
     // Document routes
     add_route!(Method::GET, "/collections/:collection_name/documents", find_documents_handler);
