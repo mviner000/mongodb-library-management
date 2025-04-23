@@ -1,4 +1,4 @@
-<!-- src/components/MongoDBDataTable.vue -->
+<!-- old src/components/MongoDBDataTable.vue -->
 <script setup lang="ts">
   // ==========================================================================
   // Imports
@@ -88,11 +88,9 @@
     errorColumn,
     addingRowError,
     totalPages,
-    tableHeaders,
     columnWidths,
     allSelected,
     hiddenColumns,
-    visibleHeaders,
     previewMode,
   } = storeToRefs(dataTableStore) // [cite: 4, 5]
 
@@ -113,7 +111,6 @@
     resetSelection,
     changeView,
     setPage, // Renamed from onPageChange
-    setPageSize, // Added action
     updateColumnWidth,
     resetColumnWidth,
     saveColumnWidthsToBackend,
@@ -136,6 +133,7 @@
     selectedCollection?: string
     name?: string
     previewData?: any[]
+    dataDisplayMode?: 'valid' | 'invalid'
   }>() // [cite: 11]
 
   // ==========================================================================
@@ -216,6 +214,13 @@
       const end = start + pageSize.value // [cite: 72]
       return documents.value.slice(start, end) // [cite: 72]
     }
+  })
+
+  const visibleHeaders = computed(() => {
+    if (previewMode.value && props.dataDisplayMode === 'invalid') {
+      return tableHeaders.value
+    }
+    return tableHeaders.value.filter((h) => !hiddenColumns.value.includes(h))
   })
 
   const columnLetters = computed(() => {
@@ -323,6 +328,38 @@
         timeoutId.value = null // [cite: 21]
       }, 2500) as unknown as number // [cite: 21]
     }
+  })
+
+  const emit = defineEmits<{
+    (e: 'update:dataDisplayMode', mode: 'valid' | 'invalid'): void
+  }>()
+
+  const tableHeaders = computed(() => {
+    if (previewMode.value && props.dataDisplayMode === 'invalid' && props.previewData?.length) {
+      const firstItem = props.previewData[0]
+      return Object.keys(firstItem).filter((k) => k !== '_id')
+    }
+
+    if (!collectionSchema.value.properties) return []
+    const schemaProps = collectionSchema.value.properties
+    const keys = Object.keys(schemaProps)
+
+    if (collectionSchema.value.ui?.columnOrder) {
+      const columnOrder = collectionSchema.value.ui.columnOrder
+      // Filter valid headers and add missing ones
+      const ordered = columnOrder.filter((key: string) => keys.includes(key))
+      const remaining = keys.filter((key: string) => !columnOrder.includes(key))
+      return [...ordered, ...remaining]
+    }
+
+    return keys.sort((a, b) => {
+      const required = collectionSchema.value.required || []
+      if (required.includes(a) && !required.includes(b)) return -1
+      if (!required.includes(a) && required.includes(b)) return 1
+      if (a === '_id') return -1
+      if (b === '_id') return 1
+      return a.localeCompare(b)
+    })
   })
 
   // Watch isAdding to prefetch reference options
@@ -971,7 +1008,6 @@
   } // [cite: 40]
 
   // --- Emit events ---
-  const emit = defineEmits(['preview-data-update']) // [cite: 71]
 
   // ==========================================================================
   // Expose (if needed by parent components)
@@ -1221,13 +1257,24 @@
               Link to Import CSV Page
             </Button>
           </router-link>
-          <Button
-            variant="outline"
-            size="sm"
-            @click="showDownloadDialog = true"
-          >
-            Download CSV Data
-          </Button>
+          <div class="flex gap-2">
+            <Select
+              :modelValue="props.dataDisplayMode"
+              @update:modelValue="
+                (value) => emit('update:dataDisplayMode', value as 'valid' | 'invalid')
+              "
+            >
+              <SelectTrigger class="w-[120px]">
+                <SelectValue placeholder="Data Type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="valid">Valid</SelectItem>
+                <SelectItem value="invalid">Invalid</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Button @click="showDownloadDialog = true"> Download CSV Data </Button>
+          </div>
           <!-- Download Dialog -->
           <Dialog v-model:open="showDownloadDialog">
             <DialogContent>

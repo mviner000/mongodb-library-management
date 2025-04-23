@@ -18,7 +18,17 @@
   const primaryKey = computed(() => {
     return collectionSchema.value?.primaryKey
   })
-  const previewData = ref<any[]>([])
+
+  // Add data display mode state
+  const dataDisplayMode = ref<'valid' | 'invalid'>('valid')
+  const validData = ref<any[]>([])
+  const invalidData = ref<any[]>([])
+
+  // Update preview data based on mode
+  const previewData = computed(() =>
+    dataDisplayMode.value === 'valid' ? validData.value : invalidData.value
+  )
+
   const fileInput = ref<HTMLInputElement | null>(null)
   const hasImportedData = ref(false)
 
@@ -51,11 +61,11 @@
       }
 
       // Validate CSV data and split into valid/invalid
-      const { valid: validData, invalid: invalidData } = validateCSVData(csvData, schema)
+      const { valid: validCsvData, invalid: invalidCsvData } = validateCSVData(csvData, schema)
 
       // Show upload counts in toast
-      const validCount = validData.length
-      const invalidCount = invalidData.length
+      const validCount = validCsvData.length
+      const invalidCount = invalidCsvData.length
       toast({
         title: `CSV Import Results`,
         description: `Valid data: ${validCount}, Invalid data: ${invalidCount}`,
@@ -63,10 +73,10 @@
       })
 
       // Transform valid data for storage
-      const transformedValid = transformCSVData(validData, shortNameMap, collectionSchema.value)
+      const transformedValid = transformCSVData(validCsvData, shortNameMap, collectionSchema.value)
 
       // UPDATED: Transform invalid data to include all CSV columns
-      const transformedInvalid = invalidData.map(({ row, errors }) => {
+      const transformedInvalid = invalidCsvData.map(({ row, errors }) => {
         const transformedRow: Record<string, string> = {}
 
         // Use CSV headers to include all columns from the original CSV
@@ -90,10 +100,15 @@
 
       if (!response.ok) throw new Error('Failed to save temporary data')
 
-      // After transforming data
-      previewData.value = transformedValid
+      // After transforming data, store in appropriate refs
+      validData.value = transformedValid
+      invalidData.value = transformedInvalid
+
       // Use MongoDB-compatible ObjectID for selection
-      dataTableStore.selectedRows = new Set(transformedValid.map((doc: any) => doc._id.$oid))
+      if (dataDisplayMode.value === 'valid') {
+        dataTableStore.selectedRows = new Set(transformedValid.map((doc: any) => doc._id.$oid))
+      }
+
       hasImportedData.value = true
       toast({ title: 'CSV Processed', description: 'Data successfully imported' })
     } catch (error: any) {
@@ -258,6 +273,21 @@
     return result
   }
 
+  // Toggle between valid and invalid data display
+  const toggleDataDisplayMode = () => {
+    dataDisplayMode.value = dataDisplayMode.value === 'valid' ? 'invalid' : 'valid'
+
+    // Update selected rows based on current display mode
+    if (dataDisplayMode.value === 'valid') {
+      dataTableStore.selectedRows = new Set(
+        validData.value.map((doc: any) => doc._id.$oid).filter(Boolean)
+      )
+    } else {
+      // For invalid data, we might not have proper IDs, so clear selection
+      dataTableStore.selectedRows = new Set()
+    }
+  }
+
   onMounted(async () => {
     try {
       // Load from SQLite backend
@@ -265,14 +295,27 @@
 
       if (response.ok) {
         const data = await response.json()
-        previewData.value = data.valid || data // Support both old and new format
-        hasImportedData.value = previewData.value.length > 0
+
+        // Support both old and new format
+        if (data.valid && data.invalid) {
+          validData.value = data.valid
+          invalidData.value = data.invalid
+        } else {
+          // Legacy support
+          validData.value = data
+          invalidData.value = []
+        }
+
+        dataDisplayMode.value = 'valid'
+        hasImportedData.value = validData.value.length > 0 || invalidData.value.length > 0
 
         // Auto-select all rows when loading saved data - use MongoDB ObjectID format
-        const ids = previewData.value.map((doc: any) => doc._id?.$oid)
+        const ids = validData.value.map((doc: any) => doc._id?.$oid)
         dataTableStore.selectedRows = new Set(ids.filter(Boolean)) // Filter out any undefined IDs
 
-        console.log(`Loaded saved CSV data with ${previewData.value.length} rows`)
+        console.log(
+          `Loaded saved CSV data with ${validData.value.length} valid rows and ${invalidData.value.length} invalid rows`
+        )
       }
     } catch (error) {
       console.error('Error loading saved CSV data:', error)
@@ -288,7 +331,8 @@
       // Delete from SQLite backend instead of localStorage
       await fetch(`${getApiBaseUrl()}/api/csv-temp/${collectionName.value}`, { method: 'DELETE' })
 
-      previewData.value = []
+      validData.value = []
+      invalidData.value = []
       hasImportedData.value = false
       // Clear selected rows when resetting
       dataTableStore.selectedRows = new Set()
@@ -375,8 +419,9 @@
   <div v-else>
     <div class="csv-import-container">
       <MongoDBDataTable
-        :selected-collection="collectionName"
         :preview-data="previewData"
+        :data-display-mode="dataDisplayMode"
+        @update:data-display-mode="dataDisplayMode = $event"
         preview-mode
       />
     </div>

@@ -57,29 +57,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     return documents.value.slice(start, end)
   })
 
-  const tableHeaders = computed(() => {
-    if (!collectionSchema.value.properties) return []
-    const props = collectionSchema.value.properties
-    const keys = Object.keys(props)
-
-    if (collectionSchema.value.ui?.columnOrder) {
-      const columnOrder = collectionSchema.value.ui.columnOrder
-      // Filter valid headers and add missing ones
-      const ordered = columnOrder.filter((key: string) => keys.includes(key))
-      const remaining = keys.filter((key: string) => !columnOrder.includes(key))
-      return [...ordered, ...remaining]
-    }
-
-    return keys.sort((a, b) => {
-      const required = collectionSchema.value.required || []
-      if (required.includes(a) && !required.includes(b)) return -1
-      if (!required.includes(a) && required.includes(b)) return 1
-      if (a === '_id') return -1
-      if (b === '_id') return 1
-      return a.localeCompare(b)
-    })
-  })
-
   const columnWidths = computed(() => {
     return collectionSchema.value?.ui?.columnWidths || {}
   })
@@ -917,11 +894,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
 
   const hiddenColumns = ref<string[]>([])
 
-  // Add getter for visible headers
-  const visibleHeaders = computed(() => {
-    return tableHeaders.value.filter((header) => !hiddenColumns.value.includes(header))
-  })
-
   // Add action to toggle visibility
   function toggleColumnVisibility(header: string) {
     const index = hiddenColumns.value.indexOf(header)
@@ -1075,14 +1047,12 @@ export const useDataTableStore = defineStore('dataTable', () => {
     errorColumn,
     addingRowError,
     hiddenColumns,
-    visibleHeaders,
     previewMode,
 
     // Getters
     totalDocuments,
     totalPages,
     paginatedDocuments,
-    tableHeaders,
     columnWidths,
     allSelected,
 
