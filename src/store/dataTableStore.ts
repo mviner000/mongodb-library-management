@@ -61,13 +61,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     return collectionSchema.value?.ui?.columnWidths || {}
   })
 
-  const allSelected = computed({
-    get: () => totalDocuments.value > 0 && selectedRows.value.size === totalDocuments.value,
-    set: (val: boolean) => {
-      selectedRows.value = val ? new Set(documents.value.map((doc) => doc._id.$oid)) : new Set()
-    },
-  })
-
   // --- Actions ---
 
   // Helper to get schema info
@@ -1054,7 +1047,6 @@ export const useDataTableStore = defineStore('dataTable', () => {
     totalPages,
     paginatedDocuments,
     columnWidths,
-    allSelected,
 
     shortNames,
     // Actions

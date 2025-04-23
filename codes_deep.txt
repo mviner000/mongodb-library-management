@@ -74,11 +74,6 @@
     logDebug('Display mode changed:', { from: oldMode, to: newMode, hasMore: hasMore.value })
   })
 
-  // Helper function to normalize document ID regardless of format
-  const getNormalizedId = (item: any): string | null => {
-    return item?._id?.$oid || (typeof item?._id === 'string' ? item._id : null) || item?.id || null
-  }
-
   // Load more data when button is clicked
   const loadMoreData = async () => {
     const mode = dataDisplayMode.value
@@ -146,17 +141,9 @@
         }
 
         logDebug('Valid data before update:', validData.value.data.length)
-
-        // Create set of existing IDs with normalized format for robust comparison
-        const existingIds = new Set(
-          validData.value.data.map(getNormalizedId).filter(Boolean) // Filter out any null IDs
-        )
-
-        // Filter out items that already exist by checking normalized IDs
-        const newItems = valid.data.filter((item: any) => {
-          const normalizedId = getNormalizedId(item)
-          return normalizedId && !existingIds.has(normalizedId)
-        })
+        // Ensure we don't duplicate any records by checking IDs
+        const existingIds = new Set(validData.value.data.map((item: any) => item._id))
+        const newItems = valid.data.filter((item: any) => !existingIds.has(item._id))
 
         validData.value.data = [...validData.value.data, ...newItems]
         validData.value.currentPage = valid.page
@@ -333,9 +320,7 @@
 
       // Use MongoDB-compatible ObjectID for selection
       if (dataDisplayMode.value === 'valid') {
-        const ids = transformedValid
-          .map((doc: any) => getNormalizedId(doc))
-          .filter(Boolean) as string[]
+        const ids = transformedValid.map((doc: any) => doc._id.$oid).filter(Boolean)
         dataTableStore.selectedRows = new Set(ids)
         logDebug('Selected rows:', { count: ids.length })
       }
@@ -467,7 +452,7 @@
       })
 
       // Add MongoDB-compatible ObjectID instead of numeric ID
-      transformed._id = { $oid: generateMongoObjectId() }
+      transformed._id = generateMongoObjectId()
 
       // Add timestamps if they're part of the schema
       const now = new Date().toISOString()
@@ -549,9 +534,9 @@
           },
         })
 
-        // Auto-select all rows when loading saved data - use normalized ID format
+        // Auto-select all rows when loading saved data - use MongoDB ObjectID format
         if (validData.value.data.length > 0) {
-          const ids = validData.value.data.map(getNormalizedId).filter(Boolean) as string[]
+          const ids = validData.value.data.map((doc: any) => doc._id?.$oid).filter(Boolean)
           dataTableStore.selectedRows = new Set(ids)
           logDebug('Selected rows initialized:', { count: ids.length })
         }

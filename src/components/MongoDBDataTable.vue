@@ -1,4 +1,4 @@
-<!-- old src/components/MongoDBDataTable.vue -->
+<!-- src/components/MongoDBDataTable.vue -->
 <script setup lang="ts">
   // ==========================================================================
   // Imports
@@ -87,9 +87,7 @@
     loadingReferences,
     errorColumn,
     addingRowError,
-    totalPages,
     columnWidths,
-    allSelected,
     hiddenColumns,
     previewMode,
   } = storeToRefs(dataTableStore) // [cite: 4, 5]
@@ -134,7 +132,8 @@
     name?: string
     previewData?: any[]
     dataDisplayMode?: 'valid' | 'invalid'
-  }>() // [cite: 11]
+    hasMore?: boolean
+  }>()
 
   // ==========================================================================
   // Local Component State
@@ -332,6 +331,7 @@
 
   const emit = defineEmits<{
     (e: 'update:dataDisplayMode', mode: 'valid' | 'invalid'): void
+    (e: 'load-more'): void
   }>()
 
   const tableHeaders = computed(() => {
@@ -996,10 +996,6 @@
     changeView(view) // Use store action [cite: 39]
   } // [cite: 39]
 
-  const onPageChange = (page: number) => {
-    setPage(page) // Use store action [cite: 39]
-  } // [cite: 39]
-
   const handleDeleteStart = (id: string) => {
     dataTableStore.pendingDeleteId = id // [cite: 39, 40]
   } // [cite: 40]
@@ -1034,18 +1030,13 @@
   })
 
   const handleScroll = useThrottleFn(async () => {
-    if (!scrollContainer.value || isLoading.value || !dataTableStore.hasMore) return
+    if (!scrollContainer.value || isLoading.value || !props.hasMore) return
 
     const { scrollTop, scrollHeight, clientHeight } = scrollContainer.value
-    const threshold = 100 // pixels from bottom
+    const threshold = 100
 
     if (scrollHeight - (scrollTop + clientHeight) < threshold) {
-      isLoadingMore.value = true
-      try {
-        await dataTableStore.loadNextPage()
-      } finally {
-        isLoadingMore.value = false
-      }
+      emit('load-more')
     }
   }, 200)
 
@@ -1955,6 +1946,14 @@
         >
           <ReloadIcon class="h-6 w-6 animate-spin text-gray-500" />
         </div>
+      </div>
+
+      <!-- loading indicator -->
+      <div
+        v-if="isLoadingMore"
+        class="loading-indicator"
+      >
+        <ReloadIcon class="h-6 w-6 animate-spin text-gray-500" />
       </div>
     </div>
   </div>

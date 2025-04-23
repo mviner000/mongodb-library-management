@@ -1,6 +1,8 @@
 // src/api_server/handlers/csv_temp_handlers.rs
 
-use axum::{extract::{Path, State}, http::StatusCode, Json};
+// src/api_server/handlers/csv_temp_handlers.rs
+
+use axum::{extract::{Path, State, Query}, http::StatusCode, Json};
 use rusqlite::{Connection, params, types::Null};
 use serde_json::{Value, Map};
 use serde::Deserialize;
@@ -20,6 +22,22 @@ pub struct CsvUpload {
     valid: Vec<Value>,
     invalid: Vec<Value>,
 }
+
+// Pagination query parameters
+#[derive(Debug, Deserialize)]
+pub struct PaginationQuery {
+    #[serde(default = "default_page")]
+    pub valid_page: u32,
+    #[serde(default = "default_page_size")]
+    pub valid_page_size: u32,
+    #[serde(default = "default_page")]
+    pub invalid_page: u32,
+    #[serde(default = "default_page_size")]
+    pub invalid_page_size: u32,
+}
+
+fn default_page() -> u32 { 1 }
+fn default_page_size() -> u32 { 20 }
 
 // Helper function to get app data directory
 fn get_app_data_dir() -> PathBuf {
@@ -449,53 +467,30 @@ pub async fn save_csv_temp(
     Ok(())
 }
 
-// Load CSV temp with improved _id handling in result processing
-pub async fn load_csv_temp(
-    State(state): State<Arc<Mutex<ApiServerState>>>,
-    Path(collection): Path<String>,
-) -> Result<Json<Value>, (StatusCode, String)> {
-    // Get the database path from state
-    let db_path = get_db_path_from_state(&state, &collection)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    
-    // Check if the database file exists
-    let db_path_clone = db_path.clone();
-    let file_exists = task::spawn_blocking(move || db_path_clone.exists())
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Task join error: {}", e)))?;
-    
-    if !file_exists {
-        return Err((StatusCode::NOT_FOUND, format!("No temporary data found for collection: {}", collection)));
-    }
-    
-    // Execute SQLite operations in blocking task
-    let results = task::spawn_blocking(move || -> AnyhowResult<Value> {
-        let conn = Connection::open(&db_path)
-            .map_err(|e| anyhow!("Failed to open database: {}", e))?;
-        
-        // Load valid data
-        let valid_data = load_table_data(&conn, "valid_data")?;
-        
-        // Load invalid data
-        let invalid_data = load_table_data(&conn, "invalid_data")?;
-        
-        // Create response with both sets of data
-        let mut response = Map::new();
-        response.insert("valid".to_string(), Value::Array(valid_data));
-        response.insert("invalid".to_string(), Value::Array(invalid_data));
-        
-        Ok(Value::Object(response))
-    })
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Task join error: {}", e)))?
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    Ok(Json(results))
+// Build paginated response
+fn build_pagination_response(
+    data: Vec<Value>, 
+    total: u32,
+    page: u32,
+    page_size: u32
+) -> Value {
+    let mut obj = Map::new();
+    obj.insert("data".to_string(), Value::Array(data));
+    obj.insert("total".to_string(), Value::Number(total.into()));
+    obj.insert("page".to_string(), Value::Number(page.into()));
+    obj.insert("page_size".to_string(), Value::Number(page_size.into()));
+    Value::Object(obj)
 }
 
-// Helper function with proper _id handling
-fn load_table_data(conn: &Connection, table_name: &str) -> Result<Vec<Value>> {
+// Modified load_table_data function with pagination
+fn load_table_data(
+    conn: &Connection,
+    table_name: &str,
+    page: u32,
+    page_size: u32,
+) -> Result<(Vec<Value>, u32)> {
+    println!("[DEBUG] Loading data from {} table, page {}, page size {}", table_name, page, page_size);
+    
     // First check if table exists
     let table_exists = conn.query_row(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
@@ -504,8 +499,18 @@ fn load_table_data(conn: &Connection, table_name: &str) -> Result<Vec<Value>> {
     ).unwrap_or(false);
     
     if !table_exists {
-        return Ok(Vec::new());
+        println!("[DEBUG] Table {} does not exist", table_name);
+        return Ok((Vec::new(), 0));
     }
+    
+    // Get total count
+    let total: u32 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM {}", table_name),
+        [],
+        |row| row.get(0),
+    )?;
+    
+    println!("[DEBUG] Total records in {}: {}", table_name, total);
     
     // Get the column names
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table_name))
@@ -519,52 +524,64 @@ fn load_table_data(conn: &Connection, table_name: &str) -> Result<Vec<Value>> {
     .collect::<Result<Vec<String>, _>>()
     .map_err(|e| anyhow!("Column error: {}", e))?;
     
-    // Prepare and execute SELECT statement for all rows
-    let mut stmt = conn.prepare(&format!("SELECT * FROM {}", table_name))
+    println!("[DEBUG] Found {} columns in {}", columns.len(), table_name);
+    
+    // Calculate offset for pagination
+    let offset = (page - 1) * page_size;
+    println!("[DEBUG] Calculated offset: {}", offset);
+    
+    // Prepare and execute SELECT statement with pagination
+    let query = format!("SELECT * FROM {} ORDER BY \"_id\" LIMIT ? OFFSET ?", table_name);
+    println!("[DEBUG] Executing query: {} with params [page_size={}, offset={}]", query, page_size, offset);
+    
+    let mut stmt = conn.prepare(&query)
         .map_err(|e| anyhow!("Failed to prepare statement: {}", e))?;
         
-    let rows = stmt.query_map([], |row| {
-        let mut obj = Map::new();
-        
-        // Process each column
-        for (i, column_name) in columns.iter().enumerate() {
-            // Check if column value is NULL
-            let val: Option<String> = row.get(i)?;
+    let rows = stmt.query_map(
+        params![page_size as i64, offset as i64],
+        |row| {
+            let mut obj = Map::new();
             
-            if let Some(s) = val {
-                // Special handling for errors column in invalid_data table
-                if table_name == "invalid_data" && column_name == "errors" {
-                    // Try to parse errors as JSON
-                    if let Ok(json_val) = serde_json::from_str::<Value>(&s) {
-                        obj.insert(column_name.clone(), json_val);
-                        continue;
+            // Process each column
+            for (i, column_name) in columns.iter().enumerate() {
+                // Check if column value is NULL
+                let val: Option<String> = row.get(i)?;
+                
+                if let Some(s) = val {
+                    // Special handling for errors column in invalid_data table
+                    if table_name == "invalid_data" && column_name == "errors" {
+                        // Try to parse errors as JSON
+                        if let Ok(json_val) = serde_json::from_str::<Value>(&s) {
+                            obj.insert(column_name.clone(), json_val);
+                            continue;
+                        }
                     }
-                }
-                
-                // Try to parse as JSON if it looks like JSON
-                let json_val = if (s.starts_with('{') && s.ends_with('}')) || 
-                   (s.starts_with('[') && s.ends_with(']')) ||
-                   (s == "true" || s == "false" || s == "null") ||
-                   s.parse::<f64>().is_ok() {
-                    serde_json::from_str(&s).unwrap_or(Value::String(s))
+                    
+                    // Try to parse as JSON if it looks like JSON
+                    let json_val = if (s.starts_with('{') && s.ends_with('}')) || 
+                       (s.starts_with('[') && s.ends_with(']')) ||
+                       (s == "true" || s == "false" || s == "null") ||
+                       s.parse::<f64>().is_ok() {
+                        serde_json::from_str(&s).unwrap_or(Value::String(s))
+                    } else {
+                        Value::String(s)
+                    };
+                    
+                    obj.insert(column_name.clone(), json_val);
                 } else {
-                    Value::String(s)
-                };
-                
-                obj.insert(column_name.clone(), json_val);
-            } else {
-                // Insert explicit null for NULL values from DB
-                obj.insert(column_name.clone(), Value::Null);
+                    // Insert explicit null for NULL values from DB
+                    obj.insert(column_name.clone(), Value::Null);
+                }
             }
+            
+            // Include _id as id for backward compatibility
+            if let Some(mongo_id) = obj.get("_id").cloned() {
+                obj.insert("id".to_string(), mongo_id.clone());
+            }
+            
+            Ok(Value::Object(obj))
         }
-        
-        // Include _id as id for backward compatibility
-        if let Some(mongo_id) = obj.get("_id").cloned() {
-            obj.insert("id".to_string(), mongo_id.clone());
-        }
-        
-        Ok(Value::Object(obj))
-    })
+    )
     .map_err(|e| anyhow!("Query failed: {}", e))?;
 
     let mut results = Vec::new();
@@ -572,7 +589,89 @@ fn load_table_data(conn: &Connection, table_name: &str) -> Result<Vec<Value>> {
         results.push(row.map_err(|e| anyhow!("Row error: {}", e))?);
     }
 
-    Ok(results)
+    println!("[DEBUG] Query returned {} rows", results.len());
+    
+    Ok((results, total))
+}
+
+// Load CSV temp with pagination support
+pub async fn load_csv_temp(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection): Path<String>,
+    Query(params): Query<PaginationQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    // Add request logging
+    println!("[DEBUG] Loading CSV temp data for {} with params: {:?}", collection, params);
+
+    // Validate and clamp pagination values
+    let valid_page = params.valid_page.max(1);
+    let valid_page_size = params.valid_page_size.clamp(1, 100);
+    let invalid_page = params.invalid_page.max(1);
+    let invalid_page_size = params.invalid_page_size.clamp(1, 100);
+    
+    println!("[DEBUG] Processed pagination: valid_page={}, valid_page_size={}, invalid_page={}, invalid_page_size={}",
+        valid_page, valid_page_size, invalid_page, invalid_page_size);
+    
+    // Get the database path from state
+    let db_path = get_db_path_from_state(&state, &collection)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    
+    println!("[DEBUG] Database path: {:?}", db_path);
+    
+    // Check if the database file exists
+    let db_path_clone = db_path.clone();
+    let file_exists = task::spawn_blocking(move || db_path_clone.exists())
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Task join error: {}", e)))?;
+    
+    if !file_exists {
+        println!("[DEBUG] Database file does not exist");
+        return Err((StatusCode::NOT_FOUND, format!("No temporary data found for collection: {}", collection)));
+    }
+    
+    println!("[DEBUG] Database file exists, proceeding with query");
+    
+    // Execute SQLite operations in blocking task
+    let results = task::spawn_blocking(move || -> AnyhowResult<Value> {
+        let conn = Connection::open(&db_path)
+            .map_err(|e| anyhow!("Failed to open database: {}", e))?;
+        
+        // Load valid data with pagination
+        println!("[DEBUG] Loading valid data - page: {}, size: {}", valid_page, valid_page_size);
+        let (valid_data, valid_total) = load_table_data(
+            &conn, "valid_data", 
+            valid_page, valid_page_size
+        )?;
+        println!("[DEBUG] Loaded {} valid items (total: {})", valid_data.len(), valid_total);
+        
+        // Load invalid data with pagination
+        println!("[DEBUG] Loading invalid data - page: {}, size: {}", invalid_page, invalid_page_size);
+        let (invalid_data, invalid_total) = load_table_data(
+            &conn, "invalid_data",
+            invalid_page, invalid_page_size
+        )?;
+        println!("[DEBUG] Loaded {} invalid items (total: {})", invalid_data.len(), invalid_total);
+        
+        // Create response with both sets of data
+        let mut response = Map::new();
+        response.insert("valid".to_string(), build_pagination_response(
+            valid_data, valid_total, valid_page, valid_page_size
+        ));
+        response.insert("invalid".to_string(), build_pagination_response(
+            invalid_data, invalid_total, invalid_page, invalid_page_size
+        ));
+        
+        println!("[DEBUG] Created response with pagination data");
+        
+        Ok(Value::Object(response))
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Task join error: {}", e)))?
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    println!("[DEBUG] Returning response with valid and invalid data");
+    Ok(Json(results))
 }
 
 pub async fn delete_csv_temp(
