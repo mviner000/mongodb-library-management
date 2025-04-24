@@ -81,7 +81,7 @@ fn get_app_data_dir() -> PathBuf { // [cite: 709]
 }
 
 // Get the database path for a collection
-async fn get_db_path_from_state(state: &Arc<Mutex<ApiServerState>>, collection: &str) -> AnyhowResult<PathBuf> { // [cite: 713]
+pub async fn get_db_path_from_state(state: &Arc<Mutex<ApiServerState>>, collection: &str) -> AnyhowResult<PathBuf> { // [cite: 713]
     let state_guard = state.lock().await; // Use a different name to avoid shadowing
     let temp_dirs = state_guard.temp_dirs.lock().await; // [cite: 714]
     if let Some(path) = temp_dirs.get(collection) { // [cite: 714]

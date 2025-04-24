@@ -4,6 +4,7 @@ use axum::{
     routing::{get, post, put, delete},
     http::Method,
     Router,
+    middleware::map_request,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -51,9 +52,20 @@ use crate::api_server::{
             save_csv_temp,
             delete_csv_temp,
             validate_csv_temp_handler
-        }
+        },
+        csv_download_handler::{
+            download_temp_csv,
+            download_temp_csv_post
+        },
     },
 };
+use axum::extract::Request;
+
+// Add middleware to log all route calls
+async fn log_request(request: Request) -> Request {
+    println!("Route called: {} {}", request.method(), request.uri().path());
+    request
+}
 
 // Create the API router and return both the router and a list of routes
 pub fn create_api_router() -> (Router<Arc<Mutex<ApiServerState>>>, Vec<String>) {
@@ -91,6 +103,11 @@ pub fn create_api_router() -> (Router<Arc<Mutex<ApiServerState>>>, Vec<String>) 
     add_route!(Method::DELETE, "/api/csv-temp/:collection", delete_csv_temp);
 
     add_route!(Method::POST, "/api/csv-validate/:collection", validate_csv_temp_handler);
+
+    // Download csv from sqlite routes
+    add_route!(Method::GET, "/api/csv-temp/:collection/download-csv", download_temp_csv);
+    add_route!(Method::POST, "/api/csv-temp/:collection/download-csv", download_temp_csv_post);
+
 
     // Document routes
     add_route!(Method::GET, "/collections/:collection_name/documents", find_documents_handler);
@@ -140,6 +157,15 @@ pub fn create_api_router() -> (Router<Arc<Mutex<ApiServerState>>>, Vec<String>) 
     // System routes
     add_route!(Method::POST, "/api/initialize-library-collections", initialize_library_collections_handler);
     add_route!(Method::GET, "/api/health", health_check_handler);
+    
+    // Print startup routes information
+    println!("Available routes:");
+    for route in &routes {
+        println!("  {}", route);
+    }
+    
+    // Apply request logging middleware
+    router = router.layer(map_request(log_request));
     
     // Apply CORS middleware
     router = router.layer(cors);
