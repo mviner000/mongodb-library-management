@@ -3,13 +3,13 @@
   import { ArrowUpToLine, Download } from 'lucide-vue-next'
   import { ref, onMounted } from 'vue'
   import { useRoute } from 'vue-router'
-  import { getApiBaseUrl } from '@/utils/api'
+  import { getApiBaseUrl, apiFetch } from '@/utils/api'
   import { useToast } from '@/components/ui/toast/use-toast'
 
   const route = useRoute()
   const { toast } = useToast()
 
-  // Logging and state tracking variables
+  // State & logging
   const isLoading = ref(false)
   const lastRequestParams = ref<any>(null)
   const lastResponse = ref<any>(null)
@@ -26,36 +26,51 @@
     (e: 'reset-selection'): void
   }>()
 
-  // Function for CSV import with enhanced logging
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CSV Import: calls /api/csv-import/:collection
+  // ─────────────────────────────────────────────────────────────────────────────
   const handleCSVImport = async () => {
     isLoading.value = true
     const collection = route.params.name as string
     const selectedIds = Array.from(props.selectedRows)
 
-    // Log request details
+    // Log request
     const requestInfo = {
       action: 'CSVImport',
       collection,
       items: selectedIds,
       timestamp: new Date().toISOString(),
     }
-
     console.log('📤 CSV Import Request:', requestInfo)
     lastRequestParams.value = requestInfo
 
     try {
-      // Placeholder for actual import implementation
-      console.log('✅ CSV Import Processed Successfully')
+      // POST to CSV-import endpoint
+      const result = await apiFetch<{
+        inserted_count: number
+        modified_count: number
+        errors: string[]
+      }>(`/api/csv-import/${collection}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ids: selectedIds,
+          collection: [collection],
+        }),
+      })
+
+      console.log('✅ CSV Import Response:', result)
+
       toast({
         title: 'Import Successful',
-        description: `Successfully imported ${selectedIds.length} item(s)`,
+        description: `${result.inserted_count} inserted, ${result.modified_count} updated.`,
         variant: 'success',
       })
 
       lastResponse.value = {
         status: 'success',
         timestamp: new Date().toISOString(),
-        items: selectedIds.length,
+        ...result,
       }
 
       emit('reset-selection')
@@ -64,7 +79,8 @@
       lastError.value = error
       toast({
         title: 'Import Failed',
-        description: 'Failed to process import. Please try again.',
+        description:
+          error instanceof Error ? error.message : 'Failed to process import. Please try again.',
         variant: 'destructive',
       })
     } finally {
@@ -72,7 +88,9 @@
     }
   }
 
-  // Updated download function to use POST request
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CSV Download (unchanged from before)
+  // ─────────────────────────────────────────────────────────────────────────────
   const handleDownloadCSV = async (type: 'single' | 'batch') => {
     const collection = route.params.name as string
     const selectedIds = Array.from(props.selectedRows)
@@ -82,30 +100,21 @@
       const baseUrl = getApiBaseUrl()
       const url = `${baseUrl}/api/csv-temp/${collection}/download-csv`
 
-      // Use POST request with JSON body for large payloads
       const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          ids: Array.from(selectedIds),
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedIds }),
       })
-
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
+        throw new Error(errorData.message || `HTTP ${response.status}`)
       }
 
       const blob = await response.blob()
       const downloadUrl = window.URL.createObjectURL(blob)
-
-      // Create filename with timestamp
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
       const filename = `${collection}_${type}_${timestamp}.csv`
 
-      // Create a temporary anchor element to trigger download
       const a = document.createElement('a')
       a.href = downloadUrl
       a.download = filename
@@ -114,19 +123,18 @@
       window.URL.revokeObjectURL(downloadUrl)
       document.body.removeChild(a)
 
-      // Show success toast with download info
       toast({
         title: '✅ Download Completed',
-        description: `CSV file "${filename}" saved to your Downloads folder`,
+        description: `CSV file "${filename}" saved.`,
         variant: 'success',
       })
 
-      console.log('✅ CSV Download Completed Successfully')
+      console.log('✅ CSV Download Completed')
       lastResponse.value = {
         status: 'completed',
         timestamp: new Date().toISOString(),
         items: selectedIds.length,
-        filename: filename,
+        filename,
       }
     } catch (error) {
       console.error('❌ CSV Download Error:', error)
@@ -141,7 +149,7 @@
     }
   }
 
-  // Add an error boundary pattern
+  // Global error boundary and mount log
   onMounted(() => {
     window.addEventListener('error', (event) => {
       console.error('🔥 Global Error in CSV Component:', {
@@ -156,14 +164,11 @@
         message: event.message,
         error: event.error,
       }
-
       toast({
         title: 'An error occurred',
         description: event.message,
         variant: 'destructive',
       })
-
-      // Prevent default browser error handling
       event.preventDefault()
     })
 

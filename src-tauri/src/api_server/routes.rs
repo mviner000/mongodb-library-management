@@ -57,6 +57,7 @@ use crate::api_server::{
             download_temp_csv,
             download_temp_csv_post
         },
+        csv_import_handler::import_valid_csv_data_handler,
     },
 };
 use axum::extract::Request;
@@ -108,6 +109,9 @@ pub fn create_api_router() -> (Router<Arc<Mutex<ApiServerState>>>, Vec<String>) 
     add_route!(Method::GET, "/api/csv-temp/:collection/download-csv", download_temp_csv);
     add_route!(Method::POST, "/api/csv-temp/:collection/download-csv", download_temp_csv_post);
 
+
+    // Import validated CSV into MongoDB
+    add_route!(Method::POST,   "/api/csv-import/:collection", import_valid_csv_data_handler);
 
     // Document routes
     add_route!(Method::GET, "/collections/:collection_name/documents", find_documents_handler);
