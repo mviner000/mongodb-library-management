@@ -1,3 +1,4 @@
+<!-- src/views/CSVImportView.vue -->
 <script setup lang="ts">
   import { ref, computed, onMounted, onUnmounted, watch } from 'vue' // [cite: 1]
   import { useRoute } from 'vue-router' // [cite: 1]
@@ -114,32 +115,37 @@
     const dataRef = dataDisplayMode.value === 'valid' ? validData : invalidData
     dataRef.value.isLoading = true
     try {
-      const url = `${getApiBaseUrl()}/api/csv-temp/${collectionName.value}?valid_page=${page}&valid_page_size=20&invalid_page=${page}&invalid_page_size=20` // [cite: 12, 55] Fetch first page for both
-      const response = await fetch(url) // [cite: 12]
+      const url = `${getApiBaseUrl()}/api/csv-temp/${collectionName.value}?valid_page=${page}&valid_page_size=20&invalid_page=${page}&invalid_page_size=20` // Fetch first page for both
+      const response = await fetch(url)
       if (!response.ok) {
-        // [cite: 12]
-        const errorText = await response.text() // [cite: 12]
-        throw new Error(`Failed to load temp data: ${response.status} - ${errorText}`) // [cite: 13]
+        const errorText = await response.text()
+        throw new Error(`Failed to load temp data: ${response.status} - ${errorText}`)
       }
-      const responseData = await response.json() // [cite: 13]
-      const { valid, invalid } = responseData // [cite: 13]
+      const responseData = await response.json()
+      const { valid, invalid } = responseData
 
       // Reset data before assigning new page
-      validData.value.data = valid.data || [] // [cite: 56]
-      validData.value.currentPage = valid.page || 1 // [cite: 57]
-      validData.value.totalPages = Math.ceil(valid.total / valid.page_size) || 1 // [cite: 57]
-      validData.value.total = valid.total || 0 // [cite: 59]
+      validData.value.data = valid.data || []
+      validData.value.currentPage = valid.page || 1
+      validData.value.totalPages = Math.ceil(valid.total / valid.page_size) || 1
+      validData.value.total = valid.total || 0
 
-      invalidData.value.data = invalid.data || [] // [cite: 60]
-      invalidData.value.currentPage = invalid.page || 1 // [cite: 61]
-      invalidData.value.totalPages = Math.ceil(invalid.total / invalid.page_size) || 1 // [cite: 62]
-      invalidData.value.total = invalid.total || 0 // [cite: 63]
+      invalidData.value.data = invalid.data || []
+      invalidData.value.currentPage = invalid.page || 1
+      invalidData.value.totalPages = Math.ceil(invalid.total / invalid.page_size) || 1
+      invalidData.value.total = invalid.total || 0
 
       hasImportedData.value = validData.value.total > 0 || invalidData.value.total > 0 // Update based on totals
 
       logDebug('Temp data refreshed successfully', {
         valid: { count: validData.value.data.length, total: validData.value.total },
         invalid: { count: invalidData.value.data.length, total: invalidData.value.total },
+      })
+
+      // Show toast for current mode
+      toast({
+        title: 'Data Loaded',
+        description: `${dataDisplayMode.value} data fetched successfully.`,
       })
     } catch (error: any) {
       console.error('Refresh error:', error)
@@ -151,157 +157,148 @@
 
   // Load more data when button is clicked
   const loadMoreData = async () => {
-    // [cite: 8]
-    const mode = dataDisplayMode.value // [cite: 8]
-    logDebug('loadMoreData triggered for mode:', mode) // [cite: 8]
+    const mode = dataDisplayMode.value
+    logDebug('loadMoreData triggered for mode:', mode)
 
-    const dataRef = mode === 'valid' ? validData : invalidData // [cite: 9]
+    const dataRef = mode === 'valid' ? validData : invalidData
     logDebug('Current pagination state:', {
-      // [cite: 9]
-      page: dataRef.value.currentPage, // [cite: 9]
-      totalPages: dataRef.value.totalPages, // [cite: 9]
-      hasMore: hasMore.value, // [cite: 9]
-      isLoading: dataRef.value.isLoading, // [cite: 9]
-      dataLength: dataRef.value.data.length, // [cite: 9]
-      total: dataRef.value.total, // [cite: 9]
-    }) // [cite: 9]
+      page: dataRef.value.currentPage,
+      totalPages: dataRef.value.totalPages,
+      hasMore: hasMore.value,
+      isLoading: dataRef.value.isLoading,
+      dataLength: dataRef.value.data.length,
+      total: dataRef.value.total,
+    })
 
     if (dataRef.value.isLoading || !hasMore.value) {
-      // [cite: 9]
-      logDebug('Aborting loadMore - loading:', dataRef.value.isLoading, 'hasMore:', hasMore.value) // [cite: 9]
-      return // [cite: 9]
+      logDebug('Aborting loadMore - loading:', dataRef.value.isLoading, 'hasMore:', hasMore.value)
+      return
     }
 
-    dataRef.value.isLoading = true // [cite: 9]
+    dataRef.value.isLoading = true
     try {
-      // [cite: 9]
-      const nextPage = dataRef.value.currentPage + 1 // [cite: 10]
-      logDebug('Attempting to load page:', nextPage) // [cite: 10]
+      const nextPage = dataRef.value.currentPage + 1
+      logDebug('Attempting to load page:', nextPage)
 
-      const validPage = mode === 'valid' ? nextPage : validData.value.currentPage // [cite: 11]
-      const invalidPage = mode === 'invalid' ? nextPage : invalidData.value.currentPage // [cite: 12]
+      const validPage = mode === 'valid' ? nextPage : validData.value.currentPage
+      const invalidPage = mode === 'invalid' ? nextPage : invalidData.value.currentPage
 
-      const url = // [cite: 12]
-        `${getApiBaseUrl()}/api/csv-temp/${collectionName.value}?` + // [cite: 12]
-        `valid_page=${validPage}&valid_page_size=20&` + // [cite: 12]
-        `invalid_page=${invalidPage}&invalid_page_size=20` // [cite: 12]
+      const url =
+        `${getApiBaseUrl()}/api/csv-temp/${collectionName.value}?` +
+        `valid_page=${validPage}&valid_page_size=20&` +
+        `invalid_page=${invalidPage}&invalid_page_size=20`
 
-      logDebug('Fetching from URL:', url) // [cite: 12]
+      logDebug('Fetching from URL:', url)
 
-      const response = await fetch(url) // [cite: 12]
+      const response = await fetch(url)
       if (!response.ok) {
-        // [cite: 12]
-        const errorText = await response.text() // [cite: 12]
-        logDebug('Load failed - status:', response.status, 'response:', errorText) // [cite: 12]
-        throw new Error(`Failed to load data: ${response.status}`) // [cite: 13]
+        const errorText = await response.text()
+        logDebug('Load failed - status:', response.status, 'response:', errorText)
+        throw new Error(`Failed to load data: ${response.status}`)
       }
 
-      const responseData = await response.json() // [cite: 13]
-      logDebug('API response structure:', Object.keys(responseData)) // [cite: 13]
-      const { valid, invalid } = responseData // [cite: 13]
+      const responseData = await response.json()
+      logDebug('API response structure:', Object.keys(responseData))
+      const { valid, invalid } = responseData
       logDebug('API response data:', {
-        // [cite: 13]
         valid: {
-          // [cite: 13]
-          page: valid.page, // [cite: 13]
-          total: valid.total, // [cite: 13]
-          page_size: valid.page_size, // [cite: 13]
-          dataLength: valid.data?.length, // [cite: 14]
-        }, // [cite: 14]
+          page: valid.page,
+          total: valid.total,
+          page_size: valid.page_size,
+          dataLength: valid.data?.length,
+        },
         invalid: {
-          // [cite: 14]
-          page: invalid.page, // [cite: 14]
-          total: invalid.total, // [cite: 14]
-          page_size: invalid.page_size, // [cite: 14]
-          dataLength: invalid.data?.length, // [cite: 14]
-        }, // [cite: 14]
-      }) // [cite: 14]
+          page: invalid.page,
+          total: invalid.total,
+          page_size: invalid.page_size,
+          dataLength: invalid.data?.length,
+        },
+      })
 
       if (mode === 'valid') {
-        // [cite: 14]
         // Check if we actually got new data
         if (!valid.data || valid.data.length === 0) {
-          // [cite: 16]
-          logDebug('Warning: No new valid data received for page', nextPage) // [cite: 16]
-        } // [cite: 16]
+          logDebug('Warning: No new valid data received for page', nextPage)
+        }
 
-        logDebug('Valid data before update:', validData.value.data.length) // [cite: 16]
+        logDebug('Valid data before update:', validData.value.data.length)
 
         // Create set of existing IDs with normalized format for robust comparison
-        const existingIds = new Set( // [cite: 16]
-          validData.value.data.map(getNormalizedId).filter(Boolean) // Filter out any null IDs // [cite: 16]
-        ) // [cite: 16]
+        const existingIds = new Set(
+          validData.value.data.map(getNormalizedId).filter(Boolean) // Filter out any null IDs
+        )
 
         // Filter out items that already exist by checking normalized IDs
         const newItems = valid.data.filter((item: any) => {
-          // [cite: 17]
-          const normalizedId = getNormalizedId(item) // [cite: 17]
-          return normalizedId && !existingIds.has(normalizedId) // [cite: 17]
-        }) // [cite: 17]
+          const normalizedId = getNormalizedId(item)
+          return normalizedId && !existingIds.has(normalizedId)
+        })
 
-        validData.value.data = [...validData.value.data, ...newItems] // [cite: 17]
-        validData.value.currentPage = valid.page // [cite: 17]
-        validData.value.totalPages = Math.ceil(valid.total / valid.page_size) // [cite: 17]
-        validData.value.total = valid.total // [cite: 18]
+        validData.value.data = [...validData.value.data, ...newItems]
+        validData.value.currentPage = valid.page
+        validData.value.totalPages = Math.ceil(valid.total / valid.page_size)
+        validData.value.total = valid.total
         logDebug('Valid data after update:', {
-          // [cite: 18]
-          length: validData.value.data.length, // [cite: 18]
-          newItemsAdded: newItems.length, // [cite: 18]
-          currentPage: validData.value.currentPage, // [cite: 18]
-          totalPages: validData.value.totalPages, // [cite: 18]
-        }) // [cite: 18]
+          length: validData.value.data.length,
+          newItemsAdded: newItems.length,
+          currentPage: validData.value.currentPage,
+          totalPages: validData.value.totalPages,
+        })
       } else {
-        // [cite: 18]
         // Check if we actually got new data
         if (!invalid.data || invalid.data.length === 0) {
-          // [cite: 19]
-          logDebug('Warning: No new invalid data received for page', nextPage) // [cite: 19]
-        } // [cite: 19]
+          logDebug('Warning: No new invalid data received for page', nextPage)
+        }
 
-        logDebug('Invalid data before update:', invalidData.value.data.length) // [cite: 19]
-        // We can't reliably use IDs for invalid data, so check based on error strings
-        const getInvalidKey = (item: any) => JSON.stringify(item.errors || []) // [cite: 19]
-        const existingKeys = new Set(invalidData.value.data.map(getInvalidKey)) // [cite: 19]
-        const newItems = invalid.data.filter((item: any) => !existingKeys.has(getInvalidKey(item))) // [cite: 20]
+        logDebug('Invalid data before update:', invalidData.value.data.length)
+        // Use _id to check for duplicates
+        const existingInvalidIds = new Set(
+          invalidData.value.data.map(getNormalizedId).filter(Boolean)
+        )
+        const newItems = invalid.data.filter((item: any) => {
+          const normalizedId = getNormalizedId(item)
+          return normalizedId && !existingInvalidIds.has(normalizedId)
+        })
 
-        invalidData.value.data = [...invalidData.value.data, ...newItems] // [cite: 20]
-        invalidData.value.currentPage = invalid.page // [cite: 20]
-        invalidData.value.totalPages = Math.ceil(invalid.total / invalid.page_size) // [cite: 20]
-        invalidData.value.total = invalid.total // [cite: 20]
+        invalidData.value.data = [...invalidData.value.data, ...newItems]
+        invalidData.value.currentPage = invalid.page
+        invalidData.value.totalPages = Math.ceil(invalid.total / invalid.page_size)
+        invalidData.value.total = invalid.total
         logDebug('Invalid data after update:', {
-          // [cite: 20]
-          length: invalidData.value.data.length, // [cite: 20]
-          newItemsAdded: newItems.length, // [cite: 20]
-          currentPage: invalidData.value.currentPage, // [cite: 20]
-          totalPages: invalidData.value.totalPages, // [cite: 21]
-        }) // [cite: 21]
+          length: invalidData.value.data.length,
+          newItemsAdded: newItems.length,
+          currentPage: invalidData.value.currentPage,
+          totalPages: invalidData.value.totalPages,
+        })
       }
 
       logDebug('Updated pagination state:', {
-        // [cite: 21]
         valid: {
-          // [cite: 21]
-          page: validData.value.currentPage, // [cite: 21]
-          totalPages: validData.value.totalPages, // [cite: 21]
-          hasMore: validData.value.currentPage < validData.value.totalPages, // [cite: 21]
-        }, // [cite: 21]
+          page: validData.value.currentPage,
+          totalPages: validData.value.totalPages,
+          hasMore: validData.value.currentPage < validData.value.totalPages,
+        },
         invalid: {
-          // [cite: 21]
-          page: invalidData.value.currentPage, // [cite: 22]
-          totalPages: invalidData.value.totalPages, // [cite: 22]
-          hasMore: invalidData.value.currentPage < invalidData.value.totalPages, // [cite: 22]
-        }, // [cite: 22]
-      }) // [cite: 22]
+          page: invalidData.value.currentPage,
+          totalPages: invalidData.value.totalPages,
+          hasMore: invalidData.value.currentPage < invalidData.value.totalPages,
+        },
+      })
+
+      // Show toast for loaded more data
+      toast({
+        title: 'More Data Loaded',
+        description: `Successfully loaded more ${mode} data.`,
+        variant: 'success',
+      })
     } catch (error: any) {
-      // [cite: 22]
-      console.error('Load error:', error) // [cite: 22]
-      toast({ title: 'Load Error', description: error.message, variant: 'destructive' }) // [cite: 22]
+      console.error('Load error:', error)
+      toast({ title: 'Load Error', description: error.message, variant: 'destructive' })
     } finally {
-      // [cite: 22]
-      dataRef.value.isLoading = false // [cite: 22]
-      logDebug('Load completed for mode:', mode) // [cite: 22]
-    } // [cite: 22]
-  } // [cite: 23]
+      dataRef.value.isLoading = false
+      logDebug('Load completed for mode:', mode)
+    }
+  }
 
   const handleFileUpload = async (event: Event) => {
     // [cite: 23]
