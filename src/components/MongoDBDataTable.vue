@@ -54,6 +54,7 @@
   import DialogFooter from './ui/dialog/DialogFooter.vue'
   import ColumnVisibilityControl from './mongodbtable/ColumnVisibilityControl.vue'
   import TableCellContextMenu from './mongodbtable/TableCellContextMenu.vue'
+  import AddNewDocumentRow from './mongodbtable/AddNewDocumentRow.vue'
 
   // ==========================================================================
   // Store Setup
@@ -1111,6 +1112,8 @@
       })
     }
   }
+
+  const isOnImportPage = route.path.endsWith('/import-csv')
 </script>
 <template>
   <!-- MongoDBDataTable main div -->
@@ -1179,106 +1182,129 @@
           @delete-end="handleDeleteEnd"
           @view-change="handleViewChange"
         />
-        <!-- Visibility of Columns -->
-        <div class="z-40 mt-10 p-2 bg-[#217346]/90 flex gap-2">
-          <ColumnVisibilityControl
-            :table-headers="tableHeaders"
-            :hidden-columns="hiddenColumns"
-            :collection-schema="collectionSchema"
-            @toggle-visibility="toggleColumnVisibility"
-          />
-
-          <div class="flex items-center space-x-2">
-            <Switch
-              id="preview-live-toggle"
-              :modelValue="previewMode"
-              :disabled="isImportRoute"
-              @update:modelValue="
-                (value) => {
-                  if (!isImportRoute) previewMode = value
-                }
-              "
-            />
-            <Label
-              class="text-white cursor-pointer"
-              for="preview-live-toggle"
-            >
-              {{ previewMode ? 'Mode: Preview' : 'Mode: Live' }}
-            </Label>
-          </div>
-
-          <router-link
-            :to="`/collection/${collectionName}/import-csv`"
-            class="ml-4"
-          >
-            <Button
-              variant="outline"
-              size="sm"
-            >
-              Link to Import CSV Page
-            </Button>
-          </router-link>
+        <!-- Column Controls -->
+        <div class="z-40 mt-10 p-2 bg-[#217346]/90 flex justify-between">
+          <!-- Left side content -->
           <div class="flex gap-2">
-            <Select
-              :modelValue="props.dataDisplayMode"
-              @update:modelValue="
-                (value) => emit('update:dataDisplayMode', value as 'valid' | 'invalid')
-              "
-            >
-              <SelectTrigger class="w-[120px]">
-                <SelectValue placeholder="Data Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="valid">Valid</SelectItem>
-                <SelectItem value="invalid">Invalid</SelectItem>
-              </SelectContent>
-            </Select>
+            <div class="flex items-center space-x-2 hidden">
+              <Switch
+                id="preview-live-toggle"
+                :modelValue="previewMode"
+                :disabled="isImportRoute"
+                @update:modelValue="
+                  (value) => {
+                    if (!isImportRoute) previewMode = value
+                  }
+                "
+              />
+              <Label
+                class="text-white cursor-pointer"
+                for="preview-live-toggle"
+              >
+                {{ previewMode ? 'Mode: Preview' : 'Mode: Live' }}
+              </Label>
+            </div>
 
-            <Button @click="showDownloadDialog = true"> Download CSV Data </Button>
-          </div>
-          <!-- Download Dialog -->
-          <Dialog v-model:open="showDownloadDialog">
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Download Options</DialogTitle>
-              </DialogHeader>
-              <div class="space-y-4">
-                <div>
-                  <Label>Header Row Format:</Label>
-                  <Select v-model="downloadHeaderChoice">
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select header format" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="short">Short Names</SelectItem>
-                      <SelectItem value="original">Original Names</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div class="flex items-center space-x-2">
-                  <Switch
-                    id="include-id"
-                    :modelValue="includeId"
-                    @update:modelValue="(value) => (includeId = value)"
-                  />
-                  <Label
-                    for="include-id"
-                    class="cursor-pointer"
-                  >
-                    Include ID
-                  </Label>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button @click="downloadCSV">Download</Button>
+            <div class="flex gap-2 ml-4">
+              <router-link
+                v-if="isOnImportPage"
+                :to="`/collection/${collectionName}`"
+              >
                 <Button
                   variant="outline"
-                  @click="showDownloadDialog = false"
-                  >Cancel</Button
+                  size="sm"
                 >
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+                  Back
+                </Button>
+              </router-link>
+
+              <router-link
+                v-else
+                :to="`/collection/${collectionName}/import-csv`"
+              >
+                <Button
+                  variant="outline"
+                  size="sm"
+                >
+                  Import CSV
+                </Button>
+              </router-link>
+            </div>
+
+            <div class="flex gap-2">
+              <Select
+                v-if="isOnImportPage"
+                :modelValue="props.dataDisplayMode"
+                @update:modelValue="
+                  (value) => emit('update:dataDisplayMode', value as 'valid' | 'invalid')
+                "
+              >
+                <SelectTrigger class="w-[120px]">
+                  <SelectValue placeholder="Data Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="valid">Valid</SelectItem>
+                  <SelectItem value="invalid">Invalid</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Button @click="showDownloadDialog = true"> Download CSV Data </Button>
+            </div>
+
+            <!-- Download Dialog -->
+            <Dialog v-model:open="showDownloadDialog">
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Download Options</DialogTitle>
+                </DialogHeader>
+                <div class="space-y-4">
+                  <div>
+                    <Label>Header Row Format:</Label>
+                    <Select v-model="downloadHeaderChoice">
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select header format" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="short">Short Names</SelectItem>
+                        <SelectItem value="original">Original Names</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div class="flex items-center space-x-2">
+                    <Switch
+                      id="include-id"
+                      :modelValue="includeId"
+                      @update:modelValue="(value) => (includeId = value)"
+                    />
+                    <Label
+                      for="include-id"
+                      class="cursor-pointer"
+                    >
+                      Include ID
+                    </Label>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button @click="downloadCSV">Download</Button>
+                  <Button
+                    variant="outline"
+                    @click="showDownloadDialog = false"
+                    >Cancel</Button
+                  >
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          <!-- Right side content -->
+          <div class="ml-auto mt-1">
+            <ColumnVisibilityControl
+              :table-headers="tableHeaders"
+              :hidden-columns="hiddenColumns"
+              :collection-schema="collectionSchema"
+              @toggle-visibility="toggleColumnVisibility"
+            />
+          </div>
         </div>
 
         <table
@@ -1711,119 +1737,26 @@
               <!-- End of Context Menu -->
             </template>
 
-            <TableRow
+            <!-- start of add new document component -->
+            <AddNewDocumentRow
               v-if="isAdding"
-              class="excel-new-row"
-              :class="['excel-new-row', { 'excel-new-row-error': addingRowError }]"
-            >
-              <TableCell
-                class="excel-column-checkbox-selector"
-                :style="{
-                  width: '40px',
-                  minWidth: '40px',
-                  maxWidth: '40px',
-                }"
-              >
-                <input
-                  type="checkbox"
-                  disabled
-                  class="excel-checkbox"
-                />
-              </TableCell>
-              <TableCell class="excel-row-number"> {{ documents.length + 1 }} </TableCell>
-              <TableCell
-                v-for="header in tableHeaders"
-                :key="`new-${header}`"
-                class="excel-cell"
-                :class="{
-                  'error-column-cell': header === errorColumn,
-                  'highlighted-column': highlightedColumn === header,
-                }"
-              >
-                <span
-                  v-if="['created_at', 'updated_at'].includes(header)"
-                  class="excel-timestamp"
-                >
-                  (auto-generated)
-                </span>
-
-                <div
-                  v-else-if="header !== '_id' && getSchemaInfo(header).bsonType === 'bool'"
-                  class="flex items-center justify-center"
-                >
-                  <input
-                    type="checkbox"
-                    v-model="newDocument[header]"
-                    class="excel-checkbox"
-                  />
-                </div>
-                <div
-                  v-else-if="header !== '_id' && isReferenceField(header)"
-                  class="h-8"
-                >
-                  <Select
-                    v-model="newDocument[header]"
-                    class="excel-select"
-                  >
-                    <SelectTrigger class="h-8">
-                      <SelectValue :placeholder="`Select`" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <div
-                        v-if="loadingReferences[getReferencedCollection(header)!]"
-                        class="p-2"
-                      >
-                        <ReloadIcon class="h-4 w-4 animate-spin mx-auto" />
-                      </div>
-                      <ScrollArea
-                        v-else
-                        class="h-48"
-                      >
-                        <Input
-                          v-model="searchQuery[header]"
-                          placeholder="Search..."
-                          class="mb-1 mx-1 excel-input"
-                        />
-                        <SelectItem
-                          v-for="option in filteredOptions(header)"
-                          :key="option.id"
-                          :value="option.id"
-                        >
-                          {{ option.label }}
-                        </SelectItem>
-                      </ScrollArea>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Input
-                  v-else-if="header !== '_id'"
-                  v-model="newDocument[header]"
-                  :type="getSchemaInfo(header).bsonType === 'date' ? 'datetime-local' : 'text'"
-                  class="excel-input"
-                  :class="{ 'ring-2 ring-red-500': header === errorColumn }"
-                />
-                <span
-                  v-else
-                  class="excel-auto-id"
-                  >(auto)</span
-                >
-              </TableCell>
-              <TableCell class="excel-cell text-center">
-                <Button
-                  variant="ghost"
-                  @click="saveNewDocument"
-                  size="sm"
-                  class="px-0 -ml-1"
-                  :disabled="isSaving"
-                >
-                  <ReloadIcon
-                    v-if="isSaving"
-                    class="h-4 w-4 animate-spin"
-                  />
-                  <span v-else>💾</span>
-                </Button>
-              </TableCell>
-            </TableRow>
+              :table-headers="visibleHeaders"
+              :new-document="newDocument"
+              @update:newDocument="(payload) => (newDocument = payload)"
+              :is-saving="isSaving"
+              :error-column="errorColumn"
+              :adding-row-error="addingRowError"
+              :highlighted-column="highlightedColumn"
+              :total-documents="documents.length"
+              :get-schema-info="getSchemaInfo"
+              :is-reference-field="isReferenceField"
+              :get-referenced-collection="getReferencedCollection"
+              :reference-options="referenceOptions"
+              :loading-references="loadingReferences"
+              :search-query="searchQuery"
+              @save="saveNewDocument"
+              @cancel="cancelAdding"
+            />
 
             <TableRow
               v-if="!isAdding && !previewMode"
@@ -1842,6 +1775,7 @@
                 </div>
               </TableCell>
             </TableRow>
+            <!-- end of add new document component -->
           </TableBody>
         </table>
 
@@ -2330,47 +2264,8 @@
     text-decoration: underline; /* Added underline */
   }
 
-  /* Excel timestamp value */
-  .excel-timestamp {
-    color: #666666; /* [cite: 122] */
-    font-style: italic; /* [cite: 122] */
-    font-size: 12px; /* [cite: 122] */ /* Slightly smaller */
-    display: block; /* Ensure it takes space */
-    line-height: normal; /* Reset line height */
-  }
-
-  /* Excel auto ID */
-  .excel-auto-id {
-    color: #888888; /* [cite: 123] */
-    font-style: italic; /* [cite: 123] */
-    padding: 0 8px; /* [cite: 123] */
-    font-size: 12px; /* [cite: 123] */ /* Slightly smaller */
-    display: block;
-    line-height: normal;
-  }
-
-  /* Excel new row */
-  .excel-new-row {
-    background-color: #e8f5e9; /* [cite: 126] */
-  }
-  .excel-new-row .excel-cell {
-    height: 40px; /* [cite: 116] */
-    overflow: visible; /* [cite: 116] */ /* Allow select dropdown */
-    vertical-align: middle; /* Center vertically */
-  }
-  .excel-new-row .excel-input {
-    overflow: hidden; /* [cite: 117] */
-    height: 100%; /* Ensure input fills cell */
-    background-color: white;
-    border: 1px solid #d0d0d0; /* Add border for clarity */
-  }
-  .excel-new-row .excel-select > button {
-    /* Target trigger */
-    height: 100%;
-    background-color: white;
-    border: 1px solid #d0d0d0;
-  }
-
+  /* ... (styles for .excel-select, .excel-input, .excel-checkbox etc. are general, */
+  /* but their application within .excel-new-row is specific) ... */
   /* Excel cancel button (if used) */
   .excel-cancel-button {
     color: #666666; /* [cite: 126] */
@@ -2484,23 +2379,6 @@
     border: 1px solid #ef4444 !important; /* [cite: 136] */ /* Changed border width */
   }
 
-  .error-column-cell {
-    /* Applied to TD in add row */
-    background-color: #fef2f2 !important; /* [cite: 137] */
-    /* Removed border here, applied to input instead */
-    /* animation: error-flash 5s; */ /* [cite: 137] */ /* Removed animation */
-  }
-  .excel-new-row .error-column-cell .excel-input {
-    /* Target input in error cell */
-    border: 1px solid #ef4444 !important;
-    outline: 1px solid #ef4444 !important;
-  }
-
-  .excel-new-row-error {
-    /* Applied to the TR for adding */
-    background-color: #fee2e2 !important; /* [cite: 138] */
-    /* animation: error-flash 5s; */ /* [cite: 138] */ /* Removed animation */
-  }
   /* Flash effect was removed as it might be jarring */
   /* @keyframes error-flash { ... } */ /**/
 

@@ -50,16 +50,6 @@
     emit('bookmark')
   }
 
-  // Propagate clicks outside the menu to the parent to close it
-  const handleClickOutside = (event: MouseEvent) => {
-    // Check if the click is outside the menu itself
-    const menuElement = document.querySelector('.context-menu') // Be more specific if needed
-    if (menuElement && !menuElement.contains(event.target as Node)) {
-      // We rely on the parent component's global click listener (`closeContextMenu`)
-      // This component doesn't need its own global listener, just handles its internal clicks.
-    }
-  }
-
   // Note: The parent component (MongoDBDataTable.vue) already has a global click listener
   // that calls `closeContextMenu`. We just need to ensure clicks *inside* the menu
   // don't propagate and trigger the parent's listener unintentionally.

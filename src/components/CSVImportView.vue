@@ -740,6 +740,16 @@
     v-if="!hasImportedData"
     class="file-import-container"
   >
+    <div class="mb-4">
+      <router-link :to="`/collection/${collectionName}`">
+        <Button
+          variant="outline"
+          size="sm"
+        >
+          Back
+        </Button>
+      </router-link>
+    </div>
     <input
       ref="fileInput"
       type="file"
