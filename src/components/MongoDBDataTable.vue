@@ -34,13 +34,6 @@
     SelectTrigger,
     SelectValue,
   } from '@/components/ui/select' // [cite: 2]
-  import {
-    NavigationMenu,
-    NavigationMenuContent,
-    NavigationMenuItem,
-    NavigationMenuList,
-    NavigationMenuTrigger,
-  } from './ui/navigation-menu' // [cite: 3]
   import { ScrollArea } from '@/components/ui/scroll-area' // [cite: 3]
   import Switch from './ui/switch/Switch.vue' // [cite: 4]
   import Label from './ui/label/Label.vue' // [cite: 4]
@@ -59,6 +52,8 @@
   import DialogTitle from './ui/dialog/DialogTitle.vue'
   import DialogHeader from './ui/dialog/DialogHeader.vue'
   import DialogFooter from './ui/dialog/DialogFooter.vue'
+  import ColumnVisibilityControl from './mongodbtable/ColumnVisibilityControl.vue'
+  import TableCellContextMenu from './mongodbtable/TableCellContextMenu.vue'
 
   // ==========================================================================
   // Store Setup
@@ -147,7 +142,6 @@
   const searchQuery = ref<Record<string, string>>({}) // [cite: 9]
   const selectedCell = ref<{ colIndex: number; rowNumber: number } | null>(null) // [cite: 10]
   const timeoutId = ref<number | null>(null) // For error message timeout [cite: 11]
-  const showPinTooltip = ref(false) // [cite: 11]
   const highlightedColumn = ref<string | null>(null) // [cite: 62]
   const showContextMenu = ref(false) // [cite: 40]
   const contextMenuPosition = ref({ x: 0, y: 0 }) // [cite: 40]
@@ -1187,36 +1181,12 @@
         />
         <!-- Visibility of Columns -->
         <div class="z-40 mt-10 p-2 bg-[#217346]/90 flex gap-2">
-          <NavigationMenu>
-            <NavigationMenuList>
-              <NavigationMenuItem>
-                <NavigationMenuTrigger size="sm">Visibility</NavigationMenuTrigger>
-                <NavigationMenuContent>
-                  <div class="p-2 w-48">
-                    <div
-                      v-for="header in tableHeaders"
-                      :key="header"
-                      class="flex items-center space-x-2 py-1 px-2 rounded hover:bg-green-100 transition-colors duration-150 group"
-                    >
-                      <input
-                        type="checkbox"
-                        :id="`checkbox-${header}`"
-                        :checked="!hiddenColumns.includes(header)"
-                        @change="toggleColumnVisibility(header)"
-                        class="cursor-pointer accent-green-600"
-                      />
-                      <label
-                        :for="`checkbox-${header}`"
-                        class="flex-1 cursor-pointer text-sm group-hover:text-green-800"
-                      >
-                        {{ collectionSchema.ui?.short_names?.[header] || header }}
-                      </label>
-                    </div>
-                  </div>
-                </NavigationMenuContent>
-              </NavigationMenuItem>
-            </NavigationMenuList>
-          </NavigationMenu>
+          <ColumnVisibilityControl
+            :table-headers="tableHeaders"
+            :hidden-columns="hiddenColumns"
+            :collection-schema="collectionSchema"
+            @toggle-visibility="toggleColumnVisibility"
+          />
 
           <div class="flex items-center space-x-2">
             <Switch
@@ -1727,49 +1697,16 @@
               </TableRow>
 
               <!-- Context Menu -->
-              <div
-                v-if="showContextMenu"
-                class="fixed z-50 bg-white shadow-lg border rounded-md p-1 min-w-[120px] context-menu"
-                :class="{ hidden: previewMode }"
-                :style="{
-                  left: `${contextMenuPosition.x}px`,
-                  top: `${contextMenuPosition.y}px`,
-                }"
-                @click="closeContextMenu"
-              >
-                <div
-                  class="flex items-center px-3 py-1.5 text-sm rounded-sm relative tooltip-container"
-                  :class="[
-                    isSelectedArchived
-                      ? 'text-gray-400 cursor-not-allowed'
-                      : 'hover:bg-gray-100 cursor-pointer text-gray-700',
-                  ]"
-                  @click="pinCell"
-                  @mouseenter="isSelectedArchived && (showPinTooltip = true)"
-                  @mouseleave="showPinTooltip = false"
-                >
-                  <span>
-                    <template v-if="selectedDocumentIsPinned">📌 Unpin this item</template>
-                    <template v-else>📌 Pin this item</template>
-                  </span>
-                  <!-- Custom tooltip -->
-                  <div
-                    v-if="isSelectedArchived && showPinTooltip"
-                    class="custom-tooltip absolute bg-gray-800 text-white text-xs rounded py-1 px-2 left-0 bottom-full mb-1 whitespace-nowrap pointer-events-none z-50"
-                  >
-                    You cannot pin an archived item
-                    <div
-                      class="tooltip-arrow absolute top-full left-4 w-2 h-2 bg-gray-800 transform rotate-45"
-                    ></div>
-                  </div>
-                </div>
-                <div
-                  class="flex items-center px-3 py-1.5 text-sm hover:bg-gray-100 rounded-sm cursor-pointer"
-                  @click="bookmarkCell"
-                >
-                  🔖 Bookmark
-                </div>
-              </div>
+              <TableCellContextMenu
+                :is-visible="showContextMenu"
+                :position="contextMenuPosition"
+                :is-pinned="selectedDocumentIsPinned"
+                :is-archived="isSelectedArchived"
+                :is-preview="previewMode"
+                @close="closeContextMenu"
+                @pin="pinCell"
+                @bookmark="bookmarkCell"
+              />
 
               <!-- End of Context Menu -->
             </template>
@@ -2069,62 +2006,6 @@
     100% {
       transform: scale(1);
     }
-  }
-
-  /* Context Menu */
-  .tooltip-container {
-    position: relative;
-  }
-
-  .custom-tooltip {
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
-    animation: fadeIn 0.2s ease-in-out;
-  }
-
-  .tooltip-arrow {
-    position: absolute;
-    top: 100%;
-    left: 10px;
-    margin-top: -4px;
-    width: 8px;
-    height: 8px;
-    transform: rotate(45deg);
-  }
-
-  @keyframes fadeIn {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
-  }
-
-  .excel-cell-context-selected {
-    outline: 2px solid #217346;
-    outline-offset: -2px;
-    position: relative;
-    z-index: 1;
-    overflow: visible;
-  }
-
-  .context-menu {
-    transform: translateY(-100%); /* Move menu up by its own height */
-    pointer-events: auto; /* Ensure menu remains interactive */
-  }
-
-  /* small arrow */
-  .context-menu::before {
-    content: '';
-    position: absolute;
-    top: -5px; /* Change from bottom to top */
-    left: 10px;
-    width: 0;
-    height: 0;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-bottom: 5px solid white; /* Change from border-top to border-bottom */
-    filter: drop-shadow(0 -1px 1px rgba(0, 0, 0, 0.1)); /* Adjust shadow direction */
   }
 
   /* --- Style Section (From old_codes.txt, using <style scoped>) --- */
