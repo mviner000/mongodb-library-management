@@ -1,0 +1,2021 @@
+// src/api_server/handlers/collection_handlers.rs
+
+use axum::{
+    http::StatusCode,
+    Json,
+    extract::{State, Path},
+    response::IntoResponse,
+};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+use mongodb::Database;
+use mongodb::bson::{doc, Document};
+use anyhow::Result;
+use std::collections::HashSet;
+use futures_util::stream::StreamExt;
+
+use crate::api_server::state::ApiServerState;
+use crate::api_server::models::{ApiResponse, error_response};
+use crate::api_server::services::database_service::get_database;
+use crate::api_server::services::get_collection_schema_with_ui;
+use crate::api_server::services::update_ui_metadata;
+
+// Collection handlers
+pub async fn list_collections_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            match db.list_collection_names(None).await {
+                Ok(collections) => {
+                    (StatusCode::OK, Json(ApiResponse {
+                        success: true,
+                        data: Some(collections),
+                        error: None,
+                    }))
+                },
+                Err(e) => error_response::<Vec<String>>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        },
+        Err((status, e)) => error_response::<Vec<String>>(status, e),
+    }
+}
+
+
+pub async fn get_required_and_unique_fields(db: &Database, coll_name: &str) -> Result<Vec<String>, mongodb::error::Error> {
+    // Retrieve collection information to extract required fields
+    let coll_info = db.run_command(doc! {
+        "listCollections": 1,
+        "filter": { "name": coll_name },
+        "nameOnly": false,
+    }, None).await?;
+
+    let required_fields = extract_required_fields(&coll_info).unwrap_or_default();
+
+    // Retrieve all indexes for the collection
+    let mut cursor = db.collection::<Document>(coll_name).list_indexes(None).await?;
+
+    // Collect all fields from unique indexes
+    let mut unique_fields = HashSet::new();
+    
+    // Use StreamExt to iterate over the cursor asynchronously
+    while let Some(index_result) = cursor.next().await {
+        if let Ok(index) = index_result {
+            // Check if this index is unique
+            if index.options.as_ref().and_then(|opts| opts.unique).unwrap_or(false) {
+                // Extract the key fields from this unique index
+                for (field, _) in index.keys.iter() {
+                    unique_fields.insert(field.clone());
+                }
+            }
+        }
+    }
+
+    // Find intersection of required and unique fields
+    let result: Vec<String> = required_fields.into_iter()
+        .filter(|field| unique_fields.contains(field))
+        .collect();
+
+    Ok(result)
+}
+
+fn extract_required_fields(coll_info: &Document) -> Option<Vec<String>> {
+    let cursor = coll_info.get_document("cursor").ok()?;
+    let first_batch = cursor.get_array("firstBatch").ok()?;
+    let coll_doc = first_batch.first()?.as_document()?;
+    let options = coll_doc.get_document("options").ok()?;
+    let validator = options.get_document("validator").ok()?;
+    let json_schema = validator.get_document("$jsonSchema").ok()?;
+    let required = json_schema.get_array("required").ok()?;
+
+    Some(required.iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect())
+}
+
+pub async fn get_collection_schema_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            // Get the schema with UI metadata
+            let schema_result = get_collection_schema_with_ui(&db, &collection_name).await;
+            
+            // Get the required and unique fields
+            let required_unique_result = get_required_and_unique_fields(&db, &collection_name).await;
+            
+            match (schema_result, required_unique_result) {
+                (Ok(mut merged_schema), Ok(required_unique_fields)) => {
+                    // Add _id field to properties
+                    match merged_schema.get_document_mut("properties") {
+                        Ok(properties) => {
+                            if !properties.contains_key("_id") {
+                                properties.insert(
+                                    "_id", 
+                                    doc! { "bsonType": "objectId", "description": "Unique document ID" }
+                                );
+                            }
+                        },
+                        Err(_) => {
+                            let mut properties = Document::new();
+                            properties.insert(
+                                "_id", 
+                                doc! { "bsonType": "objectId", "description": "Unique document ID" }
+                            );
+                            merged_schema.insert("properties", properties);
+                        }
+                    }
+                    
+                    // Add the first required and unique field to the schema (if any exists)
+                    let primary_key = required_unique_fields.first().cloned();
+                    
+                    // Insert the primary key into the merged schema
+                    merged_schema.insert("primaryKey", bson::to_bson(&primary_key).unwrap_or(bson::Bson::Null));
+                    
+                    // Convert merged schema to JSON
+                    match bson::from_bson(bson::Bson::Document(merged_schema)) {
+                        Ok(merged_schema_json) => {
+                            (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(merged_schema_json),
+                                error: None,
+                            }))
+                        },
+                        Err(e) => error_response::<serde_json::Value>(
+                            StatusCode::INTERNAL_SERVER_ERROR, 
+                            format!("Failed to convert merged schema to JSON: {}", e)
+                        ),
+                    }
+                },
+                (Ok(_), Err(e)) => error_response::<serde_json::Value>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    format!("Failed to get required and unique fields: {}", e)
+                ),
+                (Err(e), _) => error_response::<serde_json::Value>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e
+                ),
+            }
+        },
+        Err((status, e)) => error_response::<serde_json::Value>(status, e),
+    }
+}
+
+pub async fn update_ui_metadata_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Json(payload): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    let db = match get_database(mongodb_state).await {
+        Ok(db) => db,
+        Err((status, e)) => return error_response::<()>(status, e),
+    };
+
+    // Convert payload to BSON document
+    let ui_update = match mongodb::bson::to_document(&payload) {
+        Ok(doc) => doc,
+        Err(e) => return error_response::<()>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid UI metadata format: {}", e)
+        ),
+    };
+
+    match update_ui_metadata(&db, &collection_name, &ui_update).await {
+        Ok(_) => (StatusCode::OK, Json(ApiResponse {
+            success: true,
+            data: None,
+            error: None,
+        })),
+        Err(e) => error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+// src/api_server/handlers/document_handlers.rs
+
+use axum::{
+    http::{StatusCode, header},
+    Json, 
+    extract::{State, Path, Query},
+    response::IntoResponse,
+};
+use axum_extra::{
+    headers::{Authorization, authorization::Bearer},
+    TypedHeader,
+};
+use mongodb::{
+    bson::{doc, Document, oid::ObjectId}, 
+    Cursor
+};
+use mongodb::options::{FindOptions, FindOneAndUpdateOptions, ReturnDocument};
+use crate::api_server::models::PaginatedDocuments;
+use serde_json::json;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use futures_util::StreamExt;
+use std::collections::HashMap;
+use chrono;
+use crate::api_server::services::get_collection_schema_with_ui;
+use crate::api_server::services::schema_service::get_collection_schema_internal;
+use crate::api_server::state::ApiServerState;
+use crate::api_server::models::{
+    ApiResponse, InsertResponse, UpdateResponse, DeleteResponse, 
+    error_response
+};
+use crate::api_server::services::database_service::{
+    get_database, process_document_fields
+};
+
+// Document handlers
+pub async fn find_documents_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
+    let filter: Document = match serde_json::from_str(&filter_str) {
+        Ok(f) => f,
+        Err(e) => return error_response::<PaginatedDocuments>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid filter JSON: {}", e)
+        ),
+    };
+    
+    let page = params.get("page").and_then(|p| p.parse::<u64>().ok()).unwrap_or(1);
+    let page_size = params.get("page_size").and_then(|ps| ps.parse::<u64>().ok()).unwrap_or(10);
+    let skip = (page - 1) * page_size;
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            
+            let total = match collection.count_documents(filter.clone(), None).await {
+                Ok(count) => count,
+                Err(e) => return error_response::<PaginatedDocuments>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            };
+            
+            let options = FindOptions::builder()
+                .skip(skip)
+                .limit(page_size as i64)
+                .build();
+            
+            match collection.find(filter, Some(options)).await {
+                Ok(cursor) => {
+                    match process_cursor(cursor).await {
+                        Ok(items) => {
+                            let paginated_data = PaginatedDocuments {
+                                items,
+                                total,
+                                page,
+                                page_size,
+                            };
+                            (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(paginated_data),
+                                error: None,
+                            }))
+                        },
+                        Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e),
+                    }
+                },
+                Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        },
+        Err((status, e)) => error_response::<PaginatedDocuments>(status, e),
+    }
+}
+
+pub async fn find_archived_documents_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
+    let mut filter: Document = match serde_json::from_str(&filter_str) {
+        Ok(f) => f,
+        Err(e) => return error_response::<PaginatedDocuments>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid filter JSON: {}", e)
+        ),
+    };
+    
+    filter.insert("is_archive", true);
+    
+    let page = params.get("page").and_then(|p| p.parse::<u64>().ok()).unwrap_or(1);
+    let page_size = params.get("page_size").and_then(|ps| ps.parse::<u64>().ok()).unwrap_or(10);
+    let skip = (page - 1) * page_size;
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            
+            let total = match collection.count_documents(filter.clone(), None).await {
+                Ok(count) => count,
+                Err(e) => return error_response::<PaginatedDocuments>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            };
+            
+            let options = FindOptions::builder()
+                .skip(skip)
+                .limit(page_size as i64)
+                .build();
+            
+            match collection.find(filter, Some(options)).await {
+                Ok(cursor) => {
+                    match process_cursor(cursor).await {
+                        Ok(items) => {
+                            let paginated_data = PaginatedDocuments {
+                                items,
+                                total,
+                                page,
+                                page_size,
+                            };
+                            (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(paginated_data),
+                                error: None,
+                            }))
+                        },
+                        Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e),
+                    }
+                },
+                Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        },
+        Err((status, e)) => error_response::<PaginatedDocuments>(status, e),
+    }
+}
+
+pub async fn find_recovered_documents_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
+    let mut filter: Document = match serde_json::from_str(&filter_str) {
+        Ok(f) => f,
+        Err(e) => return error_response::<PaginatedDocuments>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid filter JSON: {}", e)
+        ),
+    };
+    
+    filter.insert("is_archive", false);
+    filter.insert("$expr", doc! {
+        "$eq": [
+            { "$arrayElemAt": ["$archive_history.action", -1] },
+            "recover"
+        ]
+    });
+    
+    let page = params.get("page").and_then(|p| p.parse::<u64>().ok()).unwrap_or(1);
+    let page_size = params.get("page_size").and_then(|ps| ps.parse::<u64>().ok()).unwrap_or(10);
+    let skip = (page - 1) * page_size;
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            
+            let total = match collection.count_documents(filter.clone(), None).await {
+                Ok(count) => count,
+                Err(e) => return error_response::<PaginatedDocuments>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            };
+            
+            let options = FindOptions::builder()
+                .skip(skip)
+                .limit(page_size as i64)
+                .build();
+            
+            match collection.find(filter, Some(options)).await {
+                Ok(cursor) => {
+                    match process_cursor(cursor).await {
+                        Ok(items) => {
+                            let paginated_data = PaginatedDocuments {
+                                items,
+                                total,
+                                page,
+                                page_size,
+                            };
+                            (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(paginated_data),
+                                error: None,
+                            }))
+                        },
+                        Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e),
+                    }
+                },
+                Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        },
+        Err((status, e)) => error_response::<PaginatedDocuments>(status, e),
+    }
+}
+
+pub async fn find_empty_archive_history_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    // Extract filter from query parameters
+    let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
+    
+    // Parse the JSON string into a Document
+    let mut filter: Document = match serde_json::from_str(&filter_str) {
+        Ok(f) => f,
+        Err(e) => return error_response::<Vec<Document>>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid filter JSON: {}", e)
+        ),
+    };
+    
+    // Add condition for empty archive history
+    filter.insert("$or", vec![
+        doc! { "archive_history": doc! { "$exists": false } },
+        doc! { "archive_history": doc! { "$size": 0 } }
+    ]);
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            
+            match collection.find(filter, None).await {
+                Ok(cursor) => {
+                    match process_cursor(cursor).await {
+                        Ok(documents) => {
+                            (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(documents),
+                                error: None,
+                            }))
+                        },
+                        Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e),
+                    }
+                },
+                Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        },
+        Err((status, e)) => error_response::<Vec<Document>>(status, e),
+    }
+}
+
+pub async fn find_empty_or_recovered_documents_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
+    let mut filter: Document = match serde_json::from_str(&filter_str) {
+        Ok(f) => f,
+        Err(e) => return error_response::<PaginatedDocuments>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid filter JSON: {}", e)
+        ),
+    };
+    
+    filter.insert("$or", vec![
+        doc! {
+            "$or": [
+                { "archive_history": { "$exists": false } },
+                { "archive_history": { "$size": 0 } }
+            ]
+        },
+        doc! {
+            "archive_history.0": { "$exists": true },
+            "$expr": {
+                "$eq": [
+                    { "$arrayElemAt": ["$archive_history.action", -1] },
+                    "recover"
+                ]
+            }
+        }
+    ]);
+    
+    let page = params.get("page").and_then(|p| p.parse::<u64>().ok()).unwrap_or(1);
+    let page_size = params.get("page_size").and_then(|ps| ps.parse::<u64>().ok()).unwrap_or(10);
+    let skip = (page - 1) * page_size;
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            
+            let total = match collection.count_documents(filter.clone(), None).await {
+                Ok(count) => count,
+                Err(e) => return error_response::<PaginatedDocuments>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            };
+            
+            let options = FindOptions::builder()
+                .skip(skip)
+                .limit(page_size as i64)
+                .build();
+            
+            match collection.find(filter, Some(options)).await {
+                Ok(cursor) => {
+                    match process_cursor(cursor).await {
+                        Ok(items) => {
+                            let paginated_data = PaginatedDocuments {
+                                items,
+                                total,
+                                page,
+                                page_size,
+                            };
+                            (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(paginated_data),
+                                error: None,
+                            }))
+                        },
+                        Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e),
+                    }
+                },
+                Err(e) => error_response::<PaginatedDocuments>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        },
+        Err((status, e)) => error_response::<PaginatedDocuments>(status, e),
+    }
+}
+
+pub async fn find_pinned_documents_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+) -> impl IntoResponse {
+    // Validate auth token and get user_id
+    let user_id = match async {
+        let state_guard = state.lock().await;
+        let session_manager_mutex = &state_guard.session_manager;
+        let session_manager = session_manager_mutex.lock().await;
+        
+        let token = auth.token();
+        
+        if session_manager.validate_session(token).await {
+            // If session is valid, get the user ID
+            match session_manager.get_user_id(token).await {
+                Some(user_id) => Ok(user_id),
+                None => Err("Session valid but user ID not found".to_string())
+            }
+        } else {
+            Err("Invalid or expired session".to_string())
+        }
+    }.await {
+        Ok(id) => id,
+        Err(e) => return error_response::<Vec<Document>>(
+            StatusCode::UNAUTHORIZED,
+            format!("Authentication failed: {}", e)
+        ),
+    };
+    
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    let filter_str = params.get("filter").cloned().unwrap_or_else(|| String::from("{}"));
+    
+    let mut filter: Document = match serde_json::from_str(&filter_str) {
+        Ok(f) => f,
+        Err(e) => return error_response::<Vec<Document>>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid filter JSON: {}", e)
+        ),
+    };
+    
+    // Filter for documents pinned by this user
+    filter.insert("pinned_by", user_id);
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            // Check if the collection supports pinning
+            let schema = match get_collection_schema_internal(&db, &collection_name).await {
+                Ok(s) => s,
+                Err(e) => return error_response::<Vec<Document>>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e
+                ),
+            };
+
+            if !schema_has_pinned_property(&schema) {
+                return error_response::<Vec<Document>>(
+                    StatusCode::BAD_REQUEST,
+                    "This collection does not support pinning.".into(),
+                );
+            }
+            
+            let collection = db.collection::<Document>(&collection_name);
+            
+            match collection.find(filter, None).await {
+                Ok(cursor) => {
+                    match process_cursor(cursor).await {
+                        Ok(documents) => {
+                            (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(documents),
+                                error: None,
+                            }))
+                        },
+                        Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e),
+                    }
+                },
+                Err(e) => error_response::<Vec<Document>>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        },
+        Err((status, e)) => error_response::<Vec<Document>>(status, e),
+    }
+}
+
+pub async fn insert_document_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Json(document): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            // Convert JSON to BSON document
+            let doc_result = mongodb::bson::to_document(&document);
+            match doc_result {
+                Ok(mut doc) => {
+                    // Remove any client-provided timestamp fields
+                    doc.remove("created_at");
+                    doc.remove("updated_at");
+                    
+                    // For attendance collection, also handle time_in_date
+                    if collection_name == "attendance" {
+                        doc.remove("time_in_date");
+                    }
+                    
+                    // Add server-managed timestamp fields
+                    let current_time = mongodb::bson::DateTime::now();
+                    doc.insert("created_at", current_time.clone());
+                    
+                    // For attendance collection, also set time_in_date
+                    if collection_name == "attendance" {
+                        doc.insert("time_in_date", current_time);
+                    }
+                    
+                    // Process fields according to schema types (dates, integers, etc.)
+                    if let Err(e) = process_document_fields(&db, &collection_name, &mut doc).await {
+                        return error_response::<InsertResponse>(StatusCode::BAD_REQUEST, e);
+                    }
+                    
+                    // Insert the document
+                    let collection = db.collection::<Document>(&collection_name);
+                    match collection.insert_one(doc, None).await {
+                        Ok(result) => {
+                            match result.inserted_id.as_object_id() {
+                                Some(id) => {
+                                    (StatusCode::CREATED, Json(ApiResponse {
+                                        success: true,
+                                        data: Some(InsertResponse { id: id.to_hex() }),
+                                        error: None,
+                                    }))
+                                },
+                                None => error_response::<InsertResponse>(
+                                    StatusCode::INTERNAL_SERVER_ERROR, 
+                                    "Failed to get inserted document ID".into()
+                                ),
+                            }
+                        },
+                        Err(e) => error_response::<InsertResponse>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+                    }
+                },
+                Err(e) => error_response::<InsertResponse>(
+                    StatusCode::BAD_REQUEST, 
+                    format!("Failed to convert document to BSON: {}", e)
+                ),
+            }
+        },
+        Err((status, e)) => error_response::<InsertResponse>(status, e),
+    }
+}
+
+pub async fn update_document_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path((collection_name, id)): Path<(String, String)>,
+    Json(update): Json<Document>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            // Parse ObjectId
+            match ObjectId::parse_str(&id) {
+                Ok(object_id) => {
+                    let collection = db.collection::<Document>(&collection_name);
+                    let filter = doc! { "_id": object_id };
+                    
+                    // Process fields in the update document according to the schema
+                    let mut update_doc = update.clone();
+                    
+                    // Remove any attempts to modify timestamp fields
+                    update_doc.remove("created_at");
+                    
+                    // Check if the update contains only row_height
+                    // Count keys in update_doc and check if row_height is the only one
+                    let keys: Vec<_> = update_doc.keys().collect();
+                    let is_row_height_only = keys.len() == 1 && keys[0] == "row_height";
+                    
+                    // Only update timestamp if other fields are being modified
+                    if !is_row_height_only {
+                        let current_time = mongodb::bson::DateTime::now();
+                        update_doc.insert("updated_at", current_time);
+                    }
+                    
+                    if let Err(e) = process_document_fields(&db, &collection_name, &mut update_doc).await {
+                        return error_response::<UpdateResponse>(StatusCode::BAD_REQUEST, e);
+                    }
+                    
+                    let update_bson = doc! { "$set": update_doc };
+                    
+                    // Use FindOneAndUpdateOptions to return the updated document
+                    let options = FindOneAndUpdateOptions::builder()
+                        .return_document(ReturnDocument::After)
+                        .build();
+
+                    match collection.find_one_and_update(filter, update_bson, options).await {
+                        Ok(Some(mut updated_doc)) => {
+                            // Format the date fields for proper JSON serialization
+                            format_date_fields(&mut updated_doc);
+                            
+                            (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(UpdateResponse {
+                                    success: true,
+                                    modified_count: 1,
+                                    document: Some(updated_doc),
+                                }),
+                                error: None,
+                            }))
+                        },
+                        Ok(None) => error_response::<UpdateResponse>(
+                            StatusCode::NOT_FOUND, 
+                            "Document not found".into()
+                        ),
+                        Err(e) => error_response::<UpdateResponse>(
+                            StatusCode::INTERNAL_SERVER_ERROR, 
+                            e.to_string()
+                        ),
+                    }
+                },
+                Err(e) => error_response::<UpdateResponse>(
+                    StatusCode::BAD_REQUEST, 
+                    format!("Invalid ObjectId: {}", e)
+                ),
+            }
+        },
+        Err((status, e)) => error_response::<UpdateResponse>(status, e),
+    }
+}
+
+pub async fn delete_document_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path((collection_name, id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            // Parse ObjectId
+            match ObjectId::parse_str(&id) {
+                Ok(object_id) => {
+                    let collection = db.collection::<Document>(&collection_name);
+                    let filter = doc! { "_id": object_id };
+                    
+                    match collection.delete_one(filter, None).await {
+                        Ok(result) => {
+                            (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(DeleteResponse {
+                                    success: true,
+                                    deleted_count: result.deleted_count,
+                                }),
+                                error: None,
+                            }))
+                        },
+                        Err(e) => error_response::<DeleteResponse>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+                    }
+                },
+                Err(e) => error_response::<DeleteResponse>(
+                    StatusCode::BAD_REQUEST, 
+                    format!("Invalid ObjectId: {}", e)
+                ),
+            }
+        },
+        Err((status, e)) => error_response::<DeleteResponse>(status, e),
+    }
+}
+
+pub async fn batch_delete_documents_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Json(payload): Json<HashMap<String, Vec<String>>>,
+) -> impl IntoResponse {
+    let mongodb_state = &state.lock().await.mongodb_state;
+    
+    let ids = match payload.get("ids") {
+        Some(ids) => ids,
+        None => return error_response::<DeleteResponse>(
+            StatusCode::BAD_REQUEST, 
+            "Missing 'ids' in payload".into()
+        ),
+    };
+
+    let object_ids: Result<Vec<ObjectId>, _> = ids.iter()
+        .map(|id| ObjectId::parse_str(id))
+        .collect();
+
+    let object_ids = match object_ids {
+        Ok(ids) => ids,
+        Err(e) => return error_response::<DeleteResponse>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid ObjectId: {}", e)
+        ),
+    };
+
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            let filter = doc! { "_id": { "$in": object_ids } };
+            
+            match collection.delete_many(filter, None).await {
+                Ok(result) => {
+                    (StatusCode::OK, Json(ApiResponse {
+                        success: true,
+                        data: Some(DeleteResponse {
+                            success: true,
+                            deleted_count: result.deleted_count,
+                        }),
+                        error: None,
+                    }))
+                },
+                Err(e) => error_response::<DeleteResponse>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            }
+        },
+        Err((status, e)) => error_response::<DeleteResponse>(status, e),
+    }
+}
+
+// archive handlers
+
+pub async fn archive_document_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path((collection_name, id)): Path<(String, String)>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+) -> impl IntoResponse {
+    let token = auth.token();
+    let state = state.lock().await;
+    let session_manager = &state.session_manager;
+    
+    // Validate session
+    let valid = session_manager.lock().await.validate_session(token).await;
+    if !valid {
+        return error_response::<()>(StatusCode::UNAUTHORIZED, "Invalid session".into());
+    }
+
+    // Get user ID from session
+    let user_id = match session_manager.lock().await.get_user_id(token).await {
+        Some(id) => id,
+        None => return error_response::<()>(StatusCode::UNAUTHORIZED, "Session expired".into()),
+    };
+
+    // Convert to ObjectId
+    let user_oid = match ObjectId::parse_str(&user_id) {
+        Ok(oid) => oid,
+        Err(_) => return error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, "Invalid user ID format".into()),
+    };
+
+    // Process the archive operation
+    match get_database(&state.mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            let doc_id = match ObjectId::parse_str(&id) {
+                Ok(oid) => oid,
+                Err(e) => return error_response::<()>(StatusCode::BAD_REQUEST, format!("Invalid document ID: {}", e)),
+            };
+
+            // Create timestamp
+            let now = mongodb::bson::DateTime::now();
+
+            // Try to update only if not already archived
+            let filter = doc! {
+                "_id": doc_id,
+                "is_archive": { "$ne": true }
+            };
+
+            let update = doc! {
+                "$set": { "is_archive": true },
+                "$push": {
+                    "archive_history": {
+                        "action": "archive",
+                        "user_id": user_oid,
+                        "timestamp": now
+                    }
+                }
+            };
+
+            match collection.update_one(filter, update, None).await {
+                Ok(result) => {
+                    if result.matched_count == 0 {
+                        // Check if document exists
+                        match collection.count_documents(doc! { "_id": doc_id }, None).await {
+                            Ok(count) if count > 0 => {
+                                // Document exists but already archived
+                                (StatusCode::OK, Json(ApiResponse {
+                                    success: true,
+                                    data: Some(()),
+                                    error: None,
+                                }))
+                            },
+                            _ => error_response::<()>(StatusCode::NOT_FOUND, "Document not found".into()),
+                        }
+                    } else {
+                        (StatusCode::OK, Json(ApiResponse {
+                            success: true,
+                            data: Some(()),
+                            error: None,
+                        }))
+                    }
+                },
+                Err(e) => error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        },
+        Err((status, e)) => error_response::<()>(status, e),
+    }
+}
+
+pub async fn batch_archive_documents_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+    Json(payload): Json<HashMap<String, Vec<String>>>,
+) -> impl IntoResponse {
+    let token = auth.token();
+    let state = state.lock().await;
+    let session_manager = &state.session_manager;
+    
+    // Authentication check
+    let valid = session_manager.lock().await.validate_session(token).await;
+    if !valid {
+        return error_response::<serde_json::Value>(
+            StatusCode::UNAUTHORIZED, 
+            "Invalid session".into()
+        );
+    }
+
+    // Get user ID from session
+    let user_id = match session_manager.lock().await.get_user_id(token).await {
+        Some(id) => id,
+        None => return error_response::<serde_json::Value>(
+            StatusCode::UNAUTHORIZED, 
+            "Session expired".into()
+        ),
+    };
+
+    // Convert to ObjectId
+    let user_oid = match ObjectId::parse_str(&user_id) {
+        Ok(oid) => oid,
+        Err(_) => return error_response::<serde_json::Value>(
+            StatusCode::INTERNAL_SERVER_ERROR, 
+            "Invalid user ID format".into()
+        ),
+    };
+
+    let ids = match payload.get("ids") {
+        Some(ids) => ids,
+        None => return error_response::<serde_json::Value>(
+            StatusCode::BAD_REQUEST, 
+            "Missing 'ids' in payload".into()
+        ),
+    };
+
+    // Convert string IDs to ObjectIds
+    let object_ids: Result<Vec<ObjectId>, _> = ids.iter()
+        .map(|id| ObjectId::parse_str(id))
+        .collect();
+
+    let object_ids = match object_ids {
+        Ok(ids) => ids,
+        Err(e) => return error_response::<serde_json::Value>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid ObjectId: {}", e)
+        ),
+    };
+
+    match get_database(&state.mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            let now = mongodb::bson::DateTime::now();
+
+            // First check if all documents are already archived
+            let count_total = match collection.count_documents(
+                doc! { "_id": { "$in": &object_ids } },
+                None
+            ).await {
+                Ok(count) => count,
+                Err(e) => return error_response::<serde_json::Value>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            };
+
+            let count_already_archived = match collection.count_documents(
+                doc! { 
+                    "_id": { "$in": &object_ids },
+                    "is_archive": true 
+                },
+                None
+            ).await {
+                Ok(count) => count,
+                Err(e) => return error_response::<serde_json::Value>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            };
+
+            // If all documents are already archived
+            if count_already_archived == count_total {
+                return (StatusCode::OK, Json(ApiResponse {
+                    success: true,
+                    data: Some(json!({
+                        "message": "All selected documents are already archived",
+                        "archived_count": 0
+                    })),
+                    error: None,
+                }));
+            }
+
+            // Update only non-archived documents
+            let filter = doc! {
+                "_id": { "$in": &object_ids },
+                "is_archive": { "$ne": true }
+            };
+
+            let update = doc! {
+                "$set": { "is_archive": true },
+                "$push": {
+                    "archive_history": {
+                        "action": "archive",
+                        "user_id": user_oid,
+                        "timestamp": now
+                    }
+                }
+            };
+
+            match collection.update_many(filter, update, None).await {
+                Ok(result) => {
+                    (StatusCode::OK, Json(ApiResponse {
+                        success: true,
+                        data: Some(json!({
+                            "message": format!("Successfully archived {} documents", result.modified_count),
+                            "archived_count": result.modified_count
+                        })),
+                        error: None,
+                    }))
+                },
+                Err(e) => error_response::<serde_json::Value>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            }
+        },
+        Err((status, e)) => error_response::<serde_json::Value>(status, e),
+    }
+}
+
+// recovery handlers
+
+pub async fn recover_document_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path((collection_name, id)): Path<(String, String)>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+) -> impl IntoResponse {
+    let token = auth.token();
+    let state = state.lock().await;
+    let session_manager = &state.session_manager;
+    
+    // Validate session
+    let valid = session_manager.lock().await.validate_session(token).await;
+    if !valid {
+        return error_response::<()>(StatusCode::UNAUTHORIZED, "Invalid session".into());
+    }
+
+    // Get user ID from session
+    let user_id = match session_manager.lock().await.get_user_id(token).await {
+        Some(id) => id,
+        None => return error_response::<()>(StatusCode::UNAUTHORIZED, "Session expired".into()),
+    };
+
+    // Convert to ObjectId
+    let user_oid = match ObjectId::parse_str(&user_id) {
+        Ok(oid) => oid,
+        Err(_) => return error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, "Invalid user ID format".into()),
+    };
+
+    match get_database(&state.mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            let doc_id = match ObjectId::parse_str(&id) {
+                Ok(oid) => oid,
+                Err(e) => return error_response::<()>(StatusCode::BAD_REQUEST, format!("Invalid document ID: {}", e)),
+            };
+
+            let now = mongodb::bson::DateTime::now();
+
+            // Try to update only if archived
+            let filter = doc! {
+                "_id": doc_id,
+                "is_archive": true
+            };
+
+            let update = doc! {
+                "$set": { "is_archive": false },
+                "$push": {
+                    "archive_history": {
+                        "action": "recover",
+                        "user_id": user_oid,
+                        "timestamp": now
+                    }
+                }
+            };
+
+            match collection.update_one(filter, update, None).await {
+                Ok(result) => {
+                    if result.matched_count == 0 {
+                        match collection.count_documents(doc! { "_id": doc_id }, None).await {
+                            Ok(count) if count > 0 => (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(()),
+                                error: None,
+                            })),
+                            _ => error_response::<()>(StatusCode::NOT_FOUND, "Document not found".into()),
+                        }
+                    } else {
+                        (StatusCode::OK, Json(ApiResponse {
+                            success: true,
+                            data: Some(()),
+                            error: None,
+                        }))
+                    }
+                },
+                Err(e) => error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        },
+        Err((status, e)) => error_response::<()>(status, e),
+    }
+}
+
+pub async fn batch_recover_documents_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+    Json(payload): Json<HashMap<String, Vec<String>>>,
+) -> impl IntoResponse {
+    let token = auth.token();
+    let state = state.lock().await;
+    let session_manager = &state.session_manager;
+    
+    let valid = session_manager.lock().await.validate_session(token).await;
+    if !valid {
+        return error_response::<serde_json::Value>(
+            StatusCode::UNAUTHORIZED, 
+            "Invalid session".into()
+        );
+    }
+
+    let user_id = match session_manager.lock().await.get_user_id(token).await {
+        Some(id) => id,
+        None => return error_response::<serde_json::Value>(
+            StatusCode::UNAUTHORIZED, 
+            "Session expired".into()
+        ),
+    };
+
+    let user_oid = match ObjectId::parse_str(&user_id) {
+        Ok(oid) => oid,
+        Err(_) => return error_response::<serde_json::Value>(
+            StatusCode::INTERNAL_SERVER_ERROR, 
+            "Invalid user ID format".into()
+        ),
+    };
+
+    let ids = match payload.get("ids") {
+        Some(ids) => ids,
+        None => return error_response::<serde_json::Value>(
+            StatusCode::BAD_REQUEST, 
+            "Missing 'ids' in payload".into()
+        ),
+    };
+
+    let object_ids: Result<Vec<ObjectId>, _> = ids.iter()
+        .map(|id| ObjectId::parse_str(id))
+        .collect();
+
+    let object_ids = match object_ids {
+        Ok(ids) => ids,
+        Err(e) => return error_response::<serde_json::Value>(
+            StatusCode::BAD_REQUEST, 
+            format!("Invalid ObjectId: {}", e)
+        ),
+    };
+
+    match get_database(&state.mongodb_state).await {
+        Ok(db) => {
+            let collection = db.collection::<Document>(&collection_name);
+            let now = mongodb::bson::DateTime::now();
+
+            let count_archived = match collection.count_documents(
+                doc! { 
+                    "_id": { "$in": &object_ids },
+                    "is_archive": true 
+                },
+                None
+            ).await {
+                Ok(count) => count,
+                Err(e) => return error_response::<serde_json::Value>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            };
+
+            if count_archived == 0 {
+                return (StatusCode::OK, Json(ApiResponse {
+                    success: true,
+                    data: Some(json!({
+                        "message": "No archived documents found to recover",
+                        "recovered_count": 0
+                    })),
+                    error: None,
+                }));
+            }
+
+            let filter = doc! {
+                "_id": { "$in": &object_ids },
+                "is_archive": true
+            };
+
+            let update = doc! {
+                "$set": { "is_archive": false },
+                "$push": {
+                    "archive_history": {
+                        "action": "recover",
+                        "user_id": user_oid,
+                        "timestamp": now
+                    }
+                }
+            };
+
+            match collection.update_many(filter, update, None).await {
+                Ok(result) => {
+                    (StatusCode::OK, Json(ApiResponse {
+                        success: true,
+                        data: Some(json!({
+                            "message": format!("Successfully recovered {} documents", result.modified_count),
+                            "recovered_count": result.modified_count
+                        })),
+                        error: None,
+                    }))
+                },
+                Err(e) => error_response::<serde_json::Value>(
+                    StatusCode::INTERNAL_SERVER_ERROR, 
+                    e.to_string()
+                ),
+            }
+        },
+        Err((status, e)) => error_response::<serde_json::Value>(status, e),
+    }
+}
+
+// pin and unpin handlers
+pub async fn pin_document_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path((collection_name, id)): Path<(String, String)>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+) -> impl IntoResponse {
+    tracing::debug!(
+        "pin_document_handler called: collection={}, document_id={}", 
+        collection_name, id
+    );
+    
+    let token = auth.token();
+    let state = state.lock().await;
+    let session_manager = &state.session_manager;
+    
+    let valid = session_manager.lock().await.validate_session(token).await;
+    if !valid {
+        tracing::warn!("pin_document_handler: Invalid session token");
+        return error_response::<Document>(StatusCode::UNAUTHORIZED, "Invalid session".into());
+    }
+
+    let user_id = match session_manager.lock().await.get_user_id(token).await {
+        Some(id) => id,
+        None => {
+            tracing::warn!("pin_document_handler: Session expired");
+            return error_response::<Document>(StatusCode::UNAUTHORIZED, "Session expired".into());
+        }
+    };
+
+    // temporary commented, TODO: check this part if truly not needed
+    // let user_oid = match ObjectId::parse_str(&user_id) {
+    //     Ok(oid) => oid,
+    //     Err(e) => {
+    //         tracing::error!("pin_document_handler: Invalid user ID format: {}", e);
+    //         return error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, "Invalid user ID format".into());
+    //     }
+    // };
+
+    match get_database(&state.mongodb_state).await {
+        Ok(db) => {
+            let schema = match get_collection_schema_internal(&db, &collection_name).await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("pin_document_handler: Failed to get schema: {}", e);
+                    return error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, e);
+                }
+            };
+
+            if !schema_has_pinned_property(&schema) {
+                tracing::warn!("pin_document_handler: Collection doesn't support pinning");
+                return error_response::<Document>(
+                    StatusCode::BAD_REQUEST,
+                    "Collection does not support pinning".into(),
+                );
+            }
+
+            let collection = db.collection::<Document>(&collection_name);
+            let doc_id = match ObjectId::parse_str(&id) {
+                Ok(oid) => oid,
+                Err(e) => {
+                    tracing::warn!("pin_document_handler: Invalid document ID: {}", e);
+                    return error_response::<Document>(StatusCode::BAD_REQUEST, format!("Invalid document ID: {}", e));
+                }
+            };
+
+            let now = mongodb::bson::DateTime::now();
+            let filter = doc! {
+                "_id": doc_id,
+                "pinned_by": { "$ne": &user_id }  // Use a reference here
+            };
+            let update = doc! {
+                "$addToSet": { "pinned_by": &user_id },
+                "$push": {
+                    "pinned_history": {
+                        "action": "pin",
+                        "user_id": &user_id, // Store the user_id string
+                        "timestamp": now
+                    }
+                },
+                "$set": { "updated_at": now }
+            };            
+            
+            let options = FindOneAndUpdateOptions::builder()
+                .return_document(ReturnDocument::After)
+                .build();
+
+                match collection.find_one_and_update(filter, update, options).await {
+                    Ok(Some(mut updated_doc)) => {
+                        format_date_fields(&mut updated_doc);
+                        tracing::info!("Successfully pinned document {}", id);
+                        let response = Json(ApiResponse {
+                            success: true,
+                            data: Some(updated_doc),
+                            error: None,
+                        });
+                        tracing::info!("Response: {:?}", response); // Log the success response
+                        (StatusCode::OK, response)
+                    },
+                Ok(None) => {
+                    match collection.find_one(doc! { "_id": doc_id }, None).await {
+                        Ok(Some(mut existing_doc)) => {
+                            format_date_fields(&mut existing_doc);
+                            (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(existing_doc),
+                                error: None,
+                            }))
+                        },
+                        Ok(None) => {
+                            tracing::warn!("Document not found: {}", id);
+                            error_response::<Document>(StatusCode::NOT_FOUND, "Document not found".into())
+                        },
+                        Err(e) => {
+                            tracing::error!("Database error: {}", e);
+                            error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                        }
+                    }
+                },
+                Err(e) => {
+                    tracing::error!("Update error: {}", e);
+                    error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                }
+            }
+        },
+        Err((status, e)) => {
+            tracing::error!("Database connection error: {}", e);
+            error_response::<Document>(status, e)
+        },
+    }
+}
+
+pub async fn unpin_document_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path((collection_name, id)): Path<(String, String)>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+) -> impl IntoResponse {
+    tracing::debug!(
+        "unpin_document_handler called: collection={}, document_id={}", 
+        collection_name, id
+    );
+    
+    let token = auth.token();
+    let state = state.lock().await;
+    let session_manager = &state.session_manager;
+    
+    let valid = session_manager.lock().await.validate_session(token).await;
+    if !valid {
+        tracing::warn!("unpin_document_handler: Invalid session token");
+        return error_response::<Document>(StatusCode::UNAUTHORIZED, "Invalid session".into());
+    }
+
+    let user_id = match session_manager.lock().await.get_user_id(token).await {
+        Some(id) => id,
+        None => {
+            tracing::warn!("unpin_document_handler: Session expired");
+            return error_response::<Document>(StatusCode::UNAUTHORIZED, "Session expired".into());
+        }
+    };
+
+    // temporary commented, TODO: check this part if truly not needed
+    // let user_oid = match ObjectId::parse_str(&user_id) {
+    //     Ok(oid) => oid,
+    //     Err(e) => {
+    //         tracing::error!("unpin_document_handler: Invalid user ID format: {}", e);
+    //         return error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, "Invalid user ID format".into());
+    //     }
+    // };
+
+    match get_database(&state.mongodb_state).await {
+        Ok(db) => {
+            let schema = match get_collection_schema_internal(&db, &collection_name).await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("unpin_document_handler: Failed to get schema: {}", e);
+                    return error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, e);
+                }
+            };
+
+            if !schema_has_pinned_property(&schema) {
+                tracing::warn!("unpin_document_handler: Collection doesn't support pinning");
+                return error_response::<Document>(
+                    StatusCode::BAD_REQUEST,
+                    "Collection does not support pinning".into(),
+                );
+            }
+
+            let collection = db.collection::<Document>(&collection_name);
+            let doc_id = match ObjectId::parse_str(&id) {
+                Ok(oid) => oid,
+                Err(e) => {
+                    tracing::warn!("unpin_document_handler: Invalid document ID: {}", e);
+                    return error_response::<Document>(StatusCode::BAD_REQUEST, format!("Invalid document ID: {}", e));
+                }
+            };
+
+            let now = mongodb::bson::DateTime::now();
+            let filter = doc! {
+                "_id": doc_id,
+                "pinned_by": &user_id  // Use a reference here
+            };
+            let update = doc! {
+                "$pull": { "pinned_by": &user_id },
+                "$push": {
+                    "pinned_history": {
+                        "action": "unpin",
+                        "user_id": &user_id, // Store the user_id string
+                        "timestamp": now
+                    }
+                },
+                "$set": { "updated_at": now }
+            };
+
+            let options = FindOneAndUpdateOptions::builder()
+                .return_document(ReturnDocument::After)
+                .build();
+
+            match collection.find_one_and_update(filter, update, options).await {
+                Ok(Some(mut updated_doc)) => {
+                    format_date_fields(&mut updated_doc);
+                    tracing::info!("Successfully unpinned document {}", id);
+                    let response = Json(ApiResponse {
+                        success: true,
+                        data: Some(updated_doc),
+                        error: None,
+                    });
+                    tracing::info!("Response: {:?}", response); // Log the success response
+                    (StatusCode::OK, response)
+                },
+                Ok(None) => {
+                    match collection.find_one(doc! { "_id": doc_id }, None).await {
+                        Ok(Some(mut existing_doc)) => {
+                            format_date_fields(&mut existing_doc);
+                            (StatusCode::OK, Json(ApiResponse {
+                                success: true,
+                                data: Some(existing_doc),
+                                error: None,
+                            }))
+                        },
+                        Ok(None) => {
+                            tracing::warn!("Document not found: {}", id);
+                            error_response::<Document>(StatusCode::NOT_FOUND, "Document not found".into())
+                        },
+                        Err(e) => {
+                            tracing::error!("Database error: {}", e);
+                            error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                        }
+                    }
+                },
+                Err(e) => {
+                    tracing::error!("Update error: {}", e);
+                    error_response::<Document>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                }
+            }
+        },
+        Err((status, e)) => {
+            tracing::error!("Database connection error: {}", e);
+            error_response::<Document>(status, e)
+        },
+    }
+}
+
+pub async fn download_collection_csv_handler(
+    State(state): State<Arc<Mutex<ApiServerState>>>,
+    Path(collection_name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> axum::response::Response {
+    println!("[DEBUG] download_collection_csv_handler called for collection: {}", collection_name);
+    let header_type = params.get("headers").map(|s| s.as_str()).unwrap_or("original");
+    let include_id = params.get("include_id").map(|s| s == "true").unwrap_or(false);
+    println!("[DEBUG] Header type requested: {}", header_type);
+    println!("[DEBUG] Include ID: {}", include_id);
+    
+    let mongodb_state = &state.lock().await.mongodb_state;
+    println!("[DEBUG] Acquired MongoDB state lock");
+    
+    match get_database(mongodb_state).await {
+        Ok(db) => {
+            println!("[DEBUG] Successfully connected to database");
+            let collection = db.collection::<Document>(&collection_name);
+            println!("[DEBUG] Using collection: {}", collection_name);
+            
+            // Get schema with UI metadata
+            println!("[DEBUG] Fetching collection schema with UI metadata");
+            let schema = match get_collection_schema_with_ui(&db, &collection_name).await {
+                Ok(s) => {
+                    println!("[DEBUG] Schema fetched successfully");
+                    s
+                },
+                Err(e) => {
+                    println!("[ERROR] Failed to fetch schema: {}", e);
+                    let (status, json) = error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e);
+                    return error_to_response(status, json);
+                }
+            };
+            
+            // Get all documents
+            println!("[DEBUG] Executing find() to retrieve all documents");
+            let cursor = match collection.find(None, None).await {
+                Ok(c) => {
+                    println!("[DEBUG] Cursor obtained successfully");
+                    c
+                },
+                Err(e) => {
+                    println!("[ERROR] Failed to get cursor: {}", e);
+                    let (status, json) = error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+                    return error_to_response(status, json);
+                }
+            };
+            
+            println!("[DEBUG] Processing cursor to retrieve documents");
+            let documents = match process_cursor(cursor).await {
+                Ok(docs) => {
+                    println!("[DEBUG] Retrieved {} documents", docs.len());
+                    docs
+                },
+                Err(e) => {
+                    println!("[ERROR] Failed to process cursor: {}", e);
+                    let (status, json) = error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e);
+                    return error_to_response(status, json);
+                }
+            };
+            
+            // Generate CSV
+            println!("[DEBUG] Initializing CSV writer");
+            let mut wtr = csv::WriterBuilder::new()
+                .quote_style(csv::QuoteStyle::NonNumeric) // Only quote non-numeric fields
+                .double_quote(true) // Use standard CSV double-quoting
+                .from_writer(vec![]);
+            
+            // Get headers
+            println!("[DEBUG] Extracting properties from schema");
+            let properties = schema.get_document("properties").unwrap();
+            println!("[DEBUG] Found {} properties", properties.keys().count());
+            
+            // Create a longer-lived empty document
+            let empty_doc = Document::new();
+            
+            // Build field list
+            println!("[DEBUG] Building field list");
+            let mut fields: Vec<String> = properties.keys().map(|k| k.to_string()).collect();
+            if include_id && !fields.contains(&"_id".to_string()) {
+                println!("[DEBUG] Adding _id to field list");
+                fields.insert(0, "_id".to_string());
+            }
+            
+            println!("[DEBUG] Looking for short_names in UI metadata");
+            let short_names = schema.get_document("ui")
+                .and_then(|ui| ui.get_document("short_names"))
+                .unwrap_or(&empty_doc);
+            
+            // Generate headers with correct names
+            let headers: Vec<String> = fields.iter().map(|field| {
+                if header_type == "short" {
+                    let result = short_names.get_str(field).unwrap_or(field).to_string();
+                    println!("[DEBUG] Mapping header '{}' to short name '{}'", field, result);
+                    result
+                } else {
+                    println!("[DEBUG] Using original header name: {}", field);
+                    field.clone()
+                }
+            }).collect();
+            println!("[DEBUG] Final headers: {:?}", headers);
+            
+            // Write headers
+            println!("[DEBUG] Writing headers to CSV");
+            if let Err(e) = wtr.write_record(&headers) {
+                println!("[ERROR] Failed to write CSV headers: {}", e);
+                let (status, json) = error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+                return error_to_response(status, json);
+            }
+            
+            // Write rows
+            println!("[DEBUG] Writing document data to CSV rows");
+            let mut row_count = 0;
+            for doc in documents {
+                let mut row = Vec::new();
+                for field in &fields {
+                    let value = match doc.get(field) {
+                        Some(bson) => match bson {
+                            mongodb::bson::Bson::ObjectId(oid) => {
+                                println!("[DEBUG] Converting ObjectId value for field: {}", field);
+                                oid.to_hex()
+                            },
+                            mongodb::bson::Bson::DateTime(dt) => {
+                                println!("[DEBUG] Converting DateTime value for field: {}", field);
+                                let millis = dt.timestamp_millis();
+                                let datetime = chrono::DateTime::from_timestamp_millis(millis)
+                                    .unwrap_or_default();
+                                datetime.to_rfc3339()
+                            },
+                            mongodb::bson::Bson::String(s) => {
+                                println!("[DEBUG] Using String value directly for field: {}", field);
+                                s.clone()
+                            },
+                            mongodb::bson::Bson::Int32(i) => {
+                                println!("[DEBUG] Converting Int32 value for field: {}", field);
+                                i.to_string()
+                            },
+                            mongodb::bson::Bson::Int64(i) => {
+                                println!("[DEBUG] Converting Int64 value for field: {}", field);
+                                i.to_string()
+                            },
+                            mongodb::bson::Bson::Double(d) => {
+                                println!("[DEBUG] Converting Double value for field: {}", field);
+                                d.to_string()
+                            },
+                            mongodb::bson::Bson::Boolean(b) => {
+                                println!("[DEBUG] Converting Boolean value for field: {}", field);
+                                b.to_string()
+                            },
+                            _ => {
+                                println!("[DEBUG] Converting other BSON type for field: {}", field);
+                                bson.to_string()
+                            },
+                        },
+                        None => String::new(),
+                    };
+                    row.push(value);
+                }
+                
+                if let Err(e) = wtr.write_record(&row) {
+                    println!("[ERROR] Failed to write CSV row {}: {}", row_count, e);
+                    let (status, json) = error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+                    return error_to_response(status, json);
+                }
+                
+                row_count += 1;
+                if row_count % 100 == 0 {
+                    println!("[DEBUG] Processed {} rows", row_count);
+                }
+            }
+            println!("[DEBUG] Finished writing all {} rows", row_count);
+            
+            let data = match wtr.into_inner() {
+                Ok(d) => {
+                    println!("[DEBUG] Successfully finalized CSV writer, data size: {} bytes", d.len());
+                    d
+                },
+                Err(e) => {
+                    println!("[ERROR] Failed to finalize CSV writer: {}", e);
+                    let (status, json) = error_response::<()>(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+                    return error_to_response(status, json);
+                }
+            };
+            
+            // Create filename
+            let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+            let filename = format!("{}_{}.csv", collection_name, timestamp);
+            println!("[DEBUG] Generated filename: {}", filename);
+
+            // Create and return a CSV response
+            println!("[DEBUG] Preparing HTTP response with CSV data");
+            let mut response = axum::response::Response::new(axum::body::Body::from(data));
+            response.headers_mut().insert(header::CONTENT_TYPE, header::HeaderValue::from_static("text/csv"));
+            response.headers_mut().insert(
+                header::CONTENT_DISPOSITION,
+                header::HeaderValue::from_str(&format!("attachment; filename=\"{}\"", filename)).unwrap(),
+            );
+            *response.status_mut() = StatusCode::OK;
+            println!("[DEBUG] CSV download response ready for collection: {}", collection_name);
+            response
+        },
+        Err((status, e)) => {
+            println!("[ERROR] Database connection failed: {}", e);
+            let (status_code, json_response) = error_response::<()>(status, e);
+            error_to_response(status_code, json_response)
+        }
+    }
+}
+
+// Helper function to convert error response to Axum response
+fn error_to_response(status: StatusCode, json: Json<ApiResponse<()>>) -> axum::response::Response {
+    let json_string = serde_json::to_string(&json.0).unwrap();
+    let mut response = axum::response::Response::new(axum::body::Body::from(json_string));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE, 
+        header::HeaderValue::from_static("application/json")
+    );
+    *response.status_mut() = status;
+    response
+}
+
+// Helper function to check if the schema includes the 'pinned_by' property
+fn schema_has_pinned_property(schema: &Document) -> bool {
+    if let Ok(properties) = schema.get_document("properties") {
+        let has = properties.contains_key("pinned_by");
+        tracing::debug!("Schema has pinned_by: {}", has);
+        has
+    } else {
+        tracing::error!("Schema properties not found");
+        false
+    }
+}
+
+// Helper functions for document handlers
+pub async fn process_cursor(
+    mut cursor: Cursor<Document>
+) -> Result<Vec<Document>, String> {
+    let mut documents = Vec::new();
+    while let Some(document_result) = cursor.next().await {
+        match document_result {
+            Ok(mut doc) => {
+                format_date_fields(&mut doc);
+                documents.push(doc);
+            },
+            Err(e) => return Err(format!("Error retrieving document: {}", e)),
+        }
+    }
+    
+    Ok(documents)
+}
+
+pub fn format_date_fields(doc: &mut Document) {
+    // Similar to your existing implementation
+    let keys: Vec<String> = doc.keys().cloned().collect();
+    
+    for key in keys {
+        if let Some(mongodb::bson::Bson::DateTime(date_time)) = doc.get(&key) {
+            let chrono_date = chrono::DateTime::from_timestamp_millis(date_time.timestamp_millis())
+                .unwrap_or_else(|| chrono::DateTime::from_timestamp(0, 0).unwrap());
+            
+            let formatted_date = chrono_date.format("%Y-%m-%d %H:%M:%S").to_string();
+            doc.insert(key, mongodb::bson::Bson::String(formatted_date));
+        }
+    }
+}
+
+// src/api_server/routes.rs
+
+use axum::{
+    routing::{get, post, put, delete},
+    http::Method,
+    Router,
+    middleware::map_request,
+};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tower_http::cors::{Any, CorsLayer};
+use crate::api_server::{
+    state::ApiServerState,
+    handlers::{
+        auth_handlers::{
+            auth_login_handler,
+            auth_get_me_handler,
+            auth_register_handler,
+            auth_check_session_handler,
+        },
+        collection_handlers::{
+            list_collections_handler,
+            get_collection_schema_handler,
+            update_ui_metadata_handler,
+        },
+        document_handlers::{
+            find_documents_handler,
+            find_empty_or_recovered_documents_handler,
+            find_empty_archive_history_handler,
+            find_archived_documents_handler,
+            find_recovered_documents_handler,
+            find_pinned_documents_handler,
+            insert_document_handler,
+            update_document_handler,
+            delete_document_handler,
+            batch_delete_documents_handler,
+            archive_document_handler,
+            batch_archive_documents_handler,
+            recover_document_handler,
+            batch_recover_documents_handler,
+            pin_document_handler,
+            unpin_document_handler,
+            download_collection_csv_handler,
+
+        },
+        system_handlers::{
+            health_check_handler,
+            initialize_library_collections_handler,
+        },
+        csv_temp_handlers::{
+            load_csv_temp,
+            save_csv_temp,
+            delete_csv_temp,
+            validate_csv_temp_handler
+        },
+        csv_download_handler::{
+            download_temp_csv,
+            download_temp_csv_post
+        },
+        csv_import_handler::import_valid_csv_data_handler,
+    },
+};
+use axum::extract::Request;
+
+// Add middleware to log all route calls
+async fn log_request(request: Request) -> Request {
+    println!("Route called: {} {}", request.method(), request.uri().path());
+    request
+}
+
+// Create the API router and return both the router and a list of routes
+pub fn create_api_router() -> (Router<Arc<Mutex<ApiServerState>>>, Vec<String>) {
+    let mut routes = Vec::new();
+    let mut router = Router::new();
+    
+    // Setup CORS
+    let cors = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+        .allow_headers(Any)
+        .allow_origin(Any);
+    
+    // Macro to add routes and track them
+    macro_rules! add_route {
+        ($method:expr, $path:expr, $handler:expr) => {
+            router = match $method {
+                Method::GET => router.route($path, get($handler)),
+                Method::POST => router.route($path, post($handler)),
+                Method::PUT => router.route($path, put($handler)),
+                Method::DELETE => router.route($path, delete($handler)),
+                _ => panic!("Unsupported method: {}. Update the router implementation.", $method),
+            };
+            routes.push(format!("{} {}", $method, $path));
+        };
+    }
+    
+    // Collection routes
+    add_route!(Method::GET, "/collections", list_collections_handler);
+    add_route!(Method::GET, "/collections/:collection_name/schema", get_collection_schema_handler);
+    add_route!(Method::PUT, "/collections/:collection_name/ui-metadata", update_ui_metadata_handler);
+    
+    // route for temp sqlite3 csv temporary storage
+    add_route!(Method::POST, "/api/csv-temp/:collection", save_csv_temp);
+    add_route!(Method::GET, "/api/csv-temp/:collection", load_csv_temp);
+    add_route!(Method::DELETE, "/api/csv-temp/:collection", delete_csv_temp);
+
+    add_route!(Method::POST, "/api/csv-validate/:collection", validate_csv_temp_handler);
+
+    // Download csv from sqlite routes
+    add_route!(Method::GET, "/api/csv-temp/:collection/download-csv", download_temp_csv);
+    add_route!(Method::POST, "/api/csv-temp/:collection/download-csv", download_temp_csv_post);
+
+
+    // Import validated CSV into MongoDB
+    add_route!(Method::POST,   "/api/csv-import/:collection", import_valid_csv_data_handler);
+
+    // Document routes
+    add_route!(Method::GET, "/collections/:collection_name/documents", find_documents_handler);
+    add_route!(
+        Method::GET, 
+        "/collections/:collection_name/empty-or-recovered", 
+        find_empty_or_recovered_documents_handler
+    );
+    add_route!(
+        Method::GET, 
+        "/collections/:collection_name/empty-archive-history", 
+        find_empty_archive_history_handler
+    );
+    add_route!(Method::GET, "/collections/:collection_name/archives", find_archived_documents_handler);
+    add_route!(Method::GET, "/collections/:collection_name/recoveries", find_recovered_documents_handler);
+    add_route!(Method::GET, "/collections/:collection_name/pins", find_pinned_documents_handler);
+    add_route!(Method::POST, "/collections/:collection_name/documents", insert_document_handler);
+    add_route!(Method::PUT, "/collections/:collection_name/documents/:id", update_document_handler);
+    add_route!(Method::DELETE, "/collections/:collection_name/documents/:id", delete_document_handler);
+    add_route!(
+        Method::POST, 
+        "/collections/:collection_name/documents/batch-delete", 
+        batch_delete_documents_handler
+    );
+    add_route!(Method::PUT, "/collections/:collection_name/documents/:id/archive", archive_document_handler);
+    add_route!(
+        Method::POST, 
+        "/collections/:collection_name/documents/batch-archive", 
+        batch_archive_documents_handler
+    );
+    add_route!(Method::PUT, "/collections/:collection_name/documents/:id/recover", recover_document_handler);
+    add_route!(
+        Method::POST, 
+        "/collections/:collection_name/documents/batch-recover", 
+        batch_recover_documents_handler
+    );
+    add_route!(Method::PUT, "/collections/:collection_name/documents/:id/pin", pin_document_handler);
+    add_route!(Method::PUT, "/collections/:collection_name/documents/:id/unpin", unpin_document_handler);
+
+    add_route!(Method::GET, "/collections/:collection_name/download-csv", download_collection_csv_handler);
+    
+    // Auth routes
+    add_route!(Method::POST, "/api/auth/login", auth_login_handler);
+    add_route!(Method::GET, "/api/auth/me", auth_get_me_handler);
+    add_route!(Method::POST, "/api/auth/register", auth_register_handler);
+    add_route!(Method::POST, "/api/auth/check-session", auth_check_session_handler);
+    // System routes
+    add_route!(Method::POST, "/api/initialize-library-collections", initialize_library_collections_handler);
+    add_route!(Method::GET, "/api/health", health_check_handler);
+    
+    // Print startup routes information
+    println!("Available routes:");
+    for route in &routes {
+        println!("  {}", route);
+    }
+    
+    // Apply request logging middleware
+    router = router.layer(map_request(log_request));
+    
+    // Apply CORS middleware
+    router = router.layer(cors);
+    
+    (router, routes)
+}
