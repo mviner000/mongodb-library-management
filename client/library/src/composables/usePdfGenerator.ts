@@ -1,5 +1,13 @@
+// src/composables/usePdfGenerator.ts
+
 import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
+import autoTable, {
+  CellDef,
+  RowInput,
+  UserOptions,
+  HAlignType,
+  FontStyle,
+} from "jspdf-autotable";
 
 export interface AttendanceEntry {
   date: string;
@@ -13,10 +21,10 @@ export const usePdfGenerator = () => {
   const generatePDF = async (
     attendanceData: AttendanceEntry[],
     courses: string[],
-    selectedDate: string,
+    _selectedDate: string, // Unused parameter
     schoolYear: string,
     logoBase64: string,
-    toast: any,
+    _toast: any, // Unused parameter
     formattedSelectedDateForTitle: string
   ) => {
     const pdf = new jsPDF({
@@ -54,15 +62,15 @@ export const usePdfGenerator = () => {
       );
 
       // Draw Header Text
-      pdfInstance.setFontSize(14).setFont(undefined, "bold");
+      pdfInstance.setFontSize(14).setFont("helvetica", "bold");
       pdfInstance.text(collegeName, textStartX, logoY + 0.15);
 
-      pdfInstance.setFontSize(8).setFont(undefined, "normal");
+      pdfInstance.setFontSize(8).setFont("helvetica", "normal");
       pdfInstance.text(address, textStartX, logoY + 0.3);
       pdfInstance.text(contactInfo, textStartX, logoY + 0.45);
 
       // Report Title Line
-      pdfInstance.setFontSize(10).setFont(undefined, "bold");
+      pdfInstance.setFontSize(10).setFont("helvetica", "bold");
       const reportTitle = `Daily Record of Library Users SY: ${schoolYear} ${formattedSelectedDateForTitle}`;
       const titleWidth = pdfInstance.getTextWidth(reportTitle);
       pdfInstance.text(
@@ -78,7 +86,7 @@ export const usePdfGenerator = () => {
       pageNumber: number,
       totalPages: number
     ) => {
-      pdfInstance.setFontSize(8).setFont(undefined, "normal");
+      pdfInstance.setFontSize(8).setFont("helvetica", "normal");
       const footerText = `Page ${pageNumber} of ${totalPages}`;
       const textWidth = pdfInstance.getTextWidth(footerText);
       pdfInstance.text(
@@ -94,9 +102,6 @@ export const usePdfGenerator = () => {
     };
 
     const getTotalForPurpose = (purpose: string) => {
-      const uniquePurposes = Array.from(
-        new Set(attendanceData.map((entry) => entry.purpose))
-      ).sort();
       return attendanceData.filter((entry) => entry.purpose === purpose).length;
     };
 
@@ -115,67 +120,101 @@ export const usePdfGenerator = () => {
     ).sort();
 
     // Main table data preparation
-    const head = [
+    const head: CellDef[] = [
       {
         content: "DATE",
-        styles: { halign: "center", fontStyle: "bold", fontSize: 7 },
+        styles: {
+          halign: "center" as HAlignType,
+          fontStyle: "bold" as FontStyle,
+          fontSize: 7,
+        },
       },
       {
         content: "TIME",
-        styles: { halign: "center", fontStyle: "bold", fontSize: 7 },
+        styles: {
+          halign: "center" as HAlignType,
+          fontStyle: "bold" as FontStyle,
+          fontSize: 7,
+        },
       },
       {
         content: "NAME (Last Name, First Name)",
-        styles: { halign: "left", fontStyle: "bold", fontSize: 7 },
+        styles: {
+          halign: "left" as HAlignType,
+          fontStyle: "bold" as FontStyle,
+          fontSize: 7,
+        },
       },
       // Dynamically add course headers
       ...courses.map((course) => ({
         content: course,
         styles: {
-          halign: "center",
-          fontStyle: "bold",
+          halign: "center" as HAlignType,
+          fontStyle: "bold" as FontStyle,
           fontSize: 6,
           cellWidth: 0.3,
         },
       })),
       {
         content: "Purpose of Visit",
-        styles: { halign: "left", fontStyle: "bold", fontSize: 7 },
+        styles: {
+          halign: "left" as HAlignType,
+          fontStyle: "bold" as FontStyle,
+          fontSize: 7,
+        },
       },
     ];
 
-    const body = attendanceData.map((entry) => [
+    const body: RowInput[] = attendanceData.map((entry) => [
       entry.date,
       entry.time,
-      { content: entry.name, styles: { halign: "left", fontSize: 7 } },
+      {
+        content: entry.name,
+        styles: { halign: "left" as HAlignType, fontSize: 7 },
+      },
       ...courses.map((course) => (entry.course === course ? "✓" : "")),
-      { content: entry.purpose, styles: { halign: "left", fontSize: 7 } },
+      {
+        content: entry.purpose,
+        styles: { halign: "left" as HAlignType, fontSize: 7 },
+      },
     ]);
 
     // Add total row
-    const totalRow = [
+    const totalRow: CellDef[] = [
       {
         content: "Total:",
         colSpan: 3,
-        styles: { halign: "right", fontStyle: "bold", fontSize: 7 },
+        styles: {
+          halign: "right" as HAlignType,
+          fontStyle: "bold" as FontStyle,
+          fontSize: 7,
+        },
       },
       ...courses.map((course) => ({
         content: getTotalForCourse(course).toString(),
-        styles: { halign: "center", fontStyle: "bold", fontSize: 7 },
+        styles: {
+          halign: "center" as HAlignType,
+          fontStyle: "bold" as FontStyle,
+          fontSize: 7,
+        },
       })),
       {
         content: `Grand Total: ${attendanceData.length}`,
-        styles: { halign: "right", fontStyle: "bold", fontSize: 7 },
+        styles: {
+          halign: "right" as HAlignType,
+          fontStyle: "bold" as FontStyle,
+          fontSize: 7,
+        },
       },
     ];
-    body.push(totalRow);
+    body.push(totalRow as RowInput);
 
     let finalY = 0;
     let currentPage = 0;
 
     // Generate main table
     autoTable(pdf, {
-      head: [head],
+      head: [head as RowInput],
       body: body,
       startY: 1.5,
       margin: { top: 1.5, right: margin, bottom: margin, left: margin },
@@ -197,14 +236,17 @@ export const usePdfGenerator = () => {
         lineColor: [0, 0, 0],
       },
       columnStyles: {
-        2: { cellWidth: 2.5, halign: "left" },
+        2: { cellWidth: 2.5, halign: "left" as HAlignType },
         ...Object.fromEntries(
           courses.map((_, i) => [
             3 + i,
-            { cellWidth: 0.3, halign: "center", fontSize: 8 },
+            { cellWidth: 0.3, halign: "center" as HAlignType, fontSize: 8 },
           ])
         ),
-        [3 + courses.length]: { cellWidth: "auto", halign: "left" },
+        [3 + courses.length]: {
+          cellWidth: "auto",
+          halign: "left" as HAlignType,
+        },
       },
       didDrawPage: (data) => {
         currentPage = data.pageNumber;
@@ -239,7 +281,7 @@ export const usePdfGenerator = () => {
     const summaryWidth = pageWidth - 2 * margin;
 
     // Summary Header
-    pdf.setFontSize(12).setFont(undefined, "bold");
+    pdf.setFontSize(12).setFont("helvetica", "bold");
     pdf.setFillColor(204, 204, 204);
     pdf.rect(summaryStartX, finalY, summaryWidth, 0.3, "F");
     pdf.setTextColor(0, 0, 0);
@@ -253,18 +295,21 @@ export const usePdfGenerator = () => {
     finalY += 0.4;
 
     // Course Summary Table
-    const courseSummaryBody = [];
+    const courseSummaryBody: RowInput[] = [];
     for (const chunk of chunkedCourses) {
-      const row: any[] = [];
+      const row: CellDef[] = [];
       chunk.forEach((course) => {
         row.push(
           {
             content: `${course}:`,
-            styles: { fontStyle: "bold", halign: "left" },
+            styles: {
+              fontStyle: "bold" as FontStyle,
+              halign: "left" as HAlignType,
+            },
           },
           {
             content: getTotalForCourse(course).toString(),
-            styles: { halign: "left" },
+            styles: { halign: "left" as HAlignType },
           }
         );
       });
@@ -278,18 +323,22 @@ export const usePdfGenerator = () => {
           styles: { fillColor: [255, 255, 255] },
         });
       }
-      courseSummaryBody.push(row);
+      courseSummaryBody.push(row as RowInput);
     }
     // Add Total Attendance row
     courseSummaryBody.push([
       {
         content: `Total Attendance: ${attendanceData.length}`,
         colSpan: 10,
-        styles: { halign: "right", fontStyle: "bold", fontSize: 9 },
+        styles: {
+          halign: "right" as HAlignType,
+          fontStyle: "bold" as FontStyle,
+          fontSize: 9,
+        },
       },
-    ]);
+    ] as RowInput);
 
-    autoTable(pdf, {
+    const courseTableOptions: UserOptions = {
       body: courseSummaryBody,
       startY: finalY,
       theme: "plain",
@@ -325,29 +374,36 @@ export const usePdfGenerator = () => {
         currentPage = data.pageNumber;
         finalY = data.cursor?.y ?? pageHeight - margin;
       },
-      didDrawTable: (data) => {
-        finalY = data.cursor.y + 0.1;
-      },
-    });
+    };
+
+    // Draw the course summary table and update finalY position
+    autoTable(pdf, courseTableOptions);
+    // Estimate the next Y position after the table
+    finalY += 0.5;
 
     // Purpose Summary Table
-    const purposeHead = [
+    const purposeHead: RowInput[] = [
       uniquePurposes.map((p) => ({
         content: p.toUpperCase(),
-        styles: { halign: "center", fontStyle: "bold", fontSize: 8 },
-      })),
+        styles: {
+          halign: "center" as HAlignType,
+          fontStyle: "bold" as FontStyle,
+          fontSize: 8,
+        },
+      })) as RowInput,
     ];
-    const purposeBody = [
+
+    const purposeBody: RowInput[] = [
       uniquePurposes.map((p) => ({
         content: getTotalForPurpose(p).toString(),
-        styles: { halign: "center", fontSize: 8 },
-      })),
+        styles: { halign: "center" as HAlignType, fontSize: 8 },
+      })) as RowInput,
     ];
 
     autoTable(pdf, {
       head: purposeHead,
       body: purposeBody,
-      startY: finalY + 0.2,
+      startY: finalY,
       theme: "grid",
       margin: { left: margin * 4, right: margin * 4 },
       styles: { fontSize: 8, cellPadding: 0.05 },
@@ -363,7 +419,7 @@ export const usePdfGenerator = () => {
     });
 
     // Add footers to all pages
-    const totalPages = (pdf as any).internal.getNumberOfPages();
+    const totalPages = pdf.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {
       pdf.setPage(i);
       addFooter(pdf, i, totalPages);
